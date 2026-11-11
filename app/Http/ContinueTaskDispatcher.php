@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use InvalidArgumentException;
+use Spora\Http\Exceptions\EffortValidationException;
+use Spora\Models\Agent;
+use Spora\Services\EffortService;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\MediaArchive\MediaNotOwnedException;
 use Spora\Services\MediaArchive\TaskMediaCapabilityInterface;
@@ -28,6 +31,7 @@ final class ContinueTaskDispatcher
     public function __construct(
         private readonly TaskServiceInterface $taskService,
         private readonly TaskMediaCapabilityInterface $mediaCapability,
+        private readonly EffortService $effortService,
     ) {}
 
     /**
@@ -35,23 +39,30 @@ final class ContinueTaskDispatcher
      */
     public function handleContinue(int $taskId, int $userId, array $body): JsonResponse
     {
-        $validation = $this->validateBody($body);
-        if ($validation['result'] !== null) {
-            return $validation['result'];
-        }
+        try {
+            $validation = $this->validateBody($body);
 
-        return $this->dispatch(
-            $taskId,
-            $userId,
-            $validation['prompt'],
-            $validation['additionalSteps'],
-            $validation['mediaIds'],
-        );
+            if ($validation['result'] !== null) {
+                return $validation['result'];
+            }
+
+            return $this->dispatch(
+                $taskId,
+                $userId,
+                $validation['prompt'],
+                $validation['additionalSteps'],
+                $validation['mediaIds'],
+                $validation['effort'],
+            );
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
     }
 
     /**
      * @param array<string, mixed> $body
-     * @return array{result: ?JsonResponse, prompt: ?string, additionalSteps: ?int, mediaIds: list<string>}
+     * @return array{result: ?JsonResponse, prompt: ?string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string}
+     * @throws EffortValidationException  When the body names an effort nobody knows
      */
     private function validateBody(array $body): array
     {
@@ -65,6 +76,7 @@ final class ContinueTaskDispatcher
                 'prompt' => null,
                 'additionalSteps' => null,
                 'mediaIds' => [],
+                'effort' => null,
             ];
         }
 
@@ -79,28 +91,40 @@ final class ContinueTaskDispatcher
                 'prompt' => null,
                 'additionalSteps' => null,
                 'mediaIds' => [],
+                'effort' => null,
             ];
         }
+
+        $effort = TaskEffortRequestValidator::parse($body);
 
         return [
             'result' => null,
             'prompt' => $prompt,
             'additionalSteps' => isset($body['additional_steps']) ? $body['additional_steps'] : null,
             'mediaIds' => $this->mediaCapability->parseMediaIds($body['media_ids'] ?? null),
+            'effort' => $effort,
         ];
     }
 
+    /**
+     * @throws EffortValidationException  When the task's agent does not offer the effort
+     */
     private function dispatch(
         int $taskId,
         int $userId,
         string $prompt,
         ?int $additionalSteps,
         array $mediaIds,
+        ?string $effort,
     ): JsonResponse {
         $existing = $this->taskService->getTask($taskId, $userId);
         if ($existing === null) {
             return $this->notFoundResponse();
         }
+
+        // The task is the caller's, so the agent it belongs to is the one
+        // the effort has to be checked against.
+        $this->effortService->assertLevel($effort, Agent::find((int) $existing['agent_id']));
 
         return $this->dispatchWithMediaCheck(
             $existing['agent_id'],
@@ -109,6 +133,7 @@ final class ContinueTaskDispatcher
             $prompt,
             $additionalSteps,
             $mediaIds,
+            $effort,
         );
     }
 
@@ -122,6 +147,7 @@ final class ContinueTaskDispatcher
         string $prompt,
         ?int $additionalSteps,
         array $mediaIds,
+        ?string $effort,
     ): JsonResponse {
         try {
             // Before anything writes: an attachment the caller may not read
@@ -132,7 +158,7 @@ final class ContinueTaskDispatcher
             // ordering matters: after the ids are validated, before the
             // turn is queued.
             $this->mediaCapability->ensureTextDerivatives($mediaIds);
-            $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
+            $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds, $effort);
 
             return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_OK);
         } catch (MediaNotOwnedException $e) {

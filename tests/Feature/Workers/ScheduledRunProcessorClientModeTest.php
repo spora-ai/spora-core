@@ -34,7 +34,8 @@ function makeClientScheduledProcessor(
 ): array {
     $orchestrator = Mockery::mock(OrchestratorInterface::class);
     if ($orchestratorReturnsTask) {
-        $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = [], ?int $userId = null): Task {
+        $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parentTaskId = null, ?Spora\Agents\TaskStartOptions $options = null): Task {
+            $userId = $options?->userId;
             return Task::create([
                 'agent_id'    => $agentId,
                 'principal_id' => $userId !== null

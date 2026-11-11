@@ -26,6 +26,7 @@ use Spora\Services\ApiKeys\ApiKeyGroupService;
 use Spora\Services\ApiKeys\ApiKeyMediaAccess;
 use Spora\Services\ApiKeys\ApiKeyReach;
 use Spora\Services\AssetStreamer;
+use Spora\Services\EffortService;
 use Spora\Services\GroupService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\PrincipalService;
@@ -83,6 +84,7 @@ final class ScopedApiContainerBindings
                     $c->get(SsrfGuard::class),
                     $c->get(Config::class),
                     $c->get(ScopedApiChatBody::class),
+                    $c->get(EffortService::class),
                 );
             },
 

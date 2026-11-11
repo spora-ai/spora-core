@@ -43,6 +43,7 @@ use Spora\Core\Extension\PluginManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Drivers\Responses\OpenAIResponsesDriver;
 use Spora\Events\EventDispatcherFactory;
 use Spora\Extensions\AppLoader;
 use Spora\Http\AgentApi\AgentApiChatActionController;
@@ -51,6 +52,7 @@ use Spora\Http\AgentApi\AgentApiKeyController;
 use Spora\Http\AgentApi\AgentApiMediaController;
 use Spora\Http\AgentApi\AgentApiSpeechController;
 use Spora\Http\AgentController;
+use Spora\Http\AgentEffortController;
 use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentPictureController;
 use Spora\Http\AgentTemplateController;
@@ -137,6 +139,7 @@ use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\DbRateLimiter;
+use Spora\Services\EffortService;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\GroupService;
 use Spora\Services\HandoverService;
@@ -740,6 +743,7 @@ final class ContainerDefinitions
             'llm_driver_classes' => [
                 OpenAICompatibleDriver::class,
                 AnthropicCompatibleDriver::class,
+                OpenAIResponsesDriver::class,
             ],
 
             // Plugin and App LLM drivers used to be merged into this entry at
@@ -749,6 +753,17 @@ final class ContainerDefinitions
             // a separate alias so LLMConfigService can opt into it via constructor
             // injection without rewriting the core list contract.
             'llm_driver_classes_merged' => static fn(ContainerInterface $c): array => array_values(array_unique($c->get('llm_driver_classes'))),
+
+            // The reasoning-effort capabilities of an agent's effective
+            // driver. Resolved on the server so the client never re-implements
+            // the configuration tiers.
+            EffortService::class => static function (ContainerInterface $c): EffortService {
+                return new EffortService(
+                    $c->get(LLMConfigPreferences::class),
+                    $c->get(LLMConfigService::class),
+                    $c->get(DriverFactory::class),
+                );
+            },
 
             // Speech-to-text providers — core ships its own
             // `OpenAiCompatibleTranscriber` for the OpenAI-multipart
@@ -1127,6 +1142,14 @@ final class ContainerDefinitions
                 );
             },
 
+            AgentEffortController::class => static function (ContainerInterface $c): AgentEffortController {
+                return new AgentEffortController(
+                    $c->get(AuthService::class),
+                    $c->get(AgentServiceInterface::class),
+                    $c->get(EffortService::class),
+                );
+            },
+
             // Transfer split out so AgentController stays under the
             // SonarCloud S1448 20-method-per-class ceiling. Talks to
             // AgentPrincipalService (not AgentService) so the principal
@@ -1292,6 +1315,8 @@ final class ContainerDefinitions
                     $c->get(ContinueTaskDispatcher::class),
                     $c->get(DecisionsRequestValidator::class),
                     $c->get(AnswerQuestionRequestValidator::class),
+                    $c->get(AgentServiceInterface::class),
+                    $c->get(EffortService::class),
                 );
             },
 
@@ -1342,6 +1367,7 @@ final class ContainerDefinitions
                 return new ContinueTaskDispatcher(
                     $c->get(TaskServiceInterface::class),
                     $c->get(TaskMediaCapabilityService::class),
+                    $c->get(EffortService::class),
                 );
             },
 
@@ -1554,6 +1580,7 @@ final class ContainerDefinitions
                     $c->get(ApiKeyCallbackRecorder::class),
                     $c->get(SsrfGuard::class),
                     $c->get(Config::class),
+                    $c->get(EffortService::class),
                 );
             },
 

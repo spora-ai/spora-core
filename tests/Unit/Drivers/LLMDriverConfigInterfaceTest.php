@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Spora\Core\ContainerDefinitions;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\LLMDriverConfigInterface;
 use Spora\Drivers\OpenAICompatibleDriver;
@@ -67,4 +68,11 @@ test('OpenAICompatibleDriver::getDefaultTools returns empty array', function ():
 
 test('AnthropicCompatibleDriver::getDefaultTools returns empty array', function (): void {
     expect(AnthropicCompatibleDriver::getDefaultTools())->toBeArray()->toBeEmpty();
+});
+
+test('the driver registry holds the three shipped drivers', function (): void {
+    // A driver that joins the registry brings a wire shape, a set of
+    // effort levels and a price row with it, so the count is pinned:
+    // the next one has to be added deliberately rather than slip in.
+    expect(ContainerDefinitions::all()['llm_driver_classes'])->toHaveCount(3);
 });

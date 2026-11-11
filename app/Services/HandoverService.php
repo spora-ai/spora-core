@@ -7,6 +7,7 @@ namespace Spora\Services;
 use Closure;
 use InvalidArgumentException;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\TaskStartOptions;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 
@@ -77,7 +78,7 @@ final class HandoverService implements HandoverServiceInterface
             userPrompt: $summary,
             maxSteps: (int) ($targetAgent->max_steps ?? 10),
             parentTaskId: $source->id,
-            userId: $userId,
+            options: new TaskStartOptions(userId: $userId),
         );
 
         // The source keeps running — the target's task is a background

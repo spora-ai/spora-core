@@ -11,6 +11,7 @@ use DateTimeImmutable;
 use DateTimeZone;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\TaskStartOptions;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
@@ -379,7 +380,13 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         // as its trigger user, so the tools the run executes resolve their
         // authority from that caller rather than from whoever happened to
         // run on the agent last.
-        $task = ($this->orchestratorProvider)()->start($agent->id, $prompt, (int) $maxSteps, null, null, [], $userId);
+        $task = ($this->orchestratorProvider)()->start(
+            $agent->id,
+            $prompt,
+            (int) $maxSteps,
+            null,
+            new TaskStartOptions(userId: $userId),
+        );
 
         $lastRunAt = gmdate(self::DB_TIMESTAMP_FORMAT);
 

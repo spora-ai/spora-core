@@ -16,7 +16,7 @@ use Symfony\Component\HttpClient\Response\MockResponse;
  * One assertion per UI-editable setting so a future refactor that drops
  * a field is caught immediately.
  */
-function anthropicTestRequest(?float $temperature = null, ?int $maxTokens = null, string $systemPrompt = 'You are helpful.'): LLMRequest
+function anthropicTestRequest(?float $temperature = null, ?int $maxTokens = null, string $systemPrompt = 'You are helpful.', ?string $effort = null): LLMRequest
 {
     return new LLMRequest(
         systemPrompt: $systemPrompt,
@@ -24,6 +24,7 @@ function anthropicTestRequest(?float $temperature = null, ?int $maxTokens = null
         tools: [],
         maxTokens: $maxTokens ?? 4096,
         temperature: $temperature ?? 0.7,
+        effort: $effort,
     );
 }
 
@@ -125,33 +126,33 @@ test('Anthropic driver passes the configured model verbatim in body', function (
     expect($captured['body']['model'])->toBe('claude-3-7-sonnet-20250219');
 });
 
-// temperature (now reads from LLMRequest — refactor)
+// temperature — the API version removed it, so it is never sent
 
-test('Anthropic driver reads temperature from LLMRequest, not AnthropicDriverOptions', function (): void {
+test('Anthropic driver sends no temperature, whatever the request carries', function (): void {
     $captured = [];
     $driver = new AnthropicCompatibleDriver(
         apiKey: 'test',
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-sonnet-5-5',
         baseUrl: 'https://api.anthropic.com',
         httpClient: new MockHttpClient(captureAnthropicRequestBody($captured)),
         options: new AnthropicDriverOptions(/* no temperature */),
     );
     $driver->complete(anthropicTestRequest(temperature: 0.3));
 
-    expect($captured['body']['temperature'])->toBe(0.3);
+    expect($captured['body'])->not->toHaveKey('temperature');
 });
 
-test('Anthropic driver emits temperature=0.0 verbatim (deterministic mode)', function (): void {
+test('Anthropic driver sends no temperature in deterministic mode either', function (): void {
     $captured = [];
     $driver = new AnthropicCompatibleDriver(
         apiKey: 'test',
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-sonnet-5-5',
         baseUrl: 'https://api.anthropic.com',
         httpClient: new MockHttpClient(captureAnthropicRequestBody($captured)),
     );
     $driver->complete(anthropicTestRequest(temperature: 0.0));
 
-    expect($captured['body']['temperature'])->toBe(0.0);
+    expect($captured['body'])->not->toHaveKey('temperature');
 });
 
 // max_tokens
@@ -169,36 +170,34 @@ test('Anthropic driver passes LLMRequest maxTokens into max_tokens body field', 
     expect($captured['body']['max_tokens'])->toBe(16384);
 });
 
-// thinking_budget
+// effort
 
-test('Anthropic driver includes thinking block when thinkingBudget is set', function (): void {
+test('Anthropic driver sends the adaptive thinking block when an effort level is set', function (): void {
     $captured = [];
     $driver = new AnthropicCompatibleDriver(
         apiKey: 'test',
-        model: 'claude-3-7-sonnet-20250219',
+        model: 'claude-sonnet-5-5',
         baseUrl: 'https://api.anthropic.com',
         httpClient: new MockHttpClient(captureAnthropicRequestBody($captured)),
-        options: new AnthropicDriverOptions(thinkingBudget: 2048),
     );
-    $driver->complete(anthropicTestRequest());
+    $driver->complete(anthropicTestRequest(effort: 'high'));
 
-    expect($captured['body']['thinking'])->toBe([
-        'type'         => 'enabled',
-        'budget_tokens' => 2048,
-    ]);
+    expect($captured['body']['output_config'])->toBe(['effort' => 'high']);
+    expect($captured['body']['thinking'])->toBe(['type' => 'adaptive', 'display' => 'summarized']);
 });
 
-test('Anthropic driver omits thinking block when thinkingBudget is null', function (): void {
+test('Anthropic driver omits the thinking block when no effort level is set', function (): void {
     $captured = [];
     $driver = new AnthropicCompatibleDriver(
         apiKey: 'test',
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-sonnet-5-5',
         baseUrl: 'https://api.anthropic.com',
         httpClient: new MockHttpClient(captureAnthropicRequestBody($captured)),
     );
     $driver->complete(anthropicTestRequest());
 
     expect($captured['body'])->not->toHaveKey('thinking');
+    expect($captured['body'])->not->toHaveKey('output_config');
 });
 
 // enable_prompt_caching
@@ -269,18 +268,18 @@ test('Anthropic driver respects explicit supportsImageInput override on a non-vi
 
 // request shape
 
-test('Anthropic driver includes model, system, messages, max_tokens, temperature in body', function (): void {
+test('Anthropic driver includes model, system, messages, max_tokens in body and no temperature', function (): void {
     $captured = [];
     $driver = new AnthropicCompatibleDriver(
         apiKey: 'test',
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-sonnet-5-5',
         baseUrl: 'https://api.anthropic.com',
         httpClient: new MockHttpClient(captureAnthropicRequestBody($captured)),
     );
     $driver->complete(anthropicTestRequest(maxTokens: 2048, temperature: 0.5));
 
-    expect($captured['body'])->toHaveKeys(['model', 'system', 'messages', 'max_tokens', 'temperature']);
+    expect($captured['body'])->toHaveKeys(['model', 'system', 'messages', 'max_tokens']);
+    expect($captured['body'])->not->toHaveKey('temperature');
     expect($captured['body']['max_tokens'])->toBe(2048);
-    expect($captured['body']['temperature'])->toBe(0.5);
     expect($captured['body']['messages'][0]['role'])->toBe('user');
 });

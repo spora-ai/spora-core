@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\ApiKeys;
 
+use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Http\ScopedApi\ScopedApiChatController;
 use Spora\Models\Task;
 use Tests\Feature\AgentApi\AgentApiTestSupport;
@@ -107,6 +108,26 @@ describe('chats on the group surface', function (): void {
 
         expect($transcript->getStatusCode())->toBe(200);
         expect(ScopedApiTestSupport::data($transcript)['chat']['id'])->toBe($chatId);
+    });
+
+    it('refuses an effort the agent\'s driver does not offer with 422', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-effort', 1, null, AnthropicCompatibleDriver::class);
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $response = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'store',
+            ScopedApiTestSupport::bearer(
+                $key,
+                ScopedApiTestSupport::GROUP_PREFIX . '/chats',
+                ['agent_id' => $group['agentIds'][0], 'text' => 'Hello there.', 'effort' => 'none'],
+            ),
+        );
+
+        expect($response->getStatusCode())->toBe(422);
+        expect(ScopedApiTestSupport::errorCode($response))->toBe('EFFORT_LEVEL_UNSUPPORTED');
     });
 
     it('continues a chat', function (): void {

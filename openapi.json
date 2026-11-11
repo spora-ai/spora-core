@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-20-g6b052545"
+        "version": "0.32.0-24-gd48b0698"
     },
     "servers": [
         {
@@ -551,6 +551,37 @@
                     },
                     {
                         "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agents/{id}/effort": {
+            "get": {
+                "tags": [
+                    "Agents"
+                ],
+                "summary": "The reasoning-effort levels this agent can use",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "JSON envelope: `{data: {supported: bool, levels: [{value, label}], default: string|null}}`."
+                    },
+                    "404": {
+                        "description": "NOT_FOUND — no such agent, or not one the caller may see."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
                     }
                 ]
             }
@@ -2227,6 +2258,21 @@
                                             "type": "string",
                                             "format": "uuid"
                                         }
+                                    },
+                                    "effort": {
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "type": "string",
+                                        "nullable": true,
+                                        "enum": [
+                                            "none",
+                                            "minimal",
+                                            "low",
+                                            "medium",
+                                            "high",
+                                            "xhigh",
+                                            "max",
+                                            ""
+                                        ]
                                     }
                                 }
                             }
@@ -2486,6 +2532,21 @@
                                             "type": "string",
                                             "format": "uuid"
                                         }
+                                    },
+                                    "effort": {
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "type": "string",
+                                        "nullable": true,
+                                        "enum": [
+                                            "none",
+                                            "minimal",
+                                            "low",
+                                            "medium",
+                                            "high",
+                                            "xhigh",
+                                            "max",
+                                            ""
+                                        ]
                                     }
                                 }
                             }
@@ -3926,6 +3987,21 @@
                                     },
                                     "max_steps": {
                                         "type": "integer"
+                                    },
+                                    "effort": {
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "type": "string",
+                                        "nullable": true,
+                                        "enum": [
+                                            "none",
+                                            "minimal",
+                                            "low",
+                                            "medium",
+                                            "high",
+                                            "xhigh",
+                                            "max",
+                                            ""
+                                        ]
                                     }
                                 }
                             }
@@ -4056,6 +4132,21 @@
                                     },
                                     "additional_steps": {
                                         "type": "integer"
+                                    },
+                                    "effort": {
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "type": "string",
+                                        "nullable": true,
+                                        "enum": [
+                                            "none",
+                                            "minimal",
+                                            "low",
+                                            "medium",
+                                            "high",
+                                            "xhigh",
+                                            "max",
+                                            ""
+                                        ]
                                     }
                                 }
                             }
@@ -5028,6 +5119,21 @@
                                     },
                                     "max_steps": {
                                         "type": "integer"
+                                    },
+                                    "effort": {
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "type": "string",
+                                        "nullable": true,
+                                        "enum": [
+                                            "none",
+                                            "minimal",
+                                            "low",
+                                            "medium",
+                                            "high",
+                                            "xhigh",
+                                            "max",
+                                            ""
+                                        ]
                                     }
                                 }
                             }
@@ -5156,6 +5262,21 @@
                                     },
                                     "additional_steps": {
                                         "type": "integer"
+                                    },
+                                    "effort": {
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "type": "string",
+                                        "nullable": true,
+                                        "enum": [
+                                            "none",
+                                            "minimal",
+                                            "low",
+                                            "medium",
+                                            "high",
+                                            "xhigh",
+                                            "max",
+                                            ""
+                                        ]
                                     }
                                 }
                             }
@@ -5763,6 +5884,21 @@
                                     },
                                     "max_steps": {
                                         "type": "integer"
+                                    },
+                                    "effort": {
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "type": "string",
+                                        "nullable": true,
+                                        "enum": [
+                                            "none",
+                                            "minimal",
+                                            "low",
+                                            "medium",
+                                            "high",
+                                            "xhigh",
+                                            "max",
+                                            ""
+                                        ]
                                     }
                                 }
                             }
@@ -5891,6 +6027,21 @@
                                     },
                                     "additional_steps": {
                                         "type": "integer"
+                                    },
+                                    "effort": {
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "type": "string",
+                                        "nullable": true,
+                                        "enum": [
+                                            "none",
+                                            "minimal",
+                                            "low",
+                                            "medium",
+                                            "high",
+                                            "xhigh",
+                                            "max",
+                                            ""
+                                        ]
                                     }
                                 }
                             }

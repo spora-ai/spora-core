@@ -8,6 +8,8 @@ use Psr\Log\LoggerInterface;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
+use Spora\Drivers\OpenAI\ChatCompletionsContent;
+use Spora\Drivers\OpenAI\ChatCompletionsReasoning;
 use Spora\Drivers\Utilities\LLMContentParser;
 use Spora\Drivers\Utilities\ThinkingTagExtractor;
 use Spora\Drivers\ValueObjects\ContentBlock;
@@ -22,10 +24,13 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 #[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.openai.com/v1).', required: false, default: 'https://api.openai.com/v1')]
 #[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. gpt-4o, gpt-4-turbo, o1-preview).', required: false, default: 'gpt-4o')]
 #[ToolSetting(key: 'temperature', label: 'Temperature', type: 'text', description: 'Sampling temperature (0.0–2.0). Lower is more deterministic.', required: false, default: '0.7', validation: '/^[0-2](\.[0-9]+)?$/')]
+#[ToolSetting(key: 'effort', label: 'Effort', type: 'select', default: '', description: "Default reasoning effort. Empty = the model default. On GPT-5.4 and later, Chat Completions only accepts 'None' when the agent uses tools — use the OpenAI Responses driver for reasoning with tools.", options: ['' => 'Model default', 'none' => 'None', 'minimal' => 'Minimal', 'low' => 'Low', 'medium' => 'Medium', 'high' => 'High', 'xhigh' => 'xHigh', 'max' => 'Max'])]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
 final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 {
     private const PROVIDER_KEY = 'openai_compatible';
+
+    private readonly ChatCompletionsReasoning $reasoning;
 
     public function __construct(
         string              $apiKey,
@@ -37,6 +42,8 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
         ?bool               $supportsImageInput = null,
     ) {
         parent::__construct($apiKey, $model, $baseUrl, $httpClient, $logger, $timeout, $supportsImageInput);
+
+        $this->reasoning = new ChatCompletionsReasoning($model);
     }
 
     public function getProviderName(): string
@@ -45,29 +52,32 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     }
 
     /**
-     * Vision-capable OpenAI-family model names. Conservative allowlist:
-     *   - gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-4-vision*
-     *   - o1, o1-pro, o3, o3-mini, o4-mini
-     *   - chatgpt-4o*
-     *
-     * `gpt-3.5*`, `gpt-4` (non-vision), `o1-mini` are explicitly excluded.
-     * Custom OpenAI-compatible endpoints (e.g. a private deployment) are
-     * treated as text-only unless the operator overrides via the
-     * `supports_image_input` setting on the LLM driver config.
+     * The vision-capable OpenAI families, asked of the one place a model
+     * name is interpreted.
      */
     protected function modelBasedSupportsImageInput(): bool
     {
-        $m = strtolower($this->model);
-        if ($m === '' || $m === 'gpt-3.5-turbo' || $m === 'gpt-4' || $m === 'o1-mini') {
-            return false;
-        }
-        return str_starts_with($m, 'gpt-4o')
-            || str_starts_with($m, 'gpt-4-turbo')
-            || str_starts_with($m, 'gpt-4-vision')
-            || str_starts_with($m, 'o1')
-            || str_starts_with($m, 'o3')
-            || str_starts_with($m, 'o4')
-            || str_starts_with($m, 'chatgpt-4o');
+        return ModelFamily::openAISupportsImageInput($this->model);
+    }
+
+    /**
+     * Chat Completions spells every level the way the canonical scale
+     * does, so the mapping is the identity — but it is written out so
+     * that a level this driver cannot express is visibly absent.
+     *
+     * @return array<string, string>
+     */
+    public function effortLevels(): array
+    {
+        return [
+            EffortLevel::None->value    => EffortLevel::None->value,
+            EffortLevel::Minimal->value => EffortLevel::Minimal->value,
+            EffortLevel::Low->value     => EffortLevel::Low->value,
+            EffortLevel::Medium->value  => EffortLevel::Medium->value,
+            EffortLevel::High->value    => EffortLevel::High->value,
+            EffortLevel::XHigh->value   => EffortLevel::XHigh->value,
+            EffortLevel::Max->value     => EffortLevel::Max->value,
+        ];
     }
 
     public function complete(LLMRequest $request): LLMResponse
@@ -96,14 +106,14 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     private function buildMessages(LLMRequest $request): array
     {
         return array_merge(
-            [['role' => 'system', 'content' => $request->systemPrompt]],
+            [['role' => $this->reasoning->systemRole(), 'content' => $request->systemPrompt]],
             array_map(
                 static function (array $msg): array {
                     $content = $msg['content'] ?? null;
                     if ($content === null || is_string($content)) {
                         return $msg;
                     }
-                    $msg['content'] = self::normalizeContent($content);
+                    $msg['content'] = ChatCompletionsContent::normalize($content);
                     return $msg;
                 },
                 $request->messages,
@@ -117,16 +127,24 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
      */
     private function buildRequestBody(LLMRequest $request, array $messages): array
     {
-        $body = [
-            'model'       => $this->model,
-            'messages'    => $messages,
-            'max_tokens'  => $request->maxTokens,
-            'temperature' => $request->temperature,
-        ];
+        $body = array_merge(
+            [
+                'model'    => $this->model,
+                'messages' => $messages,
+            ],
+            $this->reasoning->tokenParameters($request),
+        );
+
         if ($request->tools !== []) {
             $body['tools'] = $request->tools;
             $body['tool_choice'] = 'auto';
         }
+
+        $effort = $this->reasoning->effort($request, $this->effortLevels());
+        if ($effort !== null) {
+            $body['reasoning_effort'] = $effort;
+        }
+
         return $body;
     }
 
@@ -328,70 +346,5 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     public static function getDisplayName(): string
     {
         return 'OpenAI Compatible';
-    }
-
-    /**
-     * Translate a message's `content` to OpenAI's wire shape. Strings
-     * pass through; ContentBlock lists become OpenAI's content-part
-     * format: `{type:"text", text}` and
-     * `{type:"image_url", image_url:{url:"data:..." | <url>}}`.
-     */
-    private static function normalizeContent(mixed $content): mixed
-    {
-        if ($content === null || is_string($content)) {
-            return $content;
-        }
-        if (!is_array($content)) {
-            return (string) $content;
-        }
-        $parts = [];
-        foreach ($content as $b) {
-            if (!is_array($b)) {
-                continue;
-            }
-            $part = self::contentBlockToPart($b);
-            if ($part !== null) {
-                $parts[] = $part;
-            }
-        }
-        return $parts === [] ? '' : $parts;
-    }
-
-    /**
-     * @param array<string, mixed> $block
-     * @return array<string, mixed>|null
-     */
-    private static function contentBlockToPart(array $block): ?array
-    {
-        $type = $block['type'] ?? null;
-        return match ($type) {
-            ContentBlock::TYPE_TEXT,
-            ContentBlock::TYPE_THINKING => ['type' => 'text', 'text' => (string) ($block['text'] ?? '')],
-            ContentBlock::TYPE_REDACTED_THINKING => ['type' => 'text', 'text' => '[Redacted Thinking]'],
-            ContentBlock::TYPE_IMAGE => self::imageBlockToPart($block),
-            default => null,
-        };
-    }
-
-    /**
-     * @param array<string, mixed> $block
-     * @return array<string, mixed>|null
-     */
-    private static function imageBlockToPart(array $block): ?array
-    {
-        if (isset($block['base64']) && is_string($block['base64']) && $block['base64'] !== '' && isset($block['mediaType'])) {
-            return [
-                'type'     => 'image_url',
-                'image_url' => ['url' => 'data:' . $block['mediaType'] . ';base64,' . $block['base64']],
-            ];
-        }
-        if (isset($block['url']) && is_string($block['url']) && $block['url'] !== '') {
-            return [
-                'type'     => 'image_url',
-                'image_url' => ['url' => $block['url']],
-            ];
-        }
-
-        return null;
     }
 }

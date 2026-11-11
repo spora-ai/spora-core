@@ -42,8 +42,6 @@ it('resolves the same value for a user principal', function (): void {
     $agent = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'User Principal Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -96,8 +94,6 @@ it('resolves the same value for a group principal, and it is the group owner', f
     $agent = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'Group Principal Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -140,8 +136,6 @@ it('resolves null on both sides when the principal row is gone', function (): vo
     $agent = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'Dangling Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);

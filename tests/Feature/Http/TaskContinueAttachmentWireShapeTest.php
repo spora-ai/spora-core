@@ -113,9 +113,11 @@ function buildWireShapeController(): array
             $authService,
             $stub,
             $mediaCapability,
-            new ContinueTaskDispatcher($stub, $mediaCapability),
+            new ContinueTaskDispatcher($stub, $mediaCapability, makeEffortService()),
             new DecisionsRequestValidator($stub),
             new AnswerQuestionRequestValidator(new \Spora\Services\PrincipalResolver()),
+            makeAgentService(),
+            makeEffortService(),
         ),
         $userId,
     ];

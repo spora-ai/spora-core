@@ -48,8 +48,6 @@ describe('TaskService — getTasksForUser', function (): void {
         $agent = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'ListTestAgent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'max_retries'  => 3,
             'retry_after_minutes' => 10,
@@ -85,8 +83,6 @@ describe('TaskService — getTasksForUser', function (): void {
         $agent = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'AgentRelAgent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'max_retries'  => 7,
             'retry_after_minutes' => 15,
@@ -117,12 +113,10 @@ describe('TaskService — getTasksForUser', function (): void {
 
         $agent1 = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'Agent1',
-            'llm_provider' => 'mock', 'llm_model' => 'mock',
             'max_steps' => 5, 'is_active' => true,
         ]);
         $agent2 = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'Agent2',
-            'llm_provider' => 'mock', 'llm_model' => 'mock',
             'max_steps' => 5, 'is_active' => true,
         ]);
 
@@ -147,8 +141,6 @@ describe('TaskService — getTasksForUser', function (): void {
         $agent = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'SinceAgent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'is_active'    => true,
         ]);
@@ -192,8 +184,6 @@ describe('TaskService — getTasksForUser', function (): void {
         $agent = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'NoSinceAgent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'is_active'    => true,
         ]);
@@ -215,8 +205,6 @@ describe('TaskService — getTasksForUser', function (): void {
         $agent = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'FutureSinceAgent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'is_active'    => true,
         ]);
@@ -237,8 +225,6 @@ describe('TaskService — getTasksForUser', function (): void {
         $agent = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'OrderAgent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'is_active'    => true,
         ]);
@@ -269,8 +255,6 @@ describe('TaskService — getTasksForUser', function (): void {
         $agent = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'PagedAgent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'is_active'    => true,
         ]);
@@ -300,8 +284,6 @@ describe('TaskService — getTasksForUser', function (): void {
         $agent = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'Page2Agent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'is_active'    => true,
         ]);
@@ -327,8 +309,6 @@ describe('TaskService — getTasksForUser', function (): void {
         $agent = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'StatusFilterAgent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'is_active'    => true,
         ]);
@@ -378,8 +358,6 @@ describe('TaskService — getTasksForUser', function (): void {
         $agent = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'StatusEmptyAgent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'is_active'    => true,
         ]);
@@ -431,11 +409,11 @@ describe('TaskService — startTask', function (): void {
 
         $orchestrator->shouldReceive('start')
             ->once()
-            ->with($agent->id, 'do the thing', 7, null, null, [], $userId)
-            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds, ?int $userIdArg = null) use ($userId): Task {
+            ->with($agent->id, 'do the thing', 7, null, Mockery::type(Spora\Agents\TaskStartOptions::class))
+            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, Spora\Agents\TaskStartOptions $options) use ($userId): Task {
                 return Task::create([
                     'principal_id' => createUserPrincipalPublic($userId),
-                    'trigger_user_id' => $userIdArg ?? $userId,
+                    'trigger_user_id' => $options->userId ?? $userId,
                     'agent_id'    => $agentId,
                     'status'      => 'RUNNING',
                     'user_prompt' => $prompt,
@@ -473,9 +451,9 @@ describe('TaskService — startTask', function (): void {
 
         $orchestrator->shouldReceive('start')
             ->once()
-            ->with($agent->id, 'p', 12, null, null, [], $userId) // 12 = agent.max_steps
-            ->andReturnUsing(fn(int $a, string $p, int $m, ?int $parent, ?int $runId, array $mediaIds, ?int $userIdArg = null) => Task::create([
-                'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userIdArg ?? $userId, 'agent_id' => $a, 'status' => 'RUNNING',
+            ->with($agent->id, 'p', 12, null, Mockery::type(Spora\Agents\TaskStartOptions::class)) // 12 = agent.max_steps
+            ->andReturnUsing(fn(int $a, string $p, int $m, ?int $parent, Spora\Agents\TaskStartOptions $options) => Task::create([
+                'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $options->userId ?? $userId, 'agent_id' => $a, 'status' => 'RUNNING',
                 'user_prompt' => $p, 'max_steps' => $m, 'step_count' => 0,
             ]));
 
@@ -543,12 +521,12 @@ describe('TaskService — startTask', function (): void {
 
         $orchestrator->shouldReceive('start')
             ->once()
-            ->with($agent->id, 'plain member chat', 10, null, null, [], $plainMemberId)
-            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds, ?int $userIdArg = null): Task {
+            ->with($agent->id, 'plain member chat', 10, null, Mockery::type(Spora\Agents\TaskStartOptions::class))
+            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, Spora\Agents\TaskStartOptions $options): Task {
                 return Task::create([
                     'agent_id'    => $agentId,
                     'principal_id' => (int) Agent::find($agentId)->principal_id,
-                    'trigger_user_id' => $userIdArg ?? 0,
+                    'trigger_user_id' => $options->userId ?? 0,
                     'status'      => 'RUNNING',
                     'user_prompt' => $prompt,
                     'max_steps'   => $maxSteps,
@@ -591,7 +569,7 @@ describe('TaskService — startTask', function (): void {
 
         $orchestrator->shouldReceive('start')
             ->once()
-            ->with($agent->id, 'worker chat', 4, null, null, [], null)
+            ->with($agent->id, 'worker chat', 4, null, Mockery::type(Spora\Agents\TaskStartOptions::class))
             ->andReturnUsing(fn($a, $p, $m) => Task::create([
                 'agent_id' => $a, 'principal_id' => (int) Agent::find($a)->principal_id,
                 'trigger_user_id' => $userId, 'status' => 'RUNNING',
@@ -599,7 +577,7 @@ describe('TaskService — startTask', function (): void {
             ]));
 
         // Simulate the worker / scheduled-run path by calling orchestrator.start() directly.
-        $orchestrator->start($agent->id, 'worker chat', 4, null, null, [], null);
+        $orchestrator->start($agent->id, 'worker chat', 4, null, new Spora\Agents\TaskStartOptions());
     });
 });
 
@@ -1115,7 +1093,7 @@ describe('TaskService — continueTask', function (): void {
 
         $orchestrator->shouldReceive('continue')
             ->once()
-            ->with($task->id, 'more please', 10, [], $userId)
+            ->with($task->id, 'more please', 10, [], $userId, null)
             ->andReturnUsing(function (int $taskId, string $prompt, ?int $steps, array $mediaIds) use ($userId, $agent): Task {
                 return Task::create([
                     'principal_id' => createUserPrincipalPublic($userId),

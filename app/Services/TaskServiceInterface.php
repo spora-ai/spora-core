@@ -7,6 +7,15 @@ namespace Spora\Services;
 use InvalidArgumentException;
 use Spora\Agents\Exceptions\CompactionFailedException;
 
+/**
+ * The task lifecycle the HTTP layer drives.
+ *
+ * The trailing `?string $effort` parameter of {@see self::startTask()} and
+ * {@see self::continueTask()} is a breaking change: an implementation that
+ * does not declare it cannot satisfy this interface. The effort is the
+ * reasoning level of the message being sent — null leaves the choice to the
+ * configuration, an empty string asks for the model default.
+ */
 interface TaskServiceInterface
 {
     /**
@@ -78,8 +87,12 @@ interface TaskServiceInterface
      */
     /**
      * @param list<string> $mediaIds
+     * @param string|null $effort The reasoning effort for this turn. Null
+     *                             leaves the choice to the configuration,
+     *                             an empty string asks for the model
+     *                             default.
      */
-    public function startTask(int $userId, int $agentId, string $prompt, ?int $maxSteps = null, ?int $parentTaskId = null, array $mediaIds = []): array;
+    public function startTask(int $userId, int $agentId, string $prompt, ?int $maxSteps = null, ?int $parentTaskId = null, array $mediaIds = [], ?string $effort = null): array;
 
     /**
      * @return array{
@@ -252,8 +265,12 @@ interface TaskServiceInterface
      */
     /**
      * @param list<string> $mediaIds
+     * @param string|null $effort The reasoning effort for this turn. Null
+     *                             leaves the choice to the configuration,
+     *                             an empty string asks for the model
+     *                             default.
      */
-    public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null, array $mediaIds = []): array;
+    public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null, array $mediaIds = [], ?string $effort = null): array;
 
     /**
      * Abort the running agent loop for the given task. The user-ownership

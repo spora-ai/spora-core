@@ -151,6 +151,9 @@ final class ApiKeyChatAccess
     /**
      * @param list<string> $mediaIds ids already checked by
      *   {@see \Spora\Http\ScopedApi\ScopedApiChatController::readableMediaIds()}
+     * @param string|null $effort the reasoning effort for this turn; null
+     *   leaves the choice to the configuration, an empty string asks for the
+     *   model default.
      */
     public function startChat(
         ApiKeyContext $ctx,
@@ -158,6 +161,7 @@ final class ApiKeyChatAccess
         string $prompt,
         ?int $maxSteps,
         array $mediaIds,
+        ?string $effort = null,
     ): Task {
         $agent = $this->requireAgent($ctx, $agentId);
 
@@ -168,6 +172,7 @@ final class ApiKeyChatAccess
             $maxSteps,
             null,
             $mediaIds,
+            $effort,
         );
 
         return Task::find((int) $resource['id'])
@@ -177,6 +182,9 @@ final class ApiKeyChatAccess
     /**
      * @param list<string> $mediaIds ids already checked by
      *   {@see \Spora\Http\ScopedApi\ScopedApiChatController::readableMediaIds()}
+     * @param string|null $effort the reasoning effort for this turn; null
+     *   leaves the choice to the configuration, an empty string asks for the
+     *   model default.
      */
     public function continueChat(
         ApiKeyContext $ctx,
@@ -184,6 +192,7 @@ final class ApiKeyChatAccess
         string $text,
         ?int $additionalSteps,
         array $mediaIds,
+        ?string $effort = null,
     ): Task {
         $task = $this->requireTask($ctx, $chatId);
 
@@ -195,6 +204,7 @@ final class ApiKeyChatAccess
             $text,
             $additionalSteps,
             $mediaIds,
+            $effort,
         );
 
         return $this->requireTask($ctx, $chatId);

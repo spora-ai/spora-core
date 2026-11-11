@@ -7,6 +7,7 @@ namespace Spora\Services;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
+use Throwable;
 
 /**
  * Service for managing LLM driver configurations.
@@ -79,6 +80,28 @@ final class LLMConfigService implements LLMConfigServiceInterface
     public function decryptSettings(string $driverClass, ?string $raw): array
     {
         return $this->decodeSettings($driverClass, $raw);
+    }
+
+    /**
+     * The reasoning effort the configuration defaults to.
+     *
+     * The one place this rule lives: the write path
+     * ({@see \Spora\Agents\LlmConfigResolver::resolveEffortDefault()})
+     * and the effort endpoint ({@see EffortService::describe()}) both
+     * read it here, or the picker would offer one default and the agent
+     * would run another.
+     */
+    public function defaultEffort(LLMDriverConfiguration $config): ?string
+    {
+        try {
+            $settings = $this->decryptSettings($config->driver_class, $config->settings ?? '');
+        } catch (Throwable) {
+            return null;
+        }
+
+        $effort = $settings['effort'] ?? null;
+
+        return is_string($effort) && $effort !== '' ? $effort : null;
     }
 
     /**
