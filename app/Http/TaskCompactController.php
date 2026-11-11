@@ -8,6 +8,7 @@ use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Spora\Agents\Exceptions\CompactionFailedException;
 use Spora\Auth\AuthService;
+use Spora\Metering\Exceptions\UsageLimitExceededException;
 use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -62,6 +63,10 @@ final class TaskCompactController
                 response: 404,
                 description: 'NOT_FOUND — task is not owned by the calling user.',
             ),
+            new OA\Response(
+                response: 429,
+                description: 'USAGE_LIMIT_REACHED — the usage limit was reached, so no summary was requested.',
+            ),
         ],
     )]
     public function compact(Request $request): JsonResponse
@@ -71,16 +76,40 @@ final class TaskCompactController
 
         try {
             $result = $this->taskService->compactTask($taskId, $userId);
-        } catch (InvalidArgumentException $e) {
-            return $this->errorForException($e);
-        } catch (CompactionFailedException $e) {
+        } catch (InvalidArgumentException | CompactionFailedException | UsageLimitExceededException $e) {
+            return $this->failureResponse($e);
+        }
+
+        return new JsonResponse(['data' => $result]);
+    }
+
+    /**
+     * Map a compaction failure to the JSON error response the API contract
+     * uses.
+     *
+     * The failures are told apart by their type rather than by three
+     * separate catches, so the response is built in one place.
+     */
+    private function failureResponse(
+        InvalidArgumentException | CompactionFailedException | UsageLimitExceededException $e,
+    ): JsonResponse {
+        if ($e instanceof UsageLimitExceededException) {
+            // A quota refusal, not a server fault: the summary was never
+            // requested, so the history is unchanged.
+            return new JsonResponse(
+                ['error' => ['code' => 'USAGE_LIMIT_REACHED', 'message' => $e->decision()->reason]],
+                Response::HTTP_TOO_MANY_REQUESTS,
+            );
+        }
+
+        if ($e instanceof CompactionFailedException) {
             return new JsonResponse(
                 ['error' => ['code' => 'COMPACTION_FAILED', 'message' => $e->getMessage()]],
                 Response::HTTP_INTERNAL_SERVER_ERROR,
             );
         }
 
-        return new JsonResponse(['data' => $result]);
+        return $this->errorForException($e);
     }
 
     /**

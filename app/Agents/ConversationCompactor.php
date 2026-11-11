@@ -11,6 +11,10 @@ use Spora\Agents\Exceptions\CompactionFailedException;
 use Spora\Agents\ValueObjects\ActiveCompactions;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\ValueObjects\LLMRequest;
+use Spora\Metering\Exceptions\UsageLimitExceededException;
+use Spora\Metering\LlmCallRunner;
+use Spora\Metering\MeteringContextFactory;
+use Spora\Metering\NullUsageMeter;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
@@ -64,24 +68,43 @@ final class ConversationCompactor
      */
     private const TOOL_RESULT_CHARS = 1000;
 
+    private readonly LlmCallRunner $llmCallRunner;
+
     public function __construct(
-        private readonly DriverFactory $driverFactory,
+        DriverFactory $driverFactory,
         private readonly ?LoggerInterface $logger = null,
-    ) {}
+        ?LlmCallRunner $llmCallRunner = null,
+    ) {
+        // The driver factory only feeds the fallback: the runner resolves the
+        // driver from the agent itself. A hand-built compactor has no
+        // metering plugin behind it, so the fallback allows everything and
+        // records nothing.
+        $this->llmCallRunner = $llmCallRunner ?? new LlmCallRunner(
+            $driverFactory,
+            new NullUsageMeter(),
+            new MeteringContextFactory(),
+            $logger,
+        );
+    }
 
     /**
+     * @param  Task   $task  The task being compacted. The summary request is
+     *                        metered against this row, so the compactor needs
+     *                        the task itself rather than its id.
      * @param  int    $maxTokensOutput  The agent's output budget. The summary
      *                                  request asks for the smaller of this
      *                                  and {@see self::MAX_SUMMARY_TOKENS}.
      * @param  float  $temperature
      * @return bool   True when a summary row was written.
      *
-     * @throws CompactionFailedException  When the model returned no summary;
-     *                                    the history is left unchanged.
+     * @throws CompactionFailedException    When the model returned no summary;
+     *                                      the history is left unchanged.
+     * @throws UsageLimitExceededException When a hard usage decision stopped
+     *                                      the summary request.
      */
-    public function compact(int $taskId, Agent $agent, int $maxTokensOutput, float $temperature): bool
+    public function compact(Task $task, Agent $agent, int $maxTokensOutput, float $temperature): bool
     {
-        $rows = TaskHistory::where('task_id', $taskId)
+        $rows = TaskHistory::where('task_id', $task->id)
             ->orderBy('sequence')
             ->get();
 
@@ -105,7 +128,14 @@ final class ConversationCompactor
             return false;
         }
 
-        $summaryText = $this->summarize($agent, $summaryMessages, $maxTokensOutput, $temperature, $this->taskEffort($taskId));
+        $summaryText = $this->summarize(
+            $task,
+            $agent,
+            $summaryMessages,
+            $maxTokensOutput,
+            $temperature,
+            $this->taskEffort($task),
+        );
 
         // The new range starts where the previous one did, so the summary it
         // replaces covers both — the earlier summary's rows and the ones that
@@ -113,10 +143,10 @@ final class ConversationCompactor
         $firstSequence = $compactions->firstSequence() ?? (int) $shadowed->first()->sequence;
         $lastSequence  = max((int) $shadowed->last()->sequence, $compactions->lastSequence());
 
-        $this->appendSummaryRow($taskId, $summaryText, $firstSequence, $lastSequence);
+        $this->appendSummaryRow($task->id, $summaryText, $firstSequence, $lastSequence);
 
         $this->logger?->info('Compacted task history', [
-            'task_id'   => $taskId,
+            'task_id'   => $task->id,
             'range'     => "{$firstSequence}-{$lastSequence}",
             'compacted' => $shadowed->count(),
         ]);
@@ -131,11 +161,9 @@ final class ConversationCompactor
      * the effort the task was given — a summary written at a different
      * effort than the turns it replaces reads as a different voice.
      */
-    private function taskEffort(int $taskId): ?string
+    private function taskEffort(Task $task): ?string
     {
-        $task = Task::find($taskId);
-
-        return $task?->effort;
+        return $task->effort;
     }
 
     /**
@@ -205,8 +233,14 @@ final class ConversationCompactor
     /**
      * @param  list<array{role: string, content: string}>  $summaryMessages
      */
-    private function summarize(Agent $agent, array $summaryMessages, int $maxTokensOutput, float $temperature, ?string $effort): string
-    {
+    private function summarize(
+        Task $task,
+        Agent $agent,
+        array $summaryMessages,
+        int $maxTokensOutput,
+        float $temperature,
+        ?string $effort,
+    ): string {
         // The summariser is not the agent. Handing it the agent's persona
         // makes it answer like the agent — a long report instead of a
         // summary — which is the opposite of what a compaction needs.
@@ -223,8 +257,9 @@ final class ConversationCompactor
             effort: $effort,
         );
 
-        $driver   = $this->driverFactory->makeFromAgent($agent);
-        $response = $driver->complete($summaryRequest);
+        // The summary is a provider turn like any other: it goes through the
+        // runner, so its tokens are metered and a hard limit stops it.
+        $response = $this->llmCallRunner->complete($task, $agent, $summaryRequest);
 
         $summary = trim((string) ($response->content ?? ''));
         if ($summary === '') {

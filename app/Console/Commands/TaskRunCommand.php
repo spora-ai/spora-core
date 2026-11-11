@@ -13,6 +13,8 @@ use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Console\Concerns\AppliesSettingsOverlay;
 use Spora\Core\Database;
 use Spora\Drivers\DriverFactory;
+use Spora\Metering\LlmCallRunner;
+use Spora\Metering\UsageMeterInterface;
 use Spora\Models\Task;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
@@ -191,6 +193,11 @@ final class TaskRunCommand extends Command
                 // both hooks short-circuit on the null guard and the parent
                 // stays AWAITING_SUB_AGENTS forever.
                 subAgent: $this->container->get(SubAgentServiceInterface::class),
+                // The worker builds its own Orchestrator, so the metering
+                // collaborators come from the container here too — the
+                // OrchestratorInterface binding covers the HTTP path only.
+                usageMeter: $this->container->get(UsageMeterInterface::class),
+                llmCallRunner: $this->container->get(LlmCallRunner::class),
             ),
         );
     }

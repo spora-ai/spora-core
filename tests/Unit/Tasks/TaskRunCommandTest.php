@@ -16,6 +16,9 @@ use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
+use Spora\Metering\LlmCallRunner;
+use Spora\Metering\NullUsageMeter;
+use Spora\Metering\UsageMeterInterface;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\LLMDriverConfiguration;
@@ -248,6 +251,11 @@ describe('TaskRunCommand — task claiming', function (): void {
         });
         $container->allows('get')->with(AgentServiceInterface::class)->andReturnNull();
         $container->allows('get')->with(SubAgentServiceInterface::class)->andReturn(Mockery::mock(SubAgentServiceInterface::class));
+        // The worker builds its own Orchestrator and asks the container for
+        // the metering collaborators; the mock container is strict.
+        $container->allows('get')->with(UsageMeterInterface::class)->andReturn(new NullUsageMeter());
+        $container->allows('get')->with(LlmCallRunner::class)
+            ->andReturn(new LlmCallRunner($factory, new NullUsageMeter()));
 
         /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
@@ -340,6 +348,10 @@ describe('TaskRunCommand — task claiming', function (): void {
         // mock fail if TaskRunCommand stops asking for it.
         $mockSubAgent = Mockery::mock(SubAgentServiceInterface::class);
         $container->shouldReceive('get')->with(SubAgentServiceInterface::class)->once()->andReturn($mockSubAgent);
+
+        $container->allows('get')->with(UsageMeterInterface::class)->andReturn(new NullUsageMeter());
+        $container->allows('get')->with(LlmCallRunner::class)
+            ->andReturn(new LlmCallRunner($factory, new NullUsageMeter()));
 
         /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
@@ -678,6 +690,10 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         $container->allows('get')->with(AgentServiceInterface::class)->andReturnNull();
         $container->allows('get')->with(SubAgentServiceInterface::class)
             ->andReturn(Mockery::mock(SubAgentServiceInterface::class)->shouldIgnoreMissing());
+
+        $container->allows('get')->with(UsageMeterInterface::class)->andReturn(new NullUsageMeter());
+        $container->allows('get')->with(LlmCallRunner::class)
+            ->andReturn(new LlmCallRunner($factory, new NullUsageMeter()));
 
         $mercure = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publishForPrincipal')->andReturn(true);

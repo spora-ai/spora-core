@@ -12,6 +12,10 @@ use Spora\Drivers\DriverFactory;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
+use Spora\Metering\Exceptions\UsageLimitExceededException;
+use Spora\Metering\LlmCallRunner;
+use Spora\Metering\MeteringContextFactory;
+use Spora\Metering\NullUsageMeter;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\Task;
@@ -34,6 +38,12 @@ use Throwable;
 final class TickPhaseRunner
 {
     /**
+     * Every provider call leaves through the runner, so the meter sees each
+     * one: the tokens a call costs are only knowable once it is answered.
+     */
+    public readonly LlmCallRunner $llmCallRunner;
+
+    /**
      * @param list<object> $toolInstances
      */
     public function __construct(
@@ -46,9 +56,17 @@ final class TickPhaseRunner
         private readonly ?ToolCallSerializer $toolCallSerializer = null,
         private readonly ?SubAgentServiceInterface $subAgent = null,
         private readonly ?PrincipalResolver $principalResolver = null,
+        ?LlmCallRunner $llmCallRunner = null,
         private ?ApprovedToolExecutor $approvedToolExecutor = null,
         public readonly LeaseGuard $leaseGuard = new LeaseGuard(),
-    ) {}
+    ) {
+        $this->llmCallRunner = $llmCallRunner ?? new LlmCallRunner(
+            $this->driverFactory,
+            new NullUsageMeter(),
+            new MeteringContextFactory(),
+            $this->logger,
+        );
+    }
 
     /**
      * Set by Orchestrator::tick from the per-call OrchestratorConfig.
@@ -131,6 +149,9 @@ final class TickPhaseRunner
 
         try {
             $response = $this->dispatchLlmRequest($context);
+        } catch (UsageLimitExceededException $e) {
+            $this->abortForUsageLimit($taskId, $e);
+            return;
         } catch (Throwable $e) {
             $this->handleTickFailure($taskId, $context, $e);
             return;
@@ -152,7 +173,11 @@ final class TickPhaseRunner
             return;
         }
 
-        $this->handleTickLlmResponse($context, $response);
+        try {
+            $this->handleTickLlmResponse($context, $response);
+        } catch (UsageLimitExceededException $e) {
+            $this->abortForUsageLimit($taskId, $e);
+        }
     }
 
     /**
@@ -198,7 +223,14 @@ final class TickPhaseRunner
                 ? $ownOperation
                 : ($operationMap[$providerCallId] ?? null);
 
-            $this->approvedToolExecutor()->execute($task, $row, $providerCallId, $toolName, $approvedArgs, $operationName);
+            try {
+                $this->approvedToolExecutor()->execute($task, $row, $providerCallId, $toolName, $approvedArgs, $operationName);
+            } catch (UsageLimitExceededException $e) {
+                // This phase runs before the provider call, so an over-limit
+                // task fails without spending a token.
+                $this->abortForUsageLimit($task->id, $e);
+                return;
+            }
         }
 
         // Worker-mode batch boundary — mirror the sync-mode boundary in
@@ -300,9 +332,7 @@ final class TickPhaseRunner
 
     private function dispatchLlmRequest(array $context): LLMResponse
     {
-        return $this->driverFactory
-            ->makeFromAgent($context['agent'])
-            ->complete($context['request']);
+        return $this->llmCallRunner->complete($context['task'], $context['agent'], $context['request']);
     }
 
     /**
@@ -395,7 +425,15 @@ final class TickPhaseRunner
         ]);
 
         if ($this->orchestrator->errorClassifier->isContextWindowError($e)) {
-            $this->orchestrator->contextWindowRecovery->tryCompactionAndRetry($context['task'], $context['agent'], $e);
+            try {
+                $this->orchestrator->contextWindowRecovery->tryCompactionAndRetry($context['task'], $context['agent'], $e);
+            } catch (UsageLimitExceededException $limit) {
+                // The recovery's own compaction hit a limit. That is what
+                // stopped the run, and it is terminal: reporting it as a
+                // context-window error would send the task down a recovery
+                // path that spends the budget the limit refused.
+                $this->abortForUsageLimit($taskId, $limit);
+            }
             return;
         }
 
@@ -428,6 +466,77 @@ final class TickPhaseRunner
         }
 
         throw $e;
+    }
+
+    /**
+     * Fail the task because a hard usage decision stopped the run.
+     *
+     * The write is a compare-and-set on the statuses a run is still in:
+     * another path may have ended the task already, and the loser of that
+     * race must not overwrite the outcome. A parent waiting for its
+     * sub-agents is in that set — quiescent, but its children are running
+     * and the run is not over, so the limit has to reach it there too. No
+     * retry is scheduled: a limit is terminal, and `USAGE_LIMIT_REACHED` is
+     * not retryable.
+     */
+    private function abortForUsageLimit(int $taskId, UsageLimitExceededException $e): void
+    {
+        $reason = $e->decision()->reason;
+
+        $updated = Task::where('id', $taskId)
+            ->whereIn('status', TaskLifecyclePolicy::IN_PROGRESS_STATUSES)
+            ->update([
+                'status'         => 'FAILED',
+                'failure_reason' => Utf8Sanitizer::scrubString($reason),
+                'error_code'     => 'USAGE_LIMIT_REACHED',
+                'error_message'  => Utf8Sanitizer::scrubString($reason),
+            ]);
+
+        if ($updated === 0) {
+            return;
+        }
+
+        $this->closePendingApprovals($taskId, $reason);
+
+        $failedTask = Task::where('id', $taskId)->first();
+        if ($failedTask === null) {
+            return;
+        }
+
+        try {
+            $this->notificationService?->notifyTaskFailed($failedTask);
+        } catch (Throwable $notificationError) {
+            $this->logger?->warning('Notification failed', [
+                'task_id'   => $failedTask->id,
+                'exception' => $notificationError->getMessage(),
+            ]);
+        }
+
+        // A child task that failed still counts as "terminal" for the
+        // parent's wait — the parent will resume with the failure message
+        // as the tool result. Without this the parent stays
+        // AWAITING_SUB_AGENTS after its last child is gone.
+        $this->maybeResumeParentForChild($taskId);
+    }
+
+    /**
+     * Close the task's still-pending approval rows.
+     *
+     * The task is terminal, so nothing will ever pick these up again — left
+     * PENDING_APPROVAL they would show the operator a batch that can never
+     * be answered. The write names the rows, not the provider call id: a
+     * later proposal may reuse the id.
+     */
+    private function closePendingApprovals(int $taskId, string $reason): void
+    {
+        ToolCallModel::where('task_id', $taskId)
+            ->where('status', 'PENDING_APPROVAL')
+            ->update([
+                'status'        => 'REJECTED',
+                'rejected_at'   => date(Orchestrator::DB_TIMESTAMP_FORMAT),
+                'rejected_by'   => null,
+                'reject_reason' => $reason,
+            ]);
     }
 
     private function notifyFailedAndScheduleRetry(Task $failedTask, string $errorCode): void

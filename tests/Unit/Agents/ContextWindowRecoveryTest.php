@@ -2,16 +2,20 @@
 
 declare(strict_types=1);
 
+use Spora\Agents\ContextWindowRecovery;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
+use Spora\Metering\Exceptions\UsageLimitExceededException;
+use Spora\Metering\UsageDecision;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
+use Spora\Services\TaskCompactionServiceInterface;
 
 defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
 
@@ -199,4 +203,43 @@ it('re-ticks when the compaction wrote a summary', function (): void {
     $task->refresh();
     expect($task->status)->toBe('COMPLETED')
         ->and($task->final_response)->toBe('Recovered after compaction.');
+});
+
+it('re-throws a usage limit the compaction hits instead of the context-window error', function (): void {
+    [$agent, $task] = seedContextWindowRecoveryTask();
+
+    for ($i = 0; $i < 8; $i++) {
+        TaskHistory::create([
+            'task_id'  => $task->id,
+            'sequence' => $i,
+            'role'     => $i % 2 === 0 ? 'user' : 'assistant',
+            'content'  => "Message {$i}",
+        ]);
+    }
+
+    $calls  = 0;
+    $factory = Mockery::mock(DriverFactory::class);
+    $factory->allows('makeFromAgent')->andReturn(recoveryDriver($calls));
+
+    $orch     = recoveryOrchestrator($factory);
+    $original = new RuntimeException('Context window exceeded');
+
+    $limit = new UsageLimitExceededException(new UsageDecision('Quota exhausted.'));
+
+    $compaction = Mockery::mock(TaskCompactionServiceInterface::class);
+    $compaction->shouldReceive('compact')->once()->andThrow($limit);
+
+    $recovery = new ContextWindowRecovery($orch, $compaction);
+
+    $thrown = null;
+    try {
+        $recovery->tryCompactionAndRetry($task, $agent, $original);
+    } catch (Throwable $e) {
+        $thrown = $e;
+    }
+
+    // The limit, not the context-window error: a limit is terminal, and
+    // reporting it as a window problem would send the task down a recovery
+    // path that spends the budget the limit refused.
+    expect($thrown)->toBe($limit);
 });

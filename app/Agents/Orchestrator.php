@@ -15,6 +15,11 @@ use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
+use Spora\Metering\LlmCallRunner;
+use Spora\Metering\MeteringContextFactory;
+use Spora\Metering\MeteringGuard;
+use Spora\Metering\NullUsageMeter;
+use Spora\Metering\UsageMeterInterface;
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\Task;
@@ -62,6 +67,18 @@ final class Orchestrator implements OrchestratorInterface
     public readonly AgentStateResolver $agentStateResolver;
     public readonly TaskStatusWriter $statusWriter;
     public readonly ToolOperationResolver $toolOperations;
+
+    /** The meter this run is metered by, and the funnel every provider call
+     *  goes through. The fallback runner is built over the same meter, so
+     *  the two can never be metered by different meters. */
+    public readonly UsageMeterInterface $usageMeter;
+    public readonly LlmCallRunner $llmCallRunner;
+
+    /** The tool gate, and the context factory it shares with the provider
+     *  funnel. The gate's guard fails open — a meter that throws is logged
+     *  and ignored — and the factory costs one query per metered call. */
+    private readonly ToolUsageGate $toolUsageGate;
+    private readonly MeteringContextFactory $meteringContextFactory;
 
     /** Lease config threaded through recursive ticks within the same
      *  HTTP request (or worker daemon). Set by the outermost `tick()`
@@ -133,10 +150,20 @@ final class Orchestrator implements OrchestratorInterface
             $config->logger,
         );
         $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
+
+        $this->usageMeter             = $config->usageMeter ?? new NullUsageMeter();
+        $this->meteringContextFactory = new MeteringContextFactory();
+        $this->llmCallRunner          = $config->llmCallRunner ?? new LlmCallRunner(
+            $driverFactory,
+            $this->usageMeter,
+            $this->meteringContextFactory,
+            $config->logger,
+        );
+
         // A self-built service keeps the orchestrator usable on its own;
         // the container hands over the shared one.
         $this->taskCompactionService = $taskCompactionService ?? new TaskCompactionService(
-            new ConversationCompactor($driverFactory, $config->logger),
+            new ConversationCompactor($driverFactory, $config->logger, $this->llmCallRunner),
             $this->llmConfigResolver,
         );
         $this->contextWindowRecovery = new ContextWindowRecovery($this, $this->taskCompactionService, $config->logger, $config->notificationService);
@@ -151,8 +178,14 @@ final class Orchestrator implements OrchestratorInterface
             $config->toolCallSerializer,
             $config->subAgent,
             $principalResolver ?? new PrincipalResolver(),
+            $this->llmCallRunner,
         );
         $this->toolOperations         = new ToolOperationResolver();
+        $this->toolUsageGate          = new ToolUsageGate(
+            new MeteringGuard($this->usageMeter, $config->logger),
+            $this->meteringContextFactory,
+            $this->toolOperations,
+        );
         $this->toolCallExecutor      = new ToolCallExecutor($this, $this->toolOperations);
         $this->agentDecisionProcessor = new AgentDecisionProcessor($this);
         $this->agentStateResolver     = new AgentStateResolver($this);
@@ -580,9 +613,21 @@ final class Orchestrator implements OrchestratorInterface
         int $agentId,
         int $taskId,
     ): ToolResult {
-        $ref      = new ReflectionClass($toolInstance);
-        $attrs    = $ref->getAttributes(Tool::class);
-        $toolName = $attrs !== [] ? $attrs[0]->newInstance()->name : get_class($toolInstance);
+        $ref       = new ReflectionClass($toolInstance);
+        $attrs     = $ref->getAttributes(Tool::class);
+        $toolName  = $attrs !== [] ? $attrs[0]->newInstance()->name : get_class($toolInstance);
+        $toolClass = get_class($toolInstance);
+
+        // Building the scope costs a query, so an install without a metering
+        // plugin skips it.
+        $usageScope = $this->toolUsageGate->scopeFor(
+            $taskId,
+            $toolName,
+            $toolClass,
+            $toolInstance,
+            $arguments,
+            $agentId,
+        );
 
         $resolver = $this->principalResolver ?? new PrincipalResolver();
         // The task being executed, not the agent's newest one: a shared
@@ -598,6 +643,11 @@ final class Orchestrator implements OrchestratorInterface
             'task_id'   => $taskId,
             'arguments' => $arguments,
         ]);
+
+        // The gate sits outside the try below on purpose: inside it the limit
+        // would become a failed ToolResult, the LLM would read that as a
+        // tool error and keep spending.
+        $this->toolUsageGate->enforce($usageScope);
 
         try {
             $result = $toolInstance->execute(
@@ -615,8 +665,6 @@ final class Orchestrator implements OrchestratorInterface
                     'content'  => $result->content,
                 ]);
             }
-
-            return $result;
         } catch (Throwable $e) {
             $this->logger?->error('Tool threw exception', [
                 'tool'            => $toolName,
@@ -626,12 +674,16 @@ final class Orchestrator implements OrchestratorInterface
                 'message'         => $e->getMessage(),
             ]);
 
-            return new ToolResult(
+            $result = new ToolResult(
                 success: false,
                 content: 'System Error: The tool encountered a fatal exception: ' . $e->getMessage(),
                 data: ['exception_class' => get_class($e), 'trace' => $e->getTraceAsString()],
             );
         }
+
+        $this->toolUsageGate->record($usageScope, $result->success);
+
+        return $result;
     }
 
     /**

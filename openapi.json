@@ -2510,6 +2510,9 @@
                     },
                     "404": {
                         "description": "NOT_FOUND — task is not owned by the calling user."
+                    },
+                    "429": {
+                        "description": "USAGE_LIMIT_REACHED — the usage limit was reached, so no summary was requested."
                     }
                 },
                 "security": [

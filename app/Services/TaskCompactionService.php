@@ -7,6 +7,7 @@ namespace Spora\Services;
 use Spora\Agents\ConversationCompactor;
 use Spora\Agents\Exceptions\CompactionFailedException;
 use Spora\Agents\LlmConfigResolver;
+use Spora\Metering\Exceptions\UsageLimitExceededException;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 
@@ -27,8 +28,10 @@ final class TaskCompactionService implements TaskCompactionServiceInterface
     ) {}
 
     /**
-     * @throws CompactionFailedException  When the model returned no summary;
-     *                                    the history is left unchanged.
+     * @throws CompactionFailedException    When the model returned no summary;
+     *                                      the history is left unchanged.
+     * @throws UsageLimitExceededException When a hard usage decision stopped
+     *                                      the summary request.
      */
     public function compact(int $taskId): bool
     {
@@ -45,7 +48,7 @@ final class TaskCompactionService implements TaskCompactionServiceInterface
         $llmConfig = $this->llmConfigResolver->resolveLlmConfig($agent);
 
         return $this->compactor->compact(
-            $taskId,
+            $task,
             $agent,
             $llmConfig['max_tokens_output'],
             $llmConfig['temperature'],

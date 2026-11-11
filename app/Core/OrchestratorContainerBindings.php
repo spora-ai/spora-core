@@ -28,6 +28,10 @@ use Spora\Console\Worker\WorkerReaper;
 use Spora\Drivers\DriverFactory;
 use Spora\Extensions\AppLoader;
 use Spora\Http\WorkerController;
+use Spora\Metering\LlmCallRunner;
+use Spora\Metering\MeteringContextFactory;
+use Spora\Metering\NullUsageMeter;
+use Spora\Metering\UsageMeterInterface;
 use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
 use Spora\Scheduling\DueWorkDispatcher;
@@ -71,8 +75,8 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
  * DI definitions for the orchestrator slice: the Orchestrator itself, the
- * client-worker runtime services, the Mercure/notification/mail stack, and the
- * agent-template + skill scanners.
+ * client-worker runtime services, the Mercure/notification/mail stack, the
+ * agent-template + skill scanners, and the usage-metering seam.
  *
  * Lives outside {@see ContainerDefinitions} so that class stays within the
  * S1448 method-count ceiling — the slice needs several helpers to keep each
@@ -94,6 +98,26 @@ final class OrchestratorContainerBindings
     private static function orchestrator(): array
     {
         return [
+            // The metering seam. The core binds the null object so an install
+            // without a metering plugin behaves exactly as it did before the
+            // seam existed — no queries, no writes, no behaviour change. A
+            // plugin replaces this binding from a `ContainerBuildingEvent`
+            // subscriber: the plugin loader dispatches that event after the
+            // core's definitions are added, and the container keeps the last
+            // definition for a key.
+            UsageMeterInterface::class => static function (): UsageMeterInterface {
+                return new NullUsageMeter();
+            },
+
+            LlmCallRunner::class => static function (ContainerInterface $c): LlmCallRunner {
+                return new LlmCallRunner(
+                    $c->get(DriverFactory::class),
+                    $c->get(UsageMeterInterface::class),
+                    new MeteringContextFactory(),
+                    $c->get(LoggerInterface::class),
+                );
+            },
+
             OrchestratorInterface::class => static function (ContainerInterface $c): OrchestratorInterface {
                 return new Orchestrator(
                     $c->get(DriverFactory::class),
@@ -108,6 +132,8 @@ final class OrchestratorContainerBindings
                         toolCallSerializer: $c->get(ToolCallSerializer::class),
                         agentService: $c->get(AgentServiceInterface::class),
                         principalPreferences: $c->get(LLMConfigPreferences::class),
+                        usageMeter: $c->get(UsageMeterInterface::class),
+                        llmCallRunner: $c->get(LlmCallRunner::class),
                     ),
                     $c->get(PrincipalResolver::class),
                     $c->get(AuthService::class),
@@ -119,6 +145,9 @@ final class OrchestratorContainerBindings
                 return new ConversationCompactor(
                     $c->get(DriverFactory::class),
                     $c->get(LoggerInterface::class),
+                    // The compaction call spends tokens like any other, so it
+                    // goes through the same runner the agent turn uses.
+                    $c->get(LlmCallRunner::class),
                 );
             },
 

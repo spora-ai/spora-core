@@ -9,6 +9,7 @@ use Spora\Agents\Exceptions\ToolNotEnabledException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
+use Spora\Metering\Exceptions\UsageLimitExceededException;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
@@ -196,6 +197,11 @@ final class ToolCallBatchHandler
                     toolName: $toolCall->toolName,
                 ),
             );
+        } catch (UsageLimitExceededException $e) {
+            // A usage limit is not a tool error. Turned into a tool-history
+            // row below, the LLM would read it as a failed tool and keep
+            // spending; the task has to fail instead.
+            throw $e;
         } catch (Throwable $e) {
             $this->orchestrator->appendHistory(
                 taskId: $task->id,
