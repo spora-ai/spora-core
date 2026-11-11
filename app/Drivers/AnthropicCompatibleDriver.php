@@ -18,12 +18,11 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 
 #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', description: 'API key for the Anthropic-compatible endpoint. Leave empty for local models.', required: false)]
 #[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.anthropic.com).', required: false, default: 'https://api.anthropic.com')]
-#[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. claude-3-5-sonnet-20241022, claude-3-opus).', required: false, default: 'claude-3-5-sonnet-20241022')]
+#[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. claude-sonnet-5-5, claude-opus-4-6).', required: false, default: 'claude-sonnet-5-5')]
 #[ToolSetting(key: 'enable_prompt_caching', label: 'Enable prompt caching', type: 'toggle', default: true, description: 'Add `cache_control: ephemeral` breakpoints on the stable system and tool prefixes. Disable when the upstream proxy strips cache_control fields.')]
-#[ToolSetting(key: 'temperature', label: 'Temperature', type: 'text', description: 'Sampling temperature (0.0–2.0). Lower is more deterministic.', required: false, default: '0.7', validation: '/^[0-2](\.[0-9]+)?$/')]
-#[ToolSetting(key: 'thinking_budget', label: 'Thinking Budget (tokens)', type: 'text', description: 'Maximum tokens for extended thinking (Claude 3.7+).', required: false, validation: '/^[1-9][0-9]*$/')]
+#[ToolSetting(key: 'effort', label: 'Effort', type: 'select', default: '', description: 'Default reasoning effort. Empty = the model default (nothing is sent).', options: ['' => 'Model default', 'low' => 'Low', 'medium' => 'Medium', 'high' => 'High', 'xhigh' => 'xHigh', 'max' => 'Max'])]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
-final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
+final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface
 {
     private const PROVIDER_KEY = 'anthropic_compatible';
 
@@ -53,20 +52,67 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
             apiKey: $apiKey,
             model: $model,
             enablePromptCaching: $options->enablePromptCaching ?? true,
-            thinkingBudget: $options?->thinkingBudget,
         );
         $this->responseParser = new AnthropicResponseParser($logger);
     }
 
     /**
-     * Claude 3 / 4 family models all accept image content blocks on the
-     * Anthropic Messages API. Older models (Claude 2, Claude Instant)
-     * did not — keep the allowlist conservative.
+     * @param array<string, mixed> $args
+     * @param array<string, mixed> $settings
+     */
+    public static function makeFromSettings(array $args, array $settings): LLMDriverInterface
+    {
+        /** @var HttpClientInterface $httpClient */
+        $httpClient = $args['httpClient'];
+
+        $logger = $args['logger'] ?? null;
+        $supportsImageInput = $args['supportsImageInput'] ?? null;
+
+        return new self(
+            apiKey: (string) ($args['apiKey'] ?? ''),
+            model: (string) ($args['model'] ?? ''),
+            baseUrl: (string) ($args['baseUrl'] ?? ''),
+            httpClient: $httpClient,
+            logger: $logger instanceof LoggerInterface ? $logger : null,
+            timeout: isset($args['timeout']) ? (int) $args['timeout'] : null,
+            options: new AnthropicDriverOptions(
+                supportsImageInput: is_bool($supportsImageInput) ? $supportsImageInput : null,
+                enablePromptCaching: !array_key_exists('enable_prompt_caching', $settings)
+                    || filter_var($settings['enable_prompt_caching'], FILTER_VALIDATE_BOOLEAN),
+            ),
+        );
+    }
+
+    /**
+     * Every Claude generation from 3 onwards accepts image content blocks
+     * on the Anthropic Messages API. Claude 2 and the Instant models do
+     * not, and a name that is not a Claude id is not answered for.
      */
     protected function modelBasedSupportsImageInput(): bool
     {
-        return str_starts_with($this->model, 'claude-3-')
-            || str_starts_with($this->model, 'claude-4-');
+        return ModelFamily::claudeSupportsImageInput($this->model);
+    }
+
+    /**
+     * The levels the model takes.
+     *
+     * Anthropic spells every level the way the canonical scale does and
+     * offers no `none` or `minimal` — the model thinks or it does not.
+     * Which of the five a model takes is the model's own property, so
+     * the question is asked in {@see ModelFamily}: Sonnet 4.5 and Haiku
+     * 4.5 have no effort at all, Opus 4.5 has no `max`, and Opus 4.6
+     * and Sonnet 4.6 have no `xhigh`.
+     *
+     * @return array<string, string>
+     */
+    public function effortLevels(): array
+    {
+        $levels = [];
+        foreach (ModelFamily::claudeEffortLevels($this->model) as $level) {
+            $levels[$level->value] = $level->value;
+        }
+
+        return $levels;
     }
 
     public function getProviderName(): string
@@ -78,7 +124,12 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
     {
         $tools    = $this->requestBuilder->convertTools($request->tools);
         $messages = $this->requestBuilder->convertMessages($request->messages);
-        $body     = $this->requestBuilder->buildBody($request, $tools, $messages);
+        $body     = $this->requestBuilder->buildBody(
+            $request,
+            $tools,
+            $messages,
+            $this->resolveEffort($request->effort),
+        );
 
         $url     = rtrim($this->baseUrl, '/') . '/v1/messages';
         $headers = $this->requestBuilder->buildHeaders();

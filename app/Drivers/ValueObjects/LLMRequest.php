@@ -39,5 +39,12 @@ final readonly class LLMRequest
         public int $contextWindow = 0,
         public int   $maxTokens   = 4096,
         public float $temperature = 0.7,
+
+        /**
+         * The canonical reasoning-effort level ({@see \Spora\Drivers\EffortLevel}),
+         * never the provider's own spelling. `null` means the model
+         * default: the driver sends no effort parameter at all.
+         */
+        public ?string $effort = null,
     ) {}
 }

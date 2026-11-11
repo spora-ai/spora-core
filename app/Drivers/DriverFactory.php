@@ -96,19 +96,8 @@ class DriverFactory
             'supportsImageInput' => $supportsImageInput,
         ];
 
-        if ($driverClass === AnthropicCompatibleDriver::class) {
-            $options = new AnthropicDriverOptions(
-                thinkingBudget: isset($settings['thinking_budget']) && $settings['thinking_budget'] !== ''
-                    ? (int) $settings['thinking_budget']
-                    : null,
-                supportsImageInput: $supportsImageInput,
-                enablePromptCaching: $this->decodeEnablePromptCaching($settings),
-            );
-            // Anthropic folds supportsImageInput into AnthropicDriverOptions
-            // so its constructor stays at 7 params (S107 cap).
-            $argsForDriver = $commonArgs;
-            unset($argsForDriver['supportsImageInput']);
-            return new AnthropicCompatibleDriver(...$argsForDriver, options: $options);
+        if (is_a($driverClass, DriverOptionsAwareInterface::class, true)) {
+            return $driverClass::makeFromSettings($commonArgs, $settings);
         }
 
         return new $driverClass(...$commonArgs);
@@ -128,20 +117,5 @@ class DriverFactory
             return null;
         }
         return filter_var($settings['supports_image_input'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-    }
-
-    /**
-     * Decode the Anthropic-only `enable_prompt_caching` toggle. Defaults
-     * to `true` when the key is absent so legacy configs keep their
-     * previous behaviour. Only consumed by `AnthropicDriverOptions`.
-     *
-     * @param array<string, mixed> $settings
-     */
-    private function decodeEnablePromptCaching(array $settings): bool
-    {
-        if (!array_key_exists('enable_prompt_caching', $settings)) {
-            return true;
-        }
-        return filter_var($settings['enable_prompt_caching'], FILTER_VALIDATE_BOOLEAN);
     }
 }

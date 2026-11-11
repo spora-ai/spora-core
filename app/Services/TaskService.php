@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use InvalidArgumentException;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\TaskStartOptions;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
@@ -93,7 +94,7 @@ final class TaskService implements TaskServiceInterface
     /**
      * @param list<string> $mediaIds
      */
-    public function startTask(int $userId, int $agentId, string $prompt, ?int $maxSteps = null, ?int $parentTaskId = null, array $mediaIds = []): array
+    public function startTask(int $userId, int $agentId, string $prompt, ?int $maxSteps = null, ?int $parentTaskId = null, array $mediaIds = [], ?string $effort = null): array
     {
         // Migration 0067 cut `agents.user_id`; ownership now lives on
         // `agents.principal_id`. The check routes through PrincipalResolver so
@@ -119,7 +120,13 @@ final class TaskService implements TaskServiceInterface
         }
 
         $steps = $maxSteps ?? $agent->max_steps;
-        $task = $this->orchestrator->start($agentId, $prompt, $steps, $parentTaskId, null, $mediaIds, $userId);
+        $task = $this->orchestrator->start(
+            $agentId,
+            $prompt,
+            $steps,
+            $parentTaskId,
+            new TaskStartOptions(mediaIds: $mediaIds, userId: $userId, effort: $effort),
+        );
 
         $resource = $this->resources->taskResource($task);
         $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), $resource);
@@ -256,7 +263,7 @@ final class TaskService implements TaskServiceInterface
     /**
      * @param list<string> $mediaIds
      */
-    public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null, array $mediaIds = []): array
+    public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null, array $mediaIds = [], ?string $effort = null): array
     {
         $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
         $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
@@ -275,7 +282,7 @@ final class TaskService implements TaskServiceInterface
         }
 
         try {
-            $continuedTask = $this->orchestrator->continue($task->id, $prompt, $additionalSteps, $mediaIds, $userId);
+            $continuedTask = $this->orchestrator->continue($task->id, $prompt, $additionalSteps, $mediaIds, $userId, $effort);
         } catch (InvalidTaskTransitionException $e) {
             throw new InvalidArgumentException($e->getMessage(), 0, $e);
         }

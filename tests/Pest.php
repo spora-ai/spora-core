@@ -137,6 +137,37 @@ function claimAndTick(Spora\Agents\OrchestratorInterface $orchestrator, int $tas
 }
 
 /**
+ * The reasoning-effort capabilities of an agent's effective driver.
+ *
+ * A test that hands a controller an `EffortService` needs one whose driver
+ * can be built: the driver classes are the ones the test's configuration
+ * rows name.
+ *
+ * @param list<class-string> $driverClasses
+ */
+function makeEffortService(array $driverClasses = [Spora\Drivers\OpenAICompatibleDriver::class]): Spora\Services\EffortService
+{
+    $llmConfigService = new Spora\Services\LLMConfigService(
+        new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+        $driverClasses,
+    );
+
+    return new Spora\Services\EffortService(
+        new Spora\Services\LLMConfigPreferences(),
+        $llmConfigService,
+        new Spora\Drivers\DriverFactory(new Psr\Log\NullLogger(), $llmConfigService, 60),
+    );
+}
+
+/**
+ * The agent lookup a task request uses: the agents the caller can see.
+ */
+function makeAgentService(): Spora\Services\AgentServiceInterface
+{
+    return new Spora\Services\AgentService(null, null, new Spora\Services\PrincipalResolver());
+}
+
+/**
  * Hold the worker lock file the way a running worker does, and record a pid
  * as its holder. Returns the descriptor so the test can release it.
  */

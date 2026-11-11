@@ -310,6 +310,7 @@ final class TickPhaseRunner
             contextWindow: $llmConfig['context_window'],
             maxTokens: $llmConfig['max_tokens_output'],
             temperature: $llmConfig['temperature'],
+            effort: $task->effort,
         );
 
         return [

@@ -73,8 +73,6 @@ function makeRealConfigSkillTool(string $slug): array
     $agentId = Spora\Models\Agent::create([
         'principal_id' => createUserPrincipalPublic($userId),
         'name'         => 'Test Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ])->id;

@@ -128,7 +128,14 @@ final class ConversationCompactor
             return false;
         }
 
-        $summaryText = $this->summarize($task, $agent, $summaryMessages, $maxTokensOutput, $temperature);
+        $summaryText = $this->summarize(
+            $task,
+            $agent,
+            $summaryMessages,
+            $maxTokensOutput,
+            $temperature,
+            $this->taskEffort($task),
+        );
 
         // The new range starts where the previous one did, so the summary it
         // replaces covers both — the earlier summary's rows and the ones that
@@ -145,6 +152,18 @@ final class ConversationCompactor
         ]);
 
         return true;
+    }
+
+    /**
+     * The effort the task's own turns were sent with.
+     *
+     * The summary is a model turn of the same conversation, so it runs at
+     * the effort the task was given — a summary written at a different
+     * effort than the turns it replaces reads as a different voice.
+     */
+    private function taskEffort(Task $task): ?string
+    {
+        return $task->effort;
     }
 
     /**
@@ -214,8 +233,14 @@ final class ConversationCompactor
     /**
      * @param  list<array{role: string, content: string}>  $summaryMessages
      */
-    private function summarize(Task $task, Agent $agent, array $summaryMessages, int $maxTokensOutput, float $temperature): string
-    {
+    private function summarize(
+        Task $task,
+        Agent $agent,
+        array $summaryMessages,
+        int $maxTokensOutput,
+        float $temperature,
+        ?string $effort,
+    ): string {
         // The summariser is not the agent. Handing it the agent's persona
         // makes it answer like the agent — a long report instead of a
         // summary — which is the opposite of what a compaction needs.
@@ -229,6 +254,7 @@ final class ConversationCompactor
             tools: [],
             maxTokens: min($maxTokensOutput, self::MAX_SUMMARY_TOKENS),
             temperature: $temperature,
+            effort: $effort,
         );
 
         // The summary is a provider turn like any other: it goes through the

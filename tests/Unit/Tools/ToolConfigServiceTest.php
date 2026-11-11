@@ -45,8 +45,6 @@ function makeAgent(mixed $authService, string $suffix = ''): int
     return Agent::create([
         'principal_id' => createUserPrincipalPublic($userId),
         'name'         => 'Test Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ])->id;

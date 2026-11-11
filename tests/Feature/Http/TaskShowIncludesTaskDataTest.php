@@ -62,9 +62,11 @@ function showTaskControllerHarness(): array
         $authService,
         $taskService,
         new TaskMediaCapabilityService(),
-        new ContinueTaskDispatcher($taskService, new TaskMediaCapabilityService()),
+        new ContinueTaskDispatcher($taskService, new TaskMediaCapabilityService(), makeEffortService()),
         new DecisionsRequestValidator($taskService),
         new AnswerQuestionRequestValidator(new PrincipalResolver()),
+        makeAgentService(),
+        makeEffortService(),
     );
 
     return [

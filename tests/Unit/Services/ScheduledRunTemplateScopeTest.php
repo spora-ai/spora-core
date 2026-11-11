@@ -199,10 +199,9 @@ it('records the authenticated caller as the trigger user of a manually triggered
         string $prompt,
         int $maxSteps = 10,
         ?int $parentTaskId = null,
-        ?int $runId = null,
-        array $mediaIds = [],
-        ?int $userId = null,
+        ?Spora\Agents\TaskStartOptions $options = null,
     ) use (&$started): Spora\Models\Task {
+        $userId = $options?->userId;
         $started['user_id'] = $userId;
 
         return Spora\Models\Task::create([

@@ -20,6 +20,11 @@ use Spora\Drivers\Exceptions\UnknownContentBlockTypeException;
  * outbound path drops them so an unsigned block can never invalidate an
  * Anthropic chain. `metadata` preserves provider sub-fields that don't
  * yet warrant a typed property.
+ *
+ * The OpenAI Responses API has a third reasoning shape, and it needs a
+ * type of its own: an item carrying an opaque encrypted blob. Neither
+ * existing slot can hold it — `signature` is forwarded to Anthropic as a
+ * chain token, and `data` is forwarded as Anthropic redacted thinking.
  */
 final readonly class ContentBlock
 {
@@ -28,6 +33,7 @@ final readonly class ContentBlock
     public const TYPE_THINKING = 'thinking';
     public const TYPE_REDACTED_THINKING = 'redacted_thinking';
     public const TYPE_TOOL_USE = 'tool_use';
+    public const TYPE_REASONING = 'reasoning';
 
     private const TYPES = [
         self::TYPE_TEXT,
@@ -35,6 +41,7 @@ final readonly class ContentBlock
         self::TYPE_THINKING,
         self::TYPE_REDACTED_THINKING,
         self::TYPE_TOOL_USE,
+        self::TYPE_REASONING,
     ];
 
     /**
@@ -43,8 +50,9 @@ final readonly class ContentBlock
      * @param string|null         $signature   Opaque Anthropic signature for `thinking` blocks — must be
      *                                        replayed byte-identical on the next outbound turn. NIST
      *                                        server-side state; never mutate.
-     * @param string|null         $data        Opaque encrypted payload for `redacted_thinking` blocks.
-     *                                        Distinct from `$signature`; clients cannot decrypt it.
+     * @param string|null         $data        Opaque encrypted payload for `redacted_thinking` and
+     *                                        `reasoning` blocks. Distinct from `$signature`; clients
+     *                                        cannot decrypt it.
      * @param string|null         $mediaType   MIME type for `image` blocks (base64 transport).
      * @param string|null         $base64      Base64-encoded image bytes for `image` blocks.
      * @param string|null         $url         Remote URL for `image` blocks (alternative to base64).
@@ -103,6 +111,26 @@ final readonly class ContentBlock
     public static function redactedThinking(string $data): self
     {
         return new self(self::TYPE_REDACTED_THINKING, data: $data);
+    }
+
+    /**
+     * An OpenAI reasoning item.
+     *
+     * `$data` carries the item's `encrypted_content` — the opaque blob
+     * the provider decrypts to restore the chain of thought — and must be
+     * replayed byte-identical. `$metadata` holds the item id and its
+     * summary parts, which the provider correlates the item by.
+     *
+     * The block is server-safe: neither the Chat Completions nor the
+     * Anthropic outbound path forwards a type it does not know, so a
+     * task that switches drivers mid-flight loses the reasoning rather
+     * than sending OpenAI's blob to another provider.
+     *
+     * @param array<string, mixed>|null $metadata
+     */
+    public static function reasoning(string $text, ?string $data, ?array $metadata = null): self
+    {
+        return new self(self::TYPE_REASONING, text: $text, data: $data, metadata: $metadata);
     }
 
     /**

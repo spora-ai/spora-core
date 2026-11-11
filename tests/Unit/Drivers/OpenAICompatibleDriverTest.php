@@ -31,6 +31,64 @@ function makeRequest(array $messages = []): LLMRequest
     );
 }
 
+/**
+ * @param list<array<string, mixed>> $tools
+ */
+function makeToolRequest(array $tools, ?string $effort = null): LLMRequest
+{
+    return new LLMRequest(
+        systemPrompt: 'You are helpful.',
+        messages: [['role' => 'user', 'content' => 'hi']],
+        tools: $tools,
+        effort: $effort,
+    );
+}
+
+/**
+ * @return list<array<string, mixed>>
+ */
+function openAITestTools(): array
+{
+    return [[
+        'type' => 'function',
+        'function' => [
+            'name' => 'do_thing',
+            'description' => 'Does a thing',
+            'parameters' => ['type' => 'object', 'properties' => []],
+        ],
+    ]];
+}
+
+/**
+ * Send a request through the driver and return the body that reached
+ * the wire.
+ *
+ * @return array<string, mixed>
+ */
+function captureOpenAIBody(string $model, LLMRequest $request): array
+{
+    $captured = [];
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$captured): MockResponse {
+        $captured = json_decode($options['body'], true);
+
+        return new MockResponse(json_encode([
+            'id'      => 'cmp',
+            'choices' => [['finish_reason' => 'stop', 'message' => ['content' => 'ok']]],
+            'usage'   => ['prompt_tokens' => 1, 'completion_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    (new OpenAICompatibleDriver(
+        apiKey: 'test-key',
+        model: $model,
+        baseUrl: 'https://api.openai.com/v1',
+        httpClient: $client,
+    ))->complete($request);
+
+    return $captured;
+}
+
 // Provider / model metadata
 
 test('getProviderName returns openai_compatible', function (): void {
@@ -292,4 +350,127 @@ test('complete falls back to 45 seconds when no timeout is passed', function ():
     $driver->complete(makeRequest());
 
     expect((int) $capturedOptions['timeout'])->toBe(300);
+});
+
+// Reasoning effort
+
+test('a resolved effort level reaches the wire as reasoning_effort', function (): void {
+    $body = captureOpenAIBody('gpt-4o', new LLMRequest(
+        systemPrompt: 'You are helpful.',
+        messages: [],
+        tools: [],
+        effort: 'high',
+    ));
+
+    expect($body['reasoning_effort'])->toBe('high');
+});
+
+test('no effort level means no reasoning_effort on the wire', function (): void {
+    $body = captureOpenAIBody('gpt-4o', makeRequest());
+
+    expect($body)->not->toHaveKey('reasoning_effort');
+});
+
+// The reasoning-model wire shape
+
+test('a reasoning model is sent max_completion_tokens and no temperature', function (): void {
+    $body = captureOpenAIBody('gpt-5.5', makeRequest());
+
+    expect($body)->toHaveKey('max_completion_tokens')
+        ->and($body['max_completion_tokens'])->toBe(4096)
+        ->and($body)->not->toHaveKey('max_tokens')
+        ->and($body)->not->toHaveKey('temperature');
+});
+
+test('a non-reasoning model keeps max_tokens and the temperature', function (): void {
+    $body = captureOpenAIBody('gpt-4o', makeRequest());
+
+    expect($body)->toHaveKey('max_tokens')
+        ->and($body['max_tokens'])->toBe(4096)
+        ->and($body['temperature'])->toBe(0.7)
+        ->and($body)->not->toHaveKey('max_completion_tokens');
+});
+
+test('a reasoning model is sent the developer role instead of the system role', function (): void {
+    $body = captureOpenAIBody('gpt-5.5', makeRequest([['role' => 'user', 'content' => 'hi']]));
+
+    expect($body['messages'][0]['role'])->toBe('developer');
+});
+
+test('a non-reasoning model keeps the system role', function (): void {
+    $body = captureOpenAIBody('gpt-4o', makeRequest([['role' => 'user', 'content' => 'hi']]));
+
+    expect($body['messages'][0]['role'])->toBe('system');
+});
+
+// Tools and the none effort
+
+test('tools without a resolved effort send reasoning_effort none on a GPT-5.4 model', function (): void {
+    $body = captureOpenAIBody('gpt-5.4', makeToolRequest(openAITestTools()));
+
+    expect($body['reasoning_effort'])->toBe('none');
+});
+
+test('an explicit effort level is sent unchanged next to the tools', function (): void {
+    $body = captureOpenAIBody('gpt-5.4', makeToolRequest(openAITestTools(), 'medium'));
+
+    expect($body['reasoning_effort'])->toBe('medium');
+});
+
+test('no tools and no effort send no reasoning_effort', function (): void {
+    $body = captureOpenAIBody('gpt-5.4', makeRequest());
+
+    expect($body)->not->toHaveKey('reasoning_effort');
+});
+
+test('no tools and a resolved effort send that effort', function (): void {
+    $body = captureOpenAIBody('gpt-5.4', new LLMRequest(
+        systemPrompt: 'You are helpful.',
+        messages: [],
+        tools: [],
+        effort: 'low',
+    ));
+
+    expect($body['reasoning_effort'])->toBe('low');
+});
+
+test('the none escape hatch is not forced on a model that accepts tools at any effort', function (): void {
+    $body = captureOpenAIBody('gpt-5.2', makeToolRequest(openAITestTools()));
+
+    expect($body)->not->toHaveKey('reasoning_effort');
+});
+
+// The exact body shape
+
+test('the body of a non-reasoning model carries exactly the documented keys', function (): void {
+    $body = captureOpenAIBody('gpt-4o', makeRequest());
+
+    expect(array_keys($body))->toBe(['model', 'messages', 'max_tokens', 'temperature']);
+});
+
+test('the body of a reasoning model carries exactly the documented keys', function (): void {
+    $body = captureOpenAIBody('gpt-5.5', makeRequest());
+
+    expect(array_keys($body))->toBe(['model', 'messages', 'max_completion_tokens']);
+});
+
+test('the body of a reasoning model with tools carries exactly the documented keys', function (): void {
+    $body = captureOpenAIBody('gpt-5.5', makeToolRequest(openAITestTools(), 'high'));
+
+    expect(array_keys($body))->toBe(['model', 'messages', 'max_completion_tokens', 'tools', 'tool_choice', 'reasoning_effort']);
+});
+
+// Image input
+
+test('the current OpenAI generations accept image input', function (): void {
+    foreach (['gpt-4.1', 'gpt-4.1-mini', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-6.1-sol'] as $model) {
+        $driver = new OpenAICompatibleDriver(
+            apiKey: 'test-key',
+            model: $model,
+            baseUrl: 'https://api.openai.com/v1',
+            httpClient: new MockHttpClient(),
+        );
+
+        expect($driver->supportsImageInput())->toBeTrue();
+    }
 });
