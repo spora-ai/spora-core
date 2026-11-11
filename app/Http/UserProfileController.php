@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use JsonException;
 use Spora\Auth\AuthService;
+use Spora\Models\PrincipalLocation;
 use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -178,6 +179,11 @@ final class UserProfileController
 
     /**
      * Validate a single location field. Returns a JsonResponse on violation, or null if valid.
+     *
+     * The name is bounded at 100 characters because the column is
+     * `string('name', 100)`: a longer one is a 422 here rather than a
+     * data-too-long error from the engine. The `/groups/{id}/locations`
+     * surface reads the same way.
      */
     private function validateLocationField(string $field, array $body, bool $requireBoth): ?JsonResponse
     {
@@ -191,9 +197,29 @@ final class UserProfileController
                 : null;
         }
 
-        $value = trim((string) $body[$field]);
+        $raw = $body[$field];
+        if (!is_string($raw)) {
+            return new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $field . ' must be a string.']],
+                422,
+            );
+        }
+
+        $value = trim($raw);
         if ($value !== '') {
-            return null;
+            if ($field !== 'name' || mb_strlen($value) <= PrincipalLocation::MAX_NAME_LENGTH) {
+                return null;
+            }
+
+            return new JsonResponse(
+                [
+                    'error' => [
+                        'code' => 'VALIDATION_ERROR',
+                        'message' => 'name must be 100 characters or fewer.',
+                    ],
+                ],
+                422,
+            );
         }
 
         $message = $requireBoth

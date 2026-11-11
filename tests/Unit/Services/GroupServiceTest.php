@@ -47,6 +47,28 @@ describe('GroupService::createGroup', function (): void {
     });
 });
 
+describe('GroupService::updateGroup', function (): void {
+    it('stores the information block', function (): void {
+        [$service, , $ownerId] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'Acme Corp', 'We build things');
+
+        $service->updateGroup((int) $group->id, ['information' => "## Address\nMusterstraße 1"]);
+
+        expect(Capsule::table('groups')->where('id', $group->id)->value('information'))
+            ->toBe("## Address\nMusterstraße 1");
+    });
+
+    it('leaves the information block alone when it is not mentioned', function (): void {
+        [$service, , $ownerId] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'Acme Corp');
+        $service->updateGroup((int) $group->id, ['information' => '## Address']);
+
+        $service->updateGroup((int) $group->id, ['name' => 'Renamed']);
+
+        expect(Capsule::table('groups')->where('id', $group->id)->value('information'))->toBe('## Address');
+    });
+});
+
 describe('GroupService::addMember', function (): void {
     it('allows the owner to add a new member', function (): void {
         [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();

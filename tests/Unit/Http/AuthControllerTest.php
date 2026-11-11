@@ -19,7 +19,6 @@ use Spora\Services\AuthWorkflow;
 use Spora\Services\MailerInterface;
 use Spora\Services\RateLimiter;
 use Spora\Services\SystemMailer;
-use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -45,7 +44,7 @@ function makeAuthController(
     ?Config $config = null,
 ): array {
     $authService ??= bootAuthLayer();
-    $userService ??= new UserService();
+    $userService ??= makeUserService();
     $csrfService ??= new CsrfTokenService();
     $validator ??= new AuthValidator();
     $workflow = new AuthWorkflow($authService, $userService, $csrfService, $validator);
@@ -451,7 +450,7 @@ describe('AuthController::login', function (): void {
         User::where('email', 'suspended@example.com')->update(['verified' => 1]);
 
         $userId = (int) User::where('email', 'suspended@example.com')->value('id');
-        (new UserService())->updateUser($userId, ['suspended' => true]);
+        (makeUserService())->updateUser($userId, ['suspended' => true]);
 
         $request = jsonRequest('POST', '/api/v1/auth/login', [
             'email'    => 'suspended@example.com',
@@ -473,7 +472,7 @@ describe('AuthController::login', function (): void {
         User::where('email', 'spaced@example.com')->update(['verified' => 1]);
 
         $userId = (int) User::where('email', 'spaced@example.com')->value('id');
-        (new UserService())->updateUser($userId, ['suspended' => true]);
+        (makeUserService())->updateUser($userId, ['suspended' => true]);
 
         $request = jsonRequest('POST', '/api/v1/auth/login', [
             'email'    => ' spaced@example.com',
@@ -1423,7 +1422,7 @@ describe('AuthController::requestEmailChange', function (): void {
             $authService,
             new CsrfTokenService(),
             new AuthValidator(),
-            new AuthWorkflow($authService, new UserService(), new CsrfTokenService(), new AuthValidator()),
+            new AuthWorkflow($authService, makeUserService(), new CsrfTokenService(), new AuthValidator()),
             new Config(),
             $systemMailer,
         );
@@ -1458,7 +1457,7 @@ describe('AuthController::requestEmailChange', function (): void {
             $authService,
             new CsrfTokenService(),
             new AuthValidator(),
-            new AuthWorkflow($authService, new UserService(), new CsrfTokenService(), new AuthValidator()),
+            new AuthWorkflow($authService, makeUserService(), new CsrfTokenService(), new AuthValidator()),
             new Config(),
             $systemMailer,
         );

@@ -62,6 +62,33 @@ test('importPayload skips tools whose tool_class is not registered (TOOL_PLUGIN_
     expect($codes)->toContain('TOOL_PLUGIN_MISSING');
 });
 
+test('importPayload imports a renamed tool class under its new name', function (): void {
+    $raw = [
+        'id' => 'renamed', 'name' => 'Renamed', 'version' => '1.0.0',
+        'agent' => ['max_steps' => 5, 'system_prompt' => 'x'],
+        'tools' => [[
+            'tool_class' => 'Spora\\Tools\\UserInfoTool',
+            'enabled' => true,
+            'operations' => [['name' => 'get_base_data', 'enabled' => true]],
+        ]],
+        'required_plugins' => [],
+    ];
+
+    $result = $this->importer->importPayload($this->userId, $raw);
+
+    $tools = AgentTool::where('agent_id', $result->agent->id)->get();
+    expect($tools)->toHaveCount(1);
+    expect((string) $tools->first()->tool_class)->toBe('Spora\\Tools\\PrincipalInfoTool');
+
+    $override = AgentToolOperationOverride::where('agent_id', $result->agent->id)
+        ->where('tool_class', 'Spora\\Tools\\PrincipalInfoTool')
+        ->where('operation', 'get_base_data')
+        ->first();
+    expect($override)->not->toBeNull();
+
+    expect(array_column($result->warnings, 'code'))->not->toContain('TOOL_PLUGIN_MISSING');
+});
+
 test('importPayload emits PLUGIN_MISSING for required_plugins not loaded', function (): void {
     $raw = [
         'id' => 'with-plugin', 'name' => 'With Plugin', 'version' => '1.0.0',

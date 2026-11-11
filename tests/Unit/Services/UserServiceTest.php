@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 use Delight\Auth\Status;
 use Spora\Models\User;
-use Spora\Services\UserService;
 
 defined('USER_SVC_TEST_PASSWORD') || define('USER_SVC_TEST_PASSWORD', 'Password1!');
 
 function makeUserServiceWithUser(): array
 {
-    $service = new UserService();
+    $service = makeUserService();
 
     $auth = bootAuthLayer();
     static $seq = 0;
@@ -23,7 +22,7 @@ function makeUserServiceWithUser(): array
 describe('UserService::getUsers', function (): void {
 
     it('returns a paginated result', function (): void {
-        $service = new UserService();
+        $service = makeUserService();
         $auth = bootAuthLayer();
         bootAuth($auth, 'paginated-1@example.com', USER_SVC_TEST_PASSWORD);
         bootAuth($auth, 'paginated-2@example.com', USER_SVC_TEST_PASSWORD);
@@ -48,7 +47,7 @@ describe('UserService::getUser / getUserIdByEmail', function (): void {
     });
 
     it('returns null for an unknown id', function (): void {
-        $service = new UserService();
+        $service = makeUserService();
         expect($service->getUser(999999))->toBeNull();
     });
 
@@ -59,7 +58,7 @@ describe('UserService::getUser / getUserIdByEmail', function (): void {
     });
 
     it('returns null when looking up an unknown email', function (): void {
-        $service = new UserService();
+        $service = makeUserService();
         expect($service->getUserIdByEmail('nobody@example.com'))->toBeNull();
     });
 });
@@ -113,7 +112,7 @@ describe('UserService::updateUser / deleteUser', function (): void {
     });
 
     it('returns null when updating a non-existent user', function (): void {
-        $service = new UserService();
+        $service = makeUserService();
         expect($service->updateUser(999999, ['username' => 'x']))->toBeNull();
     });
 
@@ -124,7 +123,7 @@ describe('UserService::updateUser / deleteUser', function (): void {
     });
 
     it('returns false when deleting a non-existent user', function (): void {
-        $service = new UserService();
+        $service = makeUserService();
         expect($service->deleteUser(999999))->toBeFalse();
     });
 });
@@ -163,17 +162,17 @@ describe('UserService::grantRole / revokeRole / listRoles', function (): void {
     });
 
     it('returns null when granting a role to a missing user', function (): void {
-        $service = new UserService();
+        $service = makeUserService();
         expect($service->grantRole(999999, 'ADMIN'))->toBeNull();
     });
 
     it('returns null when revoking from a missing user', function (): void {
-        $service = new UserService();
+        $service = makeUserService();
         expect($service->revokeRole(999999, 'ADMIN'))->toBeNull();
     });
 
     it('returns an empty array from listRoles for a missing user', function (): void {
-        $service = new UserService();
+        $service = makeUserService();
         expect($service->listRoles(999999))->toBe([]);
     });
 });
@@ -181,7 +180,7 @@ describe('UserService::grantRole / revokeRole / listRoles', function (): void {
 describe('UserService::getProfile / updateProfile', function (): void {
 
     it('returns null when the user does not exist', function (): void {
-        $service = new UserService();
+        $service = makeUserService();
         expect($service->getProfile(999999))->toBeNull();
     });
 
@@ -267,5 +266,42 @@ describe('UserService locations', function (): void {
     it('returns false when deleting a missing location', function (): void {
         [$service, $userId] = makeUserServiceWithUser();
         expect($service->deleteLocation(9999, $userId))->toBeFalse();
+    });
+
+    it('saves the location under the user principal', function (): void {
+        [$service, $userId] = makeUserServiceWithUser();
+
+        // The principal id is deliberately not the user id: the location
+        // has to carry the principal, and the two must not be
+        // interchangeable.
+        $principalId = $userId + 1000;
+        Illuminate\Database\Capsule\Manager::table('principals')->insert([
+            'id'         => $principalId,
+            'type'       => 'user',
+            'user_id'    => $userId,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $created = $service->createLocation($userId, ['name' => 'Home', 'address' => '123 Main St']);
+
+        $row = Spora\Models\PrincipalLocation::find($created['location']['id']);
+        expect((int) $row->principal_id)->toBe($principalId);
+    });
+
+    it('materialises the user principal when the first location is saved', function (): void {
+        [$service, $userId] = makeUserServiceWithUser();
+        expect($this->principalIdFor($userId))->toBeNull();
+
+        $service->createLocation($userId, ['name' => 'Home', 'address' => '123 Main St']);
+
+        expect($this->principalIdFor($userId))->not->toBeNull();
+    });
+
+    it('does not materialise a principal on a read', function (): void {
+        [$service, $userId] = makeUserServiceWithUser();
+
+        expect($service->getLocations($userId))->toBe([]);
+        expect($this->principalIdFor($userId))->toBeNull();
     });
 });

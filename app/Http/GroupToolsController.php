@@ -25,7 +25,7 @@ use Symfony\Component\HttpFoundation\Response;
  *   DELETE /api/v1/groups/{id}/tools/{toolClass}
  *
  * Authorisation: read uses `callerCanSeeGroup()` (members can list);
- * write uses `callerCanManageGroup()` (owner / admin / global admin).
+ * write uses `callerCanManageGroup()` (owner / admin).
  * Non-members receive 404 (existence-hiding, not 403).
  */
 final class GroupToolsController

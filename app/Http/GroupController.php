@@ -27,7 +27,7 @@ use Symfony\Component\HttpFoundation\Response;
  *   GET    /api/v1/groups                 — members see the groups they belong to; admins see all
  *   GET    /api/v1/groups/{id}            — show one group
  *   POST   /api/v1/groups                 — create (admin-only); creator becomes owner + group-principal is materialised
- *   PATCH  /api/v1/groups/{id}            — update (admin-only)
+ *   PATCH  /api/v1/groups/{id}            — update (group owner / admin, or a global admin)
  *   DELETE /api/v1/groups/{id}            — destroy (admin OR group owner); 409 if agents or media folders still reference the group-principal
  *   GET    /api/v1/groups/{id}/agents     — list agents whose principal_id matches the group's group-principal
  *
@@ -123,13 +123,20 @@ final class GroupController
     /**
      * PATCH /api/v1/groups/{id}
      *
-     * Admin-only via middleware. The groups-row write and the optional
+     * The write gate lives here rather than in the route's middleware: a
+     * group's owner and admins may edit the group, and a global admin may
+     * edit any group. The groups-row write and the optional
      * `profile_picture` write share a single transaction so a partial
      * update can't leave the row and its picture out of sync.
      */
     public function update(int $id, Request $request): JsonResponse
     {
-        $resolved = $this->resolveGroupUpdate($id, $request);
+        $userId = $this->requireUserOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
+        }
+
+        $resolved = $this->resolveGroupUpdate($id, (int) $userId, $request);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -149,9 +156,8 @@ final class GroupController
         });
 
         $group = Group::findOrFail($id);
-        $userId = $this->authService->currentUserId() ?? 0;
         return new JsonResponse([
-            'data' => ['group' => GroupDetailResource::toArray($group, $userId, $this->principalService, $this->pictureService)],
+            'data' => ['group' => GroupDetailResource::toArray($group, (int) $userId, $this->principalService, $this->pictureService)],
         ]);
     }
 
@@ -264,11 +270,16 @@ final class GroupController
     /**
      * @return array{0: Group, 1: array<string, mixed>, 2: array<string, mixed>|null}|JsonResponse
      */
-    private function resolveGroupUpdate(int $id, Request $request): array|JsonResponse
+    private function resolveGroupUpdate(int $id, int $userId, Request $request): array|JsonResponse
     {
         $group = Group::find($id);
         if ($group === null) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
+        }
+
+        $denied = $this->denyUnwritableGroup($id, $userId);
+        if ($denied !== null) {
+            return $denied;
         }
 
         $changes = $this->resolveGroupUpdateChanges($request);
@@ -277,6 +288,25 @@ final class GroupController
         }
 
         return [$group, $changes[0], $changes[1]];
+    }
+
+    /**
+     * Who may edit the group itself.
+     *
+     * A global admin may edit any group — the admin panel depends on it.
+     * A member may edit it from `admin` upwards. A member below that is
+     * told they may not; a caller who is not a member at all is not told
+     * the group exists.
+     */
+    private function denyUnwritableGroup(int $groupId, int $userId): ?JsonResponse
+    {
+        if ($this->callerCanManageGroup($groupId, $userId, $this->authService)) {
+            return null;
+        }
+
+        return $this->callerCanSeeGroup($groupId, $userId)
+            ? $this->forbidden('FORBIDDEN', 'Only group owners or admins can edit the group.')
+            : $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
     }
 
     /**
@@ -373,15 +403,28 @@ final class GroupController
     {
         $update = [];
         if (array_key_exists('name', $body)) {
-            $name = trim((string) $body['name']);
+            if (!is_string($body['name'])) {
+                return $this->unprocessable('VALIDATION_ERROR', 'name must be a string.');
+            }
+            $name = trim($body['name']);
             if ($name === '') {
                 return $this->unprocessable('VALIDATION_ERROR', 'name cannot be empty.');
             }
             $update['name'] = $name;
         }
         if (array_key_exists('description', $body)) {
-            $description = $body['description'] === null ? null : trim((string) $body['description']);
+            if ($body['description'] !== null && !is_string($body['description'])) {
+                return $this->unprocessable('VALIDATION_ERROR', 'description must be a string.');
+            }
+            $description = $body['description'] === null ? null : trim($body['description']);
             $update['description'] = ($description === '') ? null : $description;
+        }
+        if (array_key_exists('information', $body)) {
+            if ($body['information'] !== null && !is_string($body['information'])) {
+                return $this->unprocessable('VALIDATION_ERROR', 'information must be a string.');
+            }
+            $information = $body['information'] === null ? null : trim($body['information']);
+            $update['information'] = ($information === '') ? null : $information;
         }
 
         $picturePayload = $this->validateProfilePicturePayload($body);

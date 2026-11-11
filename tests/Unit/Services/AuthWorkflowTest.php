@@ -13,7 +13,6 @@ use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
 use Spora\Services\MailerInterface;
 use Spora\Services\RateLimiter;
-use Spora\Services\UserService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Mailer\Exception\TransportException;
@@ -31,7 +30,7 @@ beforeEach(function (): void {
 function makeWorkflow(): array
 {
     $authService = bootAuthLayer();
-    $userService = new UserService();
+    $userService = makeUserService();
     $csrfService = new CsrfTokenService();
     $validator = new AuthValidator();
 
@@ -81,7 +80,7 @@ test('performLogin returns 429 with Retry-After when the login budget is exhaust
 
     $workflow = new AuthWorkflow(
         $authService,
-        new UserService(),
+        makeUserService(),
         new CsrfTokenService(),
         new AuthValidator(),
     );

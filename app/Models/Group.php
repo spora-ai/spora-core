@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property int          $id
  * @property string       $name
  * @property string|null  $description
+ * @property string|null  $information
  * @property int          $created_by_user_id
  * @property \Carbon\Carbon $created_at
  * @property \Carbon\Carbon $updated_at
@@ -32,7 +33,7 @@ final class Group extends Model
     protected $table = 'groups';
 
     /** @var list<string> */
-    protected $fillable = ['name', 'description', 'created_by_user_id'];
+    protected $fillable = ['name', 'description', 'information', 'created_by_user_id'];
 
     public function memberships(): HasMany
     {

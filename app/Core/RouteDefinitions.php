@@ -18,6 +18,7 @@ use Spora\Http\ConfigController;
 use Spora\Http\GlobalSettingsController;
 use Spora\Http\GroupController;
 use Spora\Http\GroupLlmConfigsController;
+use Spora\Http\GroupLocationController;
 use Spora\Http\GroupMemberController;
 use Spora\Http\GroupPictureController;
 use Spora\Http\GroupPreferencesController;
@@ -95,6 +96,8 @@ final class RouteDefinitions
     public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID = self::ROUTE_GROUPS_ID_LLM_CONFIGS . '/{cid}';
     public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID_SET_DEFAULT = self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID . '/set-default';
     public const ROUTE_GROUPS_ID_PICTURE_IMAGE = self::ROUTE_GROUPS_ID . '/picture/image';
+    public const ROUTE_GROUPS_ID_LOCATIONS = self::ROUTE_GROUPS_ID . '/locations';
+    public const ROUTE_GROUPS_ID_LOCATIONS_LID = self::ROUTE_GROUPS_ID_LOCATIONS . '/{locationId}';
 
     public const ROUTE_NOTIFICATIONS_SUBSCRIPTIONS = '/api/v1/notifications/subscriptions';
 
@@ -224,7 +227,10 @@ final class RouteDefinitions
         $r->addRoute('POST', self::ROUTE_GROUPS, [GroupController::class, 'store'], $createMiddleware);
         $r->addRoute('GET', self::ROUTE_GROUPS, [GroupController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_GROUPS_ID, [GroupController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PATCH', self::ROUTE_GROUPS_ID, [GroupController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        // PATCH is gated by the controller, not by AdminMiddleware: a
+        // group's owner and admins may edit it, and a global admin may
+        // edit any group.
+        $r->addRoute('PATCH', self::ROUTE_GROUPS_ID, [GroupController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         // DELETE is gated by `GroupService::deleteGroup` (admin OR group owner),
         // not by AdminMiddleware, so the group owner can clear their own group.
         $r->addRoute('DELETE', self::ROUTE_GROUPS_ID, [GroupController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
@@ -235,10 +241,10 @@ final class RouteDefinitions
         $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_MEMBERS_UID, [GroupMemberController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // Group settings pages (Overview / Agents / Tools / LLM Drivers / Preferences).
-        // All routes use AuthMiddleware + CsrfMiddleware; the per-action
-        // `callerCanManageGroup()` does the write gate (owner / admin / global admin),
-        // and `callerCanSeeGroup()` does the read gate (member / owner / admin / global admin).
-        // Non-members receive 404 (existence-hiding, not 403).
+        // All routes use AuthMiddleware + CsrfMiddleware; the read gate is
+        // `callerCanSeeGroup()` — membership only, so a non-member receives
+        // 404 (existence-hiding, not 403) — and the write gate is
+        // `callerCanManageGroup()` (owner / admin).
         $r->addRoute('GET', self::ROUTE_GROUPS_ID_AGENTS, [GroupController::class, 'agents'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', self::ROUTE_GROUPS_ID_PREFERENCES, [GroupPreferencesController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
@@ -247,6 +253,14 @@ final class RouteDefinitions
         $r->addRoute('GET', self::ROUTE_GROUPS_ID_TOOLS, [GroupToolsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', self::ROUTE_GROUPS_ID_TOOLS_CLASS, [GroupToolsController::class, 'upsert'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_TOOLS_CLASS, [GroupToolsController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Group locations — the group's own saved addresses. Read is
+        // member-level, write is owner / admin (the gate is
+        // `callerCanManageGroup()` in the controller).
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID_LOCATIONS, [GroupLocationController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_GROUPS_ID_LOCATIONS, [GroupLocationController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', self::ROUTE_GROUPS_ID_LOCATIONS_LID, [GroupLocationController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_LOCATIONS_LID, [GroupLocationController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', self::ROUTE_GROUPS_ID_LLM_CONFIGS, [GroupLlmConfigsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', self::ROUTE_GROUPS_ID_LLM_CONFIGS, [GroupLlmConfigsController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);

@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Delight\Auth\Role;
 use Spora\Auth\AuthService;
 use Spora\Http\UserController;
-use Spora\Services\UserService;
 
 /**
  * Build a UserController with real services backed by the test database.
@@ -13,7 +12,7 @@ use Spora\Services\UserService;
 function makeUserController(): array
 {
     $authService = bootAuthLayer();
-    $userService = new UserService();
+    $userService = makeUserService();
     $controller  = new UserController($authService, $userService);
 
     return [$controller, $authService, $userService];

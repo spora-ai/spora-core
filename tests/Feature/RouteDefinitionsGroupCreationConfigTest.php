@@ -77,12 +77,16 @@ describe('POST /api/v1/groups — allow_group_creation config flag', function ()
         expect($middleware)->not->toContain(Spora\Http\Middleware\AdminMiddleware::class);
     });
 
-    it('keeps PATCH on AdminMiddleware regardless of the flag', function (): void {
+    it('keeps PATCH off AdminMiddleware regardless of the flag (the gate moves to the controller)', function (): void {
         foreach ([true, false] as $value) {
             $routes = routeRegCollectRoutes(new Config(['SPORA_ALLOW_GROUP_CREATION' => $value]));
 
             $patch = routeRegMiddleware($routes, 'PATCH', '/api/v1/groups/{id}');
-            expect($patch)->toContain(Spora\Http\Middleware\AdminMiddleware::class);
+            expect($patch)->toContain(Spora\Http\Middleware\AuthMiddleware::class);
+            expect($patch)->toContain(Spora\Http\Middleware\CsrfMiddleware::class);
+            // The group owner and admins may edit the group, so the route
+            // cannot be admin-gated; `GroupController::update()` decides.
+            expect($patch)->not->toContain(Spora\Http\Middleware\AdminMiddleware::class);
         }
     });
 

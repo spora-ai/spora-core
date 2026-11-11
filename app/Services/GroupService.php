@@ -82,13 +82,13 @@ final class GroupService
     }
 
     /**
-     * Update a group's name and/or description.
+     * Update a group's name, description and/or information block.
      *
-     * The changes are a map rather than two nullable arguments, because
+     * The changes are a map rather than three nullable arguments, because
      * "not mentioned" and "set to nothing" are different edits: a caller
      * that sends only `name` must not clear the description.
      *
-     * @param array{name?: string, description?: ?string} $changes
+     * @param array{name?: string, description?: ?string, information?: ?string} $changes
      */
     public function updateGroup(int $groupId, array $changes): Group
     {
@@ -100,6 +100,10 @@ final class GroupService
 
         if (array_key_exists('description', $changes)) {
             $updates['description'] = $changes['description'];
+        }
+
+        if (array_key_exists('information', $changes)) {
+            $updates['information'] = $changes['information'];
         }
 
         if ($updates !== []) {

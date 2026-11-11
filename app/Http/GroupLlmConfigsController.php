@@ -31,7 +31,7 @@ use Symfony\Component\HttpFoundation\Response;
  *   POST   /api/v1/groups/{id}/llm-configs/{cid}/set-default
  *
  * Authorisation: read uses `callerCanSeeGroup()` (members can list);
- * write uses `callerCanManageGroup()` (owner / admin / global admin).
+ * write uses `callerCanManageGroup()` (owner / admin).
  * Non-members receive 404 (existence-hiding, not 403).
  *
  * The set-default action is per-principal: when a group config is

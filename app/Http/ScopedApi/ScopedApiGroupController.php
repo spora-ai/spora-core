@@ -122,7 +122,8 @@ final class ScopedApiGroupController
     #[OA\RequestBody(content: new OA\JsonContent(
         properties: [
             new OA\Property(property: 'name', type: 'string'),
-            new OA\Property(property: 'description', type: 'string'),
+            new OA\Property(property: 'description', type: 'string', nullable: true),
+            new OA\Property(property: 'information', type: 'string', nullable: true),
         ],
     ))]
     #[OA\Response(response: 200, description: 'The group was updated.')]
@@ -224,15 +225,19 @@ final class ScopedApiGroupController
      * "set to nothing" are different edits.
      *
      * @param array<string, mixed> $body
-     * @return array{name?: string, description?: ?string}|JsonResponse
+     * @return array{name?: string, description?: ?string, information?: ?string}|JsonResponse
      */
     private function groupChanges(array $body): array|JsonResponse
     {
         $changes = [];
 
         if (array_key_exists('name', $body)) {
-            $name = trim((string) $body['name']);
+            $name = $this->stringField($body, 'name');
+            if ($name instanceof JsonResponse) {
+                return $name;
+            }
 
+            $name = trim($name);
             if ($name === '') {
                 return $this->unprocessable('VALIDATION_ERROR', 'name cannot be empty.');
             }
@@ -241,11 +246,64 @@ final class ScopedApiGroupController
         }
 
         if (array_key_exists('description', $body)) {
-            $description = $body['description'] === null ? null : trim((string) $body['description']);
+            $description = $this->nullableStringField($body, 'description');
+            if ($description instanceof JsonResponse) {
+                return $description;
+            }
+
             $changes['description'] = $description === '' ? null : $description;
         }
 
+        if (array_key_exists('information', $body)) {
+            $information = $this->nullableStringField($body, 'information');
+            if ($information instanceof JsonResponse) {
+                return $information;
+            }
+
+            $changes['information'] = $information === '' ? null : $information;
+        }
+
         return $changes;
+    }
+
+    /**
+     * A field the payload names as a string, or the 422 that says it is not.
+     *
+     * A cast would turn an array into the string "Array" and a number into
+     * its digits, and the group row would carry it.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function stringField(array $body, string $field): string|JsonResponse
+    {
+        $value = $body[$field];
+
+        if (!is_string($value)) {
+            return $this->unprocessable('VALIDATION_ERROR', $field . ' must be a string.');
+        }
+
+        return $value;
+    }
+
+    /**
+     * A field the payload names as a string or as null — the two shapes
+     * that clear it.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function nullableStringField(array $body, string $field): string|JsonResponse|null
+    {
+        $value = $body[$field];
+
+        if ($value === null) {
+            return null;
+        }
+
+        if (!is_string($value)) {
+            return $this->unprocessable('VALIDATION_ERROR', $field . ' must be a string.');
+        }
+
+        return trim($value);
     }
 
     /**

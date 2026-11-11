@@ -582,7 +582,7 @@ it('llmDefinitions includes all expected entries', function (): void {
     expect($def)->toHaveKey('tool_classes');
     expect($def['tool_classes'])->toContain(TimeTool::class);
     expect($def['tool_classes'])->toContain(CalculatorTool::class);
-    expect($def['tool_classes'])->toContain(Spora\Tools\UserInfoTool::class);
+    expect($def['tool_classes'])->toContain(Spora\Tools\PrincipalInfoTool::class);
 
     expect($def)->toHaveKey(Spora\Services\LLMConfigService::class);
     expect($def)->toHaveKey(Spora\Services\LLMConfigServiceInterface::class);
@@ -732,7 +732,7 @@ it('toolDefinitions includes all tools and tool_instances', function (): void {
     expect($def)->toHaveKey(Spora\Services\ToolCallSerializer::class);
     expect($def)->toHaveKey(TimeTool::class);
     expect($def)->toHaveKey(CalculatorTool::class);
-    expect($def)->toHaveKey(Spora\Tools\UserInfoTool::class);
+    expect($def)->toHaveKey(Spora\Tools\PrincipalInfoTool::class);
 });
 
 it('MediaTool is wired into the container (tool_classes + factory + resolvable instance)', function (): void {

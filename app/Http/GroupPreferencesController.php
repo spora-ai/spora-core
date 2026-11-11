@@ -21,8 +21,8 @@ use Symfony\Component\HttpFoundation\Response;
  * call creates, subsequent calls update in place.
  *
  * Authorisation: read uses `callerCanSeeGroup()` (members can read);
- * write uses `callerCanManageGroup()` (owner / admin / global admin
- * only). Non-members receive a 404 so group ids stay non-probeable.
+ * write uses `callerCanManageGroup()` (owner / admin only).
+ * Non-members receive a 404 so group ids stay non-probeable.
  *
  * Endpoints:
  *   GET  /api/v1/groups/{id}/preferences

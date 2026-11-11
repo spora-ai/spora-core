@@ -67,6 +67,7 @@ use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\GlobalSettingsController;
 use Spora\Http\GroupController;
 use Spora\Http\GroupLlmConfigsController;
+use Spora\Http\GroupLocationController;
 use Spora\Http\GroupMemberController;
 use Spora\Http\GroupPictureController;
 use Spora\Http\GroupPreferencesController;
@@ -180,6 +181,7 @@ use Spora\Services\NotificationServiceInterface;
 use Spora\Services\PluginCatalogService;
 use Spora\Services\PluginMetadataExtractor;
 use Spora\Services\PluginsService;
+use Spora\Services\PrincipalLocationService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ProfilePictures\GroupPictureService;
@@ -224,6 +226,7 @@ use Spora\Tools\MediaDerivativeHandler;
 use Spora\Tools\MediaFolderHandler;
 use Spora\Tools\MediaSourceReader;
 use Spora\Tools\MediaTool;
+use Spora\Tools\PrincipalInfoTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\ScheduleTool;
 use Spora\Tools\SharedSettingsResolver;
@@ -231,7 +234,6 @@ use Spora\Tools\SkillTool;
 use Spora\Tools\SubAgentTool;
 use Spora\Tools\TimeTool;
 use Spora\Tools\TodoTool;
-use Spora\Tools\UserInfoTool;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\Process\Process;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -452,6 +454,8 @@ final class ContainerDefinitions
             },
 
             PrincipalResolver::class => static fn(): PrincipalResolver => new PrincipalResolver(),
+
+            PrincipalLocationService::class => static fn(): PrincipalLocationService => new PrincipalLocationService(),
 
             PrincipalService::class => static function (ContainerInterface $c): PrincipalService {
                 return new PrincipalService(
@@ -818,7 +822,7 @@ final class ContainerDefinitions
                 TimeTool::class,
                 CalculatorTool::class,
                 ReadUrlTool::class,
-                UserInfoTool::class,
+                PrincipalInfoTool::class,
                 SubAgentTool::class,
                 AgentTool::class,
                 SkillTool::class,
@@ -911,7 +915,11 @@ final class ContainerDefinitions
             },
 
             UserServiceInterface::class => static function (ContainerInterface $c): UserServiceInterface {
-                return new UserService($c->get(UserPictureService::class));
+                return new UserService(
+                    $c->get(PrincipalService::class),
+                    $c->get(UserPictureService::class),
+                    $c->get(PrincipalLocationService::class),
+                );
             },
         ];
     }
@@ -1085,6 +1093,14 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     $c->get(PrincipalService::class),
                     $c->get(ToolConfigService::class),
+                );
+            },
+
+            GroupLocationController::class => static function (ContainerInterface $c): GroupLocationController {
+                return new GroupLocationController(
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(PrincipalLocationService::class),
                 );
             },
 
@@ -1697,7 +1713,7 @@ final class ContainerDefinitions
                 );
             },
 
-            UserInfoTool::class => static fn(): UserInfoTool => new UserInfoTool(),
+            PrincipalInfoTool::class => static fn(): PrincipalInfoTool => new PrincipalInfoTool(),
 
             SubAgentTool::class => static function (ContainerInterface $c): SubAgentTool {
                 return new SubAgentTool(

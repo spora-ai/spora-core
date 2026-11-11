@@ -357,16 +357,22 @@ final class AgentTemplateValidator
             return '';
         }
 
-        if (isset($seenClasses[$toolClass])) {
+        // The class the importer will apply, which for a renamed tool is not
+        // the one the template names. Two entries that resolve to the same
+        // class are two entries for one tool: the later one would overwrite
+        // the earlier one's state, so the duplicate is refused here.
+        $resolved = RenamedToolClasses::resolve($toolClass);
+
+        if (isset($seenClasses[$resolved])) {
             $result->addError([
                 'code'     => 'TOOL_CLASS_DUPLICATE',
                 'severity' => 'error',
-                'message'  => sprintf("Duplicate tool_class '%s'.", $toolClass),
+                'message'  => sprintf("Duplicate tool_class '%s'.", $resolved),
                 'path'     => "{$path}.tool_class",
             ]);
         }
-        $seenClasses[$toolClass] = true;
-        return $toolClass;
+        $seenClasses[$resolved] = true;
+        return $resolved;
     }
 
     /**
