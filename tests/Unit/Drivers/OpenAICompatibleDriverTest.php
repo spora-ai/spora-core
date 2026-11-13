@@ -65,7 +65,7 @@ function openAITestTools(): array
  *
  * @return array<string, mixed>
  */
-function captureOpenAIBody(string $model, LLMRequest $request): array
+function captureOpenAIBody(string $model, LLMRequest $request, array $effortLevels = []): array
 {
     $captured = [];
 
@@ -84,6 +84,7 @@ function captureOpenAIBody(string $model, LLMRequest $request): array
         model: $model,
         baseUrl: 'https://api.openai.com/v1',
         httpClient: $client,
+        effortLevels: $effortLevels,
     ))->complete($request);
 
     return $captured;
@@ -415,6 +416,15 @@ test('an explicit effort level is sent unchanged next to the tools', function ()
     $body = captureOpenAIBody('gpt-5.4', makeToolRequest(openAITestTools(), 'medium'));
 
     expect($body['reasoning_effort'])->toBe('medium');
+});
+
+test('the none escape hatch survives a level list that does not name none', function (): void {
+    // The escape hatch is what the API requires, not a depth the operator
+    // chose. A configuration naming its own levels without `none` would
+    // otherwise leave the request with nothing the provider accepts.
+    $body = captureOpenAIBody('gpt-5.5', makeToolRequest(openAITestTools()), ['low', 'medium', 'high']);
+
+    expect($body['reasoning_effort'])->toBe('none');
 });
 
 test('no tools and no effort send no reasoning_effort', function (): void {

@@ -77,7 +77,7 @@
     "Clear the todo list": "Clear the todo list",
     "Client housekeeping interval": "Client housekeeping interval",
     "Client — browser SharedWorker, no daemon": "Client — browser SharedWorker, no daemon",
-    "Comma-separated list of the reasoning-effort levels this endpoint accepts. Empty = the model's own set. A level the endpoint does not take is refused.": "Comma-separated list of the reasoning-effort levels this endpoint accepts. Empty = the model's own set. A level the endpoint does not take is refused.",
+    "Comma-separated list of the reasoning-effort levels this endpoint accepts. Empty = the driver's own set. A level the endpoint does not take is refused.": "Comma-separated list of the reasoning-effort levels this endpoint accepts. Empty = the driver's own set. A level the endpoint does not take is refused.",
     "Composer binary": "Composer binary",
     "Configuration not found or does not belong to the requested principal.": "Configuration not found or does not belong to the requested principal.",
     "Configuration not found.": "Configuration not found.",

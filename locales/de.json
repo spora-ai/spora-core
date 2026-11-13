@@ -82,7 +82,7 @@
   "Clear the todo list": "Die Todo-Liste leeren",
   "Client housekeeping interval": "Client-Housekeeping-Intervall",
   "Client — browser SharedWorker, no daemon": "Client — SharedWorker im Browser, kein Daemon",
-  "Comma-separated list of the reasoning-effort levels this endpoint accepts. Empty = the model's own set. A level the endpoint does not take is refused.": "Kommagetrennte Liste der Denkaufwand-Stufen, die dieser Endpunkt akzeptiert. Leer = der eigene Satz des Modells. Eine Stufe, die der Endpunkt nicht annimmt, wird abgelehnt.",
+  "Comma-separated list of the reasoning-effort levels this endpoint accepts. Empty = the driver's own set. A level the endpoint does not take is refused.": "Kommagetrennte Liste der Denkaufwand-Stufen, die dieser Endpunkt akzeptiert. Leer = der eigene Satz des Treibers. Eine Stufe, die der Endpunkt nicht annimmt, wird abgelehnt.",
   "Composer binary": "Composer-Binärdatei",
   "Configuration not found or does not belong to the requested principal.": "Konfiguration nicht gefunden oder sie gehört nicht zum angeforderten Principal.",
   "Configuration not found.": "Konfiguration nicht gefunden.",
