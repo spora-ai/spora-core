@@ -16,22 +16,16 @@ use Spora\Services\PrincipalService;
 use Spora\Services\UserPictures\UserPictureService;
 use Spora\Services\UserService;
 
-/**
- * The uploaded picture has to reach the SPA in every payload the SPA
- * hydrates its session from.
- *
- * The upload patches the store optimistically, so the picture looks right
- * until the next page load: the SPA restores the session from `/auth/me`,
- * and a payload that leaves the picture out replaces the store's copy with
- * one that has none — the avatar falls back to initials and the account
- * page asks for a picture the user already uploaded.
- */
 const USER_PICTURE_SESSION_EMAIL = 'pic@example.com';
 const USER_PICTURE_SESSION_PASSWORD = 'Password1!';
 
 // 1x1 valid PNG (smallest possible image — 67 bytes)
 const USER_PICTURE_SESSION_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
+/**
+ * The picture has to reach the SPA in every payload it hydrates its
+ * session from — the login response and the session restore alike.
+ */
 beforeEach(function (): void {
     $this->storage = sys_get_temp_dir() . '/spora-user-picture-session-' . bin2hex(random_bytes(4));
     mkdir($this->storage . '/user-pictures', 0755, recursive: true);
