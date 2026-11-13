@@ -28,16 +28,12 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 #[ToolSetting(key: 'effort_levels', label: 'Effort levels', type: 'textarea', default: '', description: 'Comma-separated list of the reasoning-effort levels this endpoint accepts. Empty = the driver\'s own set. A level the endpoint does not take is refused.')]
 #[ToolSetting(key: 'supports_effort', label: 'Supports reasoning effort', type: 'toggle', default: true, description: 'Turn this off for an endpoint with no reasoning-effort parameter at all — the agent then has no effort picker and any effort sent is refused.')]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
-final class OpenAICompatibleDriver extends AbstractCompatibleDriver
+final class OpenAICompatibleDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface
 {
     private const PROVIDER_KEY = 'openai_compatible';
 
     private readonly ChatCompletionsReasoning $reasoning;
 
-    /**
-     * @param list<string> $effortLevels The levels the configuration names.
-     *        Empty means the model's own set applies.
-     */
     public function __construct(
         string              $apiKey,
         string              $model,
@@ -45,9 +41,7 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
         HttpClientInterface $httpClient,
         ?LoggerInterface    $logger = null,
         ?int                $timeout = null,
-        ?bool               $supportsImageInput = null,
-        array               $effortLevels = [],
-        ?bool               $supportsEffort = null,
+        ?OpenAIDriverOptions $options = null,
     ) {
         parent::__construct(
             $apiKey,
@@ -56,12 +50,42 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
             $httpClient,
             $logger,
             $timeout,
-            $supportsImageInput,
-            $effortLevels,
-            $supportsEffort,
+            $options?->supportsImageInput,
+            $options !== null ? $options->configuredEffortLevels : [],
+            $options?->supportsEffort,
         );
 
         $this->reasoning = new ChatCompletionsReasoning($model);
+    }
+
+    /**
+     * @param array<string, mixed> $args
+     * @param array<string, mixed> $settings
+     */
+    public static function makeFromSettings(array $args, array $settings): LLMDriverInterface
+    {
+        /** @var HttpClientInterface $httpClient */
+        $httpClient = $args['httpClient'];
+
+        $logger = $args['logger'] ?? null;
+        $supportsImageInput = $args['supportsImageInput'] ?? null;
+        $effortLevels = $args['effortLevels'] ?? [];
+
+        return new self(
+            apiKey: (string) ($args['apiKey'] ?? ''),
+            model: (string) ($args['model'] ?? ''),
+            baseUrl: (string) ($args['baseUrl'] ?? ''),
+            httpClient: $httpClient,
+            logger: $logger instanceof LoggerInterface ? $logger : null,
+            timeout: isset($args['timeout']) ? (int) $args['timeout'] : null,
+            options: new OpenAIDriverOptions(
+                supportsImageInput: is_bool($supportsImageInput) ? $supportsImageInput : null,
+                configuredEffortLevels: is_array($effortLevels) ? array_values($effortLevels) : [],
+                supportsEffort: isset($args['supportsEffort']) && is_bool($args['supportsEffort'])
+                    ? $args['supportsEffort']
+                    : null,
+            ),
+        );
     }
 
     public function getProviderName(): string
