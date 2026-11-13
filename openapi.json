@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-27-g01c32f61"
+        "version": "0.33.0-1-g7b5e5ac7"
     },
     "servers": [
         {
@@ -2178,19 +2178,9 @@
                                         }
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "description": "The reasoning effort for this message. Omit it and the agent's default applies, then the LLM configuration's default, then the model default; an empty string asks for the model default. A level the agent's LLM configuration does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED. The levels are listed by GET /api/v1/agents/{id}/effort, GET /api/v1/agent-api/effort, GET /api/v1/group-api/agents/{agentId}/effort and GET /api/v1/global-api/agents/{agentId}/effort.",
                                         "type": "string",
-                                        "nullable": true,
-                                        "enum": [
-                                            "none",
-                                            "minimal",
-                                            "low",
-                                            "medium",
-                                            "high",
-                                            "xhigh",
-                                            "max",
-                                            ""
-                                        ]
+                                        "nullable": true
                                     }
                                 }
                             }
@@ -2442,19 +2432,9 @@
                                         }
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "description": "The reasoning effort for this message. Omit it and the agent's default applies, then the LLM configuration's default, then the model default; an empty string asks for the model default. A level the agent's LLM configuration does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED. The levels are listed by GET /api/v1/agents/{id}/effort, GET /api/v1/agent-api/effort, GET /api/v1/group-api/agents/{agentId}/effort and GET /api/v1/global-api/agents/{agentId}/effort.",
                                         "type": "string",
-                                        "nullable": true,
-                                        "enum": [
-                                            "none",
-                                            "minimal",
-                                            "low",
-                                            "medium",
-                                            "high",
-                                            "xhigh",
-                                            "max",
-                                            ""
-                                        ]
+                                        "nullable": true
                                     }
                                 }
                             }
@@ -3854,19 +3834,9 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "description": "The reasoning effort for this message. Omit it and the agent's default applies, then the LLM configuration's default, then the model default; an empty string asks for the model default. A level the agent's LLM configuration does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED. The levels are listed by GET /api/v1/agents/{id}/effort, GET /api/v1/agent-api/effort, GET /api/v1/group-api/agents/{agentId}/effort and GET /api/v1/global-api/agents/{agentId}/effort.",
                                         "type": "string",
-                                        "nullable": true,
-                                        "enum": [
-                                            "none",
-                                            "minimal",
-                                            "low",
-                                            "medium",
-                                            "high",
-                                            "xhigh",
-                                            "max",
-                                            ""
-                                        ]
+                                        "nullable": true
                                     }
                                 }
                             }
@@ -3999,19 +3969,9 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "description": "The reasoning effort for this message. Omit it and the agent's default applies, then the LLM configuration's default, then the model default; an empty string asks for the model default. A level the agent's LLM configuration does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED. The levels are listed by GET /api/v1/agents/{id}/effort, GET /api/v1/agent-api/effort, GET /api/v1/group-api/agents/{agentId}/effort and GET /api/v1/global-api/agents/{agentId}/effort.",
                                         "type": "string",
-                                        "nullable": true,
-                                        "enum": [
-                                            "none",
-                                            "minimal",
-                                            "low",
-                                            "medium",
-                                            "high",
-                                            "xhigh",
-                                            "max",
-                                            ""
-                                        ]
+                                        "nullable": true
                                     }
                                 }
                             }
@@ -4362,6 +4322,11 @@
                                         "description": "Existing chat only.",
                                         "type": "integer",
                                         "nullable": true
+                                    },
+                                    "effort": {
+                                        "description": "The reasoning effort for this message. Omit it and the agent's default applies, then the LLM configuration's default, then the model default; an empty string asks for the model default. A level the agent's LLM configuration does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED. The levels are listed by GET /api/v1/agents/{id}/effort, GET /api/v1/agent-api/effort, GET /api/v1/group-api/agents/{agentId}/effort and GET /api/v1/global-api/agents/{agentId}/effort.",
+                                        "type": "string",
+                                        "nullable": true
                                     }
                                 }
                             }
@@ -4469,6 +4434,25 @@
                     },
                     "404": {
                         "description": "No such asset, or not this agent's to read."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/effort": {
+            "get": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "The reasoning-effort levels this agent's LLM configuration offers",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "JSON envelope: `{data: {supported: bool, levels: [{value, label}], default: string|null}}`."
                     }
                 },
                 "security": [
@@ -4885,6 +4869,37 @@
                 ]
             }
         },
+        "/api/v1/group-api/agents/{agentId}/effort": {
+            "get": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "The reasoning-effort levels an agent's LLM configuration offers",
+                "parameters": [
+                    {
+                        "name": "agentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "JSON envelope: `{data: {supported: bool, levels: [{value, label}], default: string|null}}`."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/group-api/chats": {
             "get": {
                 "tags": [
@@ -4978,19 +4993,9 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "description": "The reasoning effort for this message. Omit it and the agent's default applies, then the LLM configuration's default, then the model default; an empty string asks for the model default. A level the agent's LLM configuration does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED. The levels are listed by GET /api/v1/agents/{id}/effort, GET /api/v1/agent-api/effort, GET /api/v1/group-api/agents/{agentId}/effort and GET /api/v1/global-api/agents/{agentId}/effort.",
                                         "type": "string",
-                                        "nullable": true,
-                                        "enum": [
-                                            "none",
-                                            "minimal",
-                                            "low",
-                                            "medium",
-                                            "high",
-                                            "xhigh",
-                                            "max",
-                                            ""
-                                        ]
+                                        "nullable": true
                                     }
                                 }
                             }
@@ -5121,19 +5126,9 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "description": "The reasoning effort for this message. Omit it and the agent's default applies, then the LLM configuration's default, then the model default; an empty string asks for the model default. A level the agent's LLM configuration does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED. The levels are listed by GET /api/v1/agents/{id}/effort, GET /api/v1/agent-api/effort, GET /api/v1/group-api/agents/{agentId}/effort and GET /api/v1/global-api/agents/{agentId}/effort.",
                                         "type": "string",
-                                        "nullable": true,
-                                        "enum": [
-                                            "none",
-                                            "minimal",
-                                            "low",
-                                            "medium",
-                                            "high",
-                                            "xhigh",
-                                            "max",
-                                            ""
-                                        ]
+                                        "nullable": true
                                     }
                                 }
                             }
@@ -5650,6 +5645,37 @@
                 ]
             }
         },
+        "/api/v1/global-api/agents/{agentId}/effort": {
+            "get": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "The reasoning-effort levels an agent's LLM configuration offers",
+                "parameters": [
+                    {
+                        "name": "agentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "JSON envelope: `{data: {supported: bool, levels: [{value, label}], default: string|null}}`."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/global-api/chats": {
             "get": {
                 "tags": [
@@ -5743,19 +5769,9 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "description": "The reasoning effort for this message. Omit it and the agent's default applies, then the LLM configuration's default, then the model default; an empty string asks for the model default. A level the agent's LLM configuration does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED. The levels are listed by GET /api/v1/agents/{id}/effort, GET /api/v1/agent-api/effort, GET /api/v1/group-api/agents/{agentId}/effort and GET /api/v1/global-api/agents/{agentId}/effort.",
                                         "type": "string",
-                                        "nullable": true,
-                                        "enum": [
-                                            "none",
-                                            "minimal",
-                                            "low",
-                                            "medium",
-                                            "high",
-                                            "xhigh",
-                                            "max",
-                                            ""
-                                        ]
+                                        "nullable": true
                                     }
                                 }
                             }
@@ -5886,19 +5902,9 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
+                                        "description": "The reasoning effort for this message. Omit it and the agent's default applies, then the LLM configuration's default, then the model default; an empty string asks for the model default. A level the agent's LLM configuration does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED. The levels are listed by GET /api/v1/agents/{id}/effort, GET /api/v1/agent-api/effort, GET /api/v1/group-api/agents/{agentId}/effort and GET /api/v1/global-api/agents/{agentId}/effort.",
                                         "type": "string",
-                                        "nullable": true,
-                                        "enum": [
-                                            "none",
-                                            "minimal",
-                                            "low",
-                                            "medium",
-                                            "high",
-                                            "xhigh",
-                                            "max",
-                                            ""
-                                        ]
+                                        "nullable": true
                                     }
                                 }
                             }

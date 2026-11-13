@@ -48,6 +48,7 @@ use Spora\Events\EventDispatcherFactory;
 use Spora\Extensions\AppLoader;
 use Spora\Http\AgentApi\AgentApiChatActionController;
 use Spora\Http\AgentApi\AgentApiChatController;
+use Spora\Http\AgentApi\AgentApiEffortController;
 use Spora\Http\AgentApi\AgentApiKeyController;
 use Spora\Http\AgentApi\AgentApiMediaController;
 use Spora\Http\AgentApi\AgentApiSpeechController;
@@ -64,6 +65,7 @@ use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
+use Spora\Http\EffortProjection;
 use Spora\Http\GlobalSettingsController;
 use Spora\Http\GroupController;
 use Spora\Http\GroupLlmConfigsController;
@@ -765,6 +767,12 @@ final class ContainerDefinitions
                 );
             },
 
+            // The one payload every effort endpoint answers with, so the
+            // admin, agent and scoped surfaces report the same thing.
+            EffortProjection::class => static function (ContainerInterface $c): EffortProjection {
+                return new EffortProjection($c->get(EffortService::class));
+            },
+
             // Speech-to-text providers — core ships its own
             // `OpenAiCompatibleTranscriber` for the OpenAI-multipart
             // family (Mistral Voxtral, OpenAI Whisper, Groq Whisper,
@@ -1146,7 +1154,7 @@ final class ContainerDefinitions
                 return new AgentEffortController(
                     $c->get(AuthService::class),
                     $c->get(AgentServiceInterface::class),
-                    $c->get(EffortService::class),
+                    $c->get(EffortProjection::class),
                 );
             },
 
@@ -1608,6 +1616,13 @@ final class ContainerDefinitions
                     $c->get(ApiKeyCallbackRecorder::class),
                     $c->get(SpeechTranscriber::class),
                     $c->get(SsrfGuard::class),
+                    $c->get(EffortService::class),
+                );
+            },
+
+            AgentApiEffortController::class => static function (ContainerInterface $c): AgentApiEffortController {
+                return new AgentApiEffortController(
+                    $c->get(EffortProjection::class),
                 );
             },
 
