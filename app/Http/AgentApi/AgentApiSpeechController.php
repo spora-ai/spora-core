@@ -179,10 +179,14 @@ final class AgentApiSpeechController
             return $body;
         }
 
+        // The refusal from the catch is a JsonResponse like the ones
+        // prepareSend returns, so one variable and one guard answer both —
+        // a second guard would put the endpoint over the S1142 three-return
+        // ceiling.
         try {
             $prepared = $this->prepareSend($body, $context);
         } catch (EffortValidationException $e) {
-            return TaskEffortRequestValidator::errorResponse($e);
+            $prepared = TaskEffortRequestValidator::errorResponse($e);
         }
 
         if ($prepared instanceof JsonResponse) {
