@@ -18,7 +18,7 @@ use Spora\Services\ScheduledRunService;
 
 function makePromptTemplateServiceForExceptions(): PromptTemplateService
 {
-    return new PromptTemplateService();
+    return new PromptTemplateService(makeEffortService());
 }
 
 /**
@@ -47,7 +47,7 @@ function makeScheduledRunServiceForExceptions(): ScheduledRunService
     $mercure      = Mockery::mock(Spora\Services\MercurePublisherInterface::class);
     $mercure->allows('publish')->andReturn(true);
 
-    return new ScheduledRunService($orchestrator, $mercure);
+    return new ScheduledRunService($orchestrator, $mercure, makeEffortService());
 }
 
 describe('Service exceptions', function (): void {

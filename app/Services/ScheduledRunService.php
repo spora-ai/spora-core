@@ -12,6 +12,7 @@ use DateTimeZone;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\TaskStartOptions;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
@@ -46,6 +47,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
     public function __construct(
         OrchestratorInterface|Closure $orchestrator,
         private readonly MercurePublisherInterface $mercure,
+        private readonly EffortService $effortService,
         ?PrincipalService $principalService = null,
         ?PrincipalResolver $principalResolver = null,
     ) {
@@ -120,6 +122,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 : null,
             'timezone'          => trim((string) ($data['timezone'] ?? 'UTC')),
             'max_steps_override' => isset($data['max_steps_override']) ? (int) $data['max_steps_override'] : null,
+            'effort_override'   => $this->resolveEffort($data['effort_override'] ?? null, $agent),
             'is_active'         => $isActive,
             'last_run_at'       => null,
             'next_run_at'       => $nextRunAt,
@@ -167,11 +170,15 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             return null;
         }
 
-        $allowed = ['template_id', 'raw_prompt', 'cron_expression', 'run_at', 'timezone', 'max_steps_override', 'is_active'];
+        $allowed = ['template_id', 'raw_prompt', 'cron_expression', 'run_at', 'timezone', 'max_steps_override', 'effort_override', 'is_active'];
         $updateData = array_intersect_key($data, array_flip($allowed));
 
         if ($updateData !== []) {
             $this->normalizeUpdateFields($updateData);
+
+            if (array_key_exists('effort_override', $updateData)) {
+                $updateData['effort_override'] = $this->resolveEffort($updateData['effort_override'], $agent);
+            }
 
             // Before anything writes: rescheduling rewrites the queue
             // entries, and a foreign template that fails the check
@@ -228,6 +235,39 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         if (array_key_exists('max_steps_override', $updateData)) {
             $updateData['max_steps_override'] = $updateData['max_steps_override'] !== null ? (int) $updateData['max_steps_override'] : null;
         }
+    }
+
+    /**
+     * The reasoning effort a run stores: null means "inherit", and a level
+     * the agent's driver does not offer is refused.
+     *
+     * An empty string is inherit as well — the column has two states, and
+     * a stored `''` would be a third one nobody reads differently.
+     *
+     * @throws EffortValidationException
+     */
+    private function resolveEffort(mixed $value, Agent $agent): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (!is_string($value)) {
+            throw new EffortValidationException(
+                'effort_override must be a string.',
+                EffortValidationException::CODE_MALFORMED,
+            );
+        }
+
+        $effort = trim($value);
+
+        if ($effort === '') {
+            return null;
+        }
+
+        $this->effortService->assertLevel($effort, $agent);
+
+        return $effort;
     }
 
     /**
@@ -376,6 +416,11 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             $maxSteps = $agent->max_steps;
         }
 
+        // The same precedence the cron tick resolves: the run's own
+        // override wins, the template's effort is the fallback, and null
+        // leaves the choice to the agent's default.
+        $effort = $run->effort_override ?? $template?->effort;
+
         // The trigger is an authenticated action: the task records the caller
         // as its trigger user, so the tools the run executes resolve their
         // authority from that caller rather than from whoever happened to
@@ -385,7 +430,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             $prompt,
             (int) $maxSteps,
             null,
-            new TaskStartOptions(userId: $userId),
+            new TaskStartOptions(userId: $userId, effort: $effort),
         );
 
         $lastRunAt = gmdate(self::DB_TIMESTAMP_FORMAT);
@@ -523,6 +568,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 : null,
             'timezone'          => $run->timezone,
             'max_steps_override' => $run->max_steps_override,
+            'effort_override'   => $run->effort_override,
             'is_active'         => (bool) $run->is_active,
             'last_run_at'       => $run->last_run_at?->toIso8601String(),
             'next_run_at'       => $nextRunAt,

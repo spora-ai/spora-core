@@ -48,7 +48,7 @@ function makeScheduledRunService(?OrchestratorInterface $orchestrator = null, ?M
     });
     $mercure->allows('publishForPrincipal')->andReturn(true);
 
-    return new ScheduledRunService($orchestrator, $mercure);
+    return new ScheduledRunService($orchestrator, $mercure, makeEffortService());
 }
 
 function createScheduledRunUserAgent(): array
@@ -518,7 +518,7 @@ describe('ScheduledRunService::triggerRun', function (): void {
         });
         $mercure->allows('publish')->andReturn(true);
 
-        $service = new ScheduledRunService($orchestrator, $mercure);
+        $service = new ScheduledRunService($orchestrator, $mercure, makeEffortService());
         [$userId, $agentId] = createScheduledRunUserAgent();
 
         $run = ScheduledRun::create([
@@ -556,7 +556,7 @@ describe('ScheduledRunService::triggerRun', function (): void {
         });
         $mercure->allows('publish')->andReturn(true);
 
-        $service = new ScheduledRunService($orchestrator, $mercure);
+        $service = new ScheduledRunService($orchestrator, $mercure, makeEffortService());
         [$userId, $agentId] = createScheduledRunUserAgent();
 
         $run = ScheduledRun::create([

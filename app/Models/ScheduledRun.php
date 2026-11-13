@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property \Carbon\Carbon|null $run_at
  * @property string $timezone
  * @property int|null $max_steps_override
+ * @property string|null $effort_override
  * @property bool $is_active
  * @property \Carbon\Carbon|null $last_run_at
  * @property \Carbon\Carbon|null $next_run_at
@@ -36,6 +37,7 @@ final class ScheduledRun extends Model
         'run_at',
         'timezone',
         'max_steps_override',
+        'effort_override',
         'is_active',
         'last_run_at',
         'next_run_at',
@@ -48,6 +50,7 @@ final class ScheduledRun extends Model
         'last_run_at' => 'datetime',
         'next_run_at' => 'datetime',
         'max_steps_override' => 'integer',
+        'effort_override' => 'string',
     ];
 
     public function agent(): BelongsTo

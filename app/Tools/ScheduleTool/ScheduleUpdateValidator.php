@@ -31,6 +31,7 @@ final class ScheduleUpdateValidator
         'run_at',
         'timezone',
         'max_steps_override',
+        'effort_override',
         'is_active',
     ];
 
@@ -40,6 +41,7 @@ final class ScheduleUpdateValidator
         'prompt_template',
         'variables',
         'max_steps',
+        'effort',
         'is_active',
     ];
 
@@ -120,8 +122,8 @@ final class ScheduleUpdateValidator
     private function normalizeNullLikeStrings(array $raw, string $op): array
     {
         $fields = $op === self::OP_UPDATE_TEMPLATE
-            ? ['max_steps']
-            : ['cron_expression', 'run_at', 'template_id', 'max_steps_override'];
+            ? ['max_steps', 'effort']
+            : ['cron_expression', 'run_at', 'template_id', 'max_steps_override', 'effort_override'];
 
         foreach ($fields as $field) {
             if (!array_key_exists($field, $raw)) {

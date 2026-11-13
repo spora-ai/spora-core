@@ -10,6 +10,7 @@ use DateTimeZone;
 use JsonException;
 use RuntimeException;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Services\Exceptions\PromptTemplateMissingException;
 use Spora\Services\ScheduledRunServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -82,8 +83,9 @@ final class ScheduledRunController
                 ['data' => $result],
                 Response::HTTP_CREATED,
             );
-        } catch (PromptTemplateMissingException $e) {
-            return $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (PromptTemplateMissingException | EffortValidationException $e) {
+            $code = $e instanceof EffortValidationException ? $e->errorCode() : 'VALIDATION_ERROR';
+            return $this->error($code, $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (RuntimeException) {
             return $this->notFound();
         }
@@ -136,8 +138,9 @@ final class ScheduledRunController
 
         try {
             $result = $this->scheduledRunService->updateRun($runId, $agentId, $userId, $body);
-        } catch (PromptTemplateMissingException $e) {
-            return $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (PromptTemplateMissingException | EffortValidationException $e) {
+            $code = $e instanceof EffortValidationException ? $e->errorCode() : 'VALIDATION_ERROR';
+            return $this->error($code, $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         return $result === null

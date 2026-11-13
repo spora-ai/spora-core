@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use RuntimeException;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Services\PromptTemplateServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -71,6 +72,8 @@ final class PromptTemplateController
                 ['data' => $result],
                 Response::HTTP_CREATED,
             );
+        } catch (EffortValidationException $e) {
+            return $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (RuntimeException) {
             return $this->notFound();
         }
@@ -138,7 +141,11 @@ final class PromptTemplateController
             return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
 
-        $result = $this->promptTemplateService->updateTemplate($templateId, $agentId, $userId, $body);
+        try {
+            $result = $this->promptTemplateService->updateTemplate($templateId, $agentId, $userId, $body);
+        } catch (EffortValidationException $e) {
+            return $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         if ($result === null) {
             return $this->notFound();

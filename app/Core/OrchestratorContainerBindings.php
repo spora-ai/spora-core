@@ -40,6 +40,7 @@ use Spora\Search\SearchProviderRegistry;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\DbRateLimiter;
+use Spora\Services\EffortService;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\HousekeepingLock;
 use Spora\Services\LLMConfigPreferences;
@@ -455,7 +456,9 @@ final class OrchestratorContainerBindings
                 );
             },
 
-            PromptTemplateServiceInterface::class => static fn(): PromptTemplateServiceInterface => new PromptTemplateService(),
+            PromptTemplateServiceInterface::class => static function (ContainerInterface $c): PromptTemplateServiceInterface {
+                return new PromptTemplateService($c->get(EffortService::class));
+            },
 
             EmailTemplateLoader::class => static function (ContainerInterface $c): EmailTemplateLoader {
                 return new EmailTemplateLoader($c->get(Paths::class));
@@ -470,6 +473,7 @@ final class OrchestratorContainerBindings
                 return new ScheduledRunService(
                     static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
                     $c->get(MercurePublisherInterface::class),
+                    $c->get(EffortService::class),
                 );
             },
 
