@@ -25,6 +25,7 @@ use Throwable;
  * @property int|null    $llm_driver_config_id
  * @property int|null    $speech_driver_config_id
  * @property int|null    $max_steps
+ * @property string|null $default_effort
  * @property bool $is_active
  * @property bool $allow_followup
  * @property int $retry_after_minutes
@@ -59,6 +60,7 @@ final class Agent extends Model
         'llm_driver_config_id',
         'speech_driver_config_id',
         'max_steps',
+        'default_effort',
         'is_active',
         'allow_followup',
         'retry_after_minutes',
@@ -228,6 +230,7 @@ final class Agent extends Model
     /** @var array<string, int> */
     public const STRING_COLUMN_MAX_LENGTHS = [
         'name' => 100,
+        'default_effort' => 16,
     ];
 
     /** @return array{0: string, 1: string} */

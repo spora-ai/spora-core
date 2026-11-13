@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Spora\Drivers\DriverFactory;
 use Spora\Models\LLMDriverConfiguration;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -38,8 +39,9 @@ final class LlmConfigValidator
         ?LlmConfigSchemaValidator $schemaValidator = null,
         ?PrincipalService $principalService = null,
         ?PrincipalResolver $principalResolver = null,
+        ?DriverFactory $driverFactory = null,
     ) {
-        $this->schemaValidator    = $schemaValidator ?? new LlmConfigSchemaValidator();
+        $this->schemaValidator    = $schemaValidator ?? new LlmConfigSchemaValidator($driverFactory);
         $this->principalService  = $principalService ?? new PrincipalService(new PrincipalResolver());
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
@@ -130,9 +132,11 @@ final class LlmConfigValidator
     {
         $rawSettings = $body['settings'] ?? null;
         $settings = is_array($rawSettings) ? $rawSettings : [];
+        $driverClass = trim((string) ($body['driver_class'] ?? ''));
         $validationError = $this->schemaValidator->validateSettings(
+            $driverClass,
             $settings,
-            $this->schemaValidator->getSchemaForDriver(trim((string) ($body['driver_class'] ?? ''))),
+            $this->schemaValidator->getSchemaForDriver($driverClass),
         );
 
         if ($validationError === null) {
@@ -265,6 +269,13 @@ final class LlmConfigValidator
     }
 
     /**
+     * Validate an update's settings against the stored ones.
+     *
+     * The incoming settings are merged over the stored ones first, so an
+     * update is judged as the configuration it would produce: narrowing
+     * the level list under a saved default is refused rather than
+     * silently dropping the default.
+     *
      * @param array<string, mixed> $body
      */
     public function validateUpdateSettings(array $body, LLMDriverConfiguration $config): ?JsonResponse
@@ -276,7 +287,7 @@ final class LlmConfigValidator
         $schema = $this->schemaValidator->getSchemaForDriver($config->driver_class);
         $existing = $this->service->decodeSettings($config->driver_class, $config->getRawOriginal('settings') ?? '');
         $merged = array_merge($existing, $body['settings']);
-        $validationError = $this->schemaValidator->validateSettings($merged, $schema);
+        $validationError = $this->schemaValidator->validateSettings($config->driver_class, $merged, $schema);
         if ($validationError === null) {
             return null;
         }

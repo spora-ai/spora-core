@@ -45,6 +45,7 @@ final class AgentPatchValidator
         'description'          => self::T_TEXT,
         'system_prompt'        => self::T_PROMPT,
         'max_steps'            => self::T_STEPS,
+        'default_effort'       => self::T_TEXT,
         'allow_followup'       => self::T_BOOL,
         'retry_after_minutes'  => self::T_NON_NEGATIVE,
         'max_retries'          => self::T_NON_NEGATIVE,
@@ -67,6 +68,7 @@ final class AgentPatchValidator
     private const NULLABLE = [
         'description'   => true,
         'system_prompt' => true,
+        'default_effort' => true,
     ];
 
     /**

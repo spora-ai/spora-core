@@ -32,7 +32,9 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', description: 'API key for the OpenAI Responses endpoint. Leave empty for local models.', required: false)]
 #[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.openai.com/v1).', required: false, default: 'https://api.openai.com/v1')]
 #[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. gpt-6-astra, gpt-6.1-sol).', required: false, default: 'gpt-6-astra')]
-#[ToolSetting(key: 'effort', label: 'Effort', type: 'select', default: '', description: 'Default reasoning effort. Empty = the model default (nothing is sent).', options: ['' => 'Model default', 'none' => 'None', 'minimal' => 'Minimal', 'low' => 'Low', 'medium' => 'Medium', 'high' => 'High', 'xhigh' => 'xHigh', 'max' => 'Max'])]
+#[ToolSetting(key: 'effort', label: 'Effort', type: 'text', default: '', description: 'Default reasoning effort. Empty = the model default (nothing is sent). A level this endpoint does not offer is refused.')]
+#[ToolSetting(key: 'effort_levels', label: 'Effort levels', type: 'textarea', default: '', description: 'Comma-separated list of the reasoning-effort levels this endpoint accepts. Empty = the model\'s own set. A level the endpoint does not take is refused.')]
+#[ToolSetting(key: 'supports_effort', label: 'Supports reasoning effort', type: 'toggle', default: true, description: 'Turn this off for an endpoint with no reasoning-effort parameter at all — the agent then has no effort picker and any effort sent is refused.')]
 #[ToolSetting(key: 'store', label: 'Store responses', type: 'toggle', default: false, description: "Store the response on the provider's servers as a retrievable object — OpenAI keeps it for at least 30 days. Spora always replays the encrypted reasoning itself, so the toggle does not decide that: it only decides the fallback for a reasoning item without encrypted content — dropped from the replay when off, sent by id alone when on, which only the provider can resolve if it kept the item. Prompts and responses still go into OpenAI's abuse-monitoring logs (up to 30 days) unless the project the API key belongs to has Zero Data Retention or Modified Abuse Monitoring enabled. Under Zero Data Retention the provider treats the store parameter as false, so there is no stored response for a reasoning id to resolve against — leave the toggle off.")]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
 final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface
@@ -60,6 +62,8 @@ final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements Dr
             $logger,
             $timeout,
             $options?->supportsImageInput,
+            $options !== null ? $options->configuredEffortLevels : [],
+            $options?->supportsEffort,
         );
         $this->requestBuilder = new ResponsesRequestBuilder(
             $apiKey,
@@ -80,6 +84,7 @@ final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements Dr
 
         $logger = $args['logger'] ?? null;
         $supportsImageInput = $args['supportsImageInput'] ?? null;
+        $effortLevels = $args['effortLevels'] ?? [];
 
         return new self(
             apiKey: (string) ($args['apiKey'] ?? ''),
@@ -96,6 +101,10 @@ final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements Dr
                 store: array_key_exists('store', $settings)
                     && is_scalar($settings['store'])
                     && filter_var($settings['store'], FILTER_VALIDATE_BOOLEAN),
+                configuredEffortLevels: is_array($effortLevels) ? array_values($effortLevels) : [],
+                supportsEffort: isset($args['supportsEffort']) && is_bool($args['supportsEffort'])
+                    ? $args['supportsEffort']
+                    : null,
             ),
         );
     }
@@ -126,7 +135,7 @@ final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements Dr
      *
      * @return array<string, string>
      */
-    public function effortLevels(): array
+    protected function defaultEffortLevels(): array
     {
         return [
             EffortLevel::None->value    => EffortLevel::None->value,

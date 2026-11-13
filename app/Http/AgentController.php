@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\SpeechProviderConfiguration;
@@ -239,7 +240,12 @@ final class AgentController
         }
         $body = $bodyOrError;
 
-        $agent = $this->applyAgentPatch($agentId, $userId, $body);
+        try {
+            $agent = $this->applyAgentPatch($agentId, $userId, $body);
+        } catch (EffortValidationException $e) {
+            return $this->unprocessable($e->errorCode(), $e->getMessage());
+        }
+
         if ($agent instanceof JsonResponse) {
             return $agent;
         }
@@ -265,7 +271,7 @@ final class AgentController
         // `is_favorite` is gone from this allowlist — the column
         // no longer exists on `agents`. The toggle is per-user via
         // `POST /agents/{id}/favorite` / `DELETE /agents/{id}/favorite`.
-        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'speech_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'voice_message_retention_count', 'is_pinned', 'is_archived'];
+        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'speech_driver_config_id', 'max_steps', 'default_effort', 'allow_followup', 'retry_after_minutes', 'max_retries', 'voice_message_retention_count', 'is_pinned', 'is_archived'];
         $data = array_intersect_key($body, array_flip($allowed));
         $this->coerceBooleanFlags($data);
         $validationError = $this->validateAgentPatch($data);

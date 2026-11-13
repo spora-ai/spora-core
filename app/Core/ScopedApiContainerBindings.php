@@ -71,6 +71,8 @@ final class ScopedApiContainerBindings
                 return new ScopedApiAgentController(
                     $c->get(ApiKeyAgentService::class),
                     $c->get(ApiKeyReach::class),
+                    $c->get(EffortService::class),
+                    $c->get(PrincipalService::class),
                 );
             },
 

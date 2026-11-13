@@ -4,7 +4,13 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use InvalidArgumentException;
 use ReflectionClass;
+use Spora\Drivers\DriverFactory;
+use Spora\Drivers\EffortAwareDriverInterface;
+use Spora\Drivers\EffortLevelSet;
+use Spora\Drivers\Exceptions\DriverClassNotFoundException;
+use Spora\Drivers\LLMDriverInterface;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -17,6 +23,11 @@ use Symfony\Component\HttpFoundation\Response;
  * the reflection-based `#[ToolSetting]` walker and the regex/key/value
  * coercion rules. Body-shape validation, data shaping, authorization,
  * and the JSON response helpers remain on {@see LlmConfigValidator}.
+ *
+ * The reasoning-effort value is checked against the driver the settings
+ * describe, not against a static list: the validator and the runtime must
+ * agree exactly on which levels a configuration offers, including for an
+ * out-of-tree driver.
  */
 final class LlmConfigSchemaValidator
 {
@@ -28,6 +39,10 @@ final class LlmConfigSchemaValidator
      */
     private const MAX_CONTEXT_WINDOW = 1_000_000;
     private const MAX_OUTPUT_TOKENS = 1_000_000;
+
+    public function __construct(
+        private readonly ?DriverFactory $driverFactory = null,
+    ) {}
 
     /**
      * Validate `context_window` and `max_tokens_output` if present.
@@ -85,10 +100,12 @@ final class LlmConfigSchemaValidator
     }
 
     /**
+     * The reason the settings cannot be accepted, or null.
+     *
      * @param array<string, mixed> $settings
      * @param list<array> $schema
      */
-    public function validateSettings(array $settings, array $schema): ?string
+    public function validateSettings(string $driverClass, array $settings, array $schema): ?string
     {
         foreach ($schema as $field) {
             $error = $this->validateField($field, $settings);
@@ -98,7 +115,13 @@ final class LlmConfigSchemaValidator
             }
         }
 
-        return null;
+        $levelsError = $this->validateEffortLevels($settings);
+
+        if ($levelsError !== null) {
+            return $levelsError;
+        }
+
+        return $this->effortMembershipError($this->driverFor($driverClass, $settings), $settings);
     }
 
     /**
@@ -138,9 +161,9 @@ final class LlmConfigSchemaValidator
 
         // A select's option list is the only description of what it
         // accepts, so a value outside it is refused here rather than
-        // reaching the provider. The empty string never reaches this
-        // method: it is a legitimate option on most selects — the "model
-        // default" one on the effort setting.
+        // reaching the provider. A free-text field has no such list —
+        // what it accepts is decided by the configuration it belongs to,
+        // which is checked separately.
         $options = $field['options'] ?? [];
 
         if (($field['type'] ?? '') === 'select' && $options !== [] && !array_key_exists($value, $options)) {
@@ -148,6 +171,110 @@ final class LlmConfigSchemaValidator
         }
 
         return null;
+    }
+
+    /**
+     * The reason the reasoning-effort default cannot be accepted, or null.
+     *
+     * @param array<string, mixed> $settings
+     */
+    private function effortMembershipError(?LLMDriverInterface $driver, array $settings): ?string
+    {
+        $effort = trim((string) ($settings['effort'] ?? ''));
+
+        if ($effort === '') {
+            return null;
+        }
+
+        $levels = $this->levelNames($driver, $settings);
+
+        if ($levels === null || in_array($effort, $levels, true)) {
+            return null;
+        }
+
+        return $this->unsupportedEffortMessage($effort, $levels);
+    }
+
+    /**
+     * The levels the configuration offers, or null when they are unknown.
+     *
+     * The driver's own set is authoritative — it already accounts for the
+     * configured list. Without a driver to ask, the configured list is the
+     * only thing known, and an unset list leaves the effort unchecked: the
+     * container always wires a driver factory, so that path is the test
+     * harness, not production.
+     *
+     * @param array<string, mixed> $settings
+     * @return list<string>|null
+     */
+    private function levelNames(?LLMDriverInterface $driver, array $settings): ?array
+    {
+        if ($driver instanceof EffortAwareDriverInterface) {
+            return array_keys($driver->effortLevels());
+        }
+
+        $configured = trim((string) ($settings['effort_levels'] ?? ''));
+
+        return $configured === '' ? null : EffortLevelSet::fromSetting($configured)->names();
+    }
+
+    /**
+     * The reason the level list cannot be accepted, or null.
+     *
+     * @param array<string, mixed> $settings
+     */
+    private function validateEffortLevels(array $settings): ?string
+    {
+        $raw = $settings['effort_levels'] ?? '';
+
+        if (!is_string($raw)) {
+            return "Field 'Effort levels' has an invalid value.";
+        }
+
+        try {
+            EffortLevelSet::fromSetting($raw);
+        } catch (InvalidArgumentException $e) {
+            return $e->getMessage();
+        }
+
+        return null;
+    }
+
+    /**
+     * @param list<string> $levels
+     */
+    private function unsupportedEffortMessage(string $effort, array $levels): string
+    {
+        if ($levels === []) {
+            return sprintf(
+                'effort "%s" is not offered by this LLM configuration: it accepts no reasoning-effort level.',
+                $effort,
+            );
+        }
+
+        return sprintf(
+            'effort "%s" is not offered by this LLM configuration. Supported levels: %s.',
+            $effort,
+            implode(', ', $levels),
+        );
+    }
+
+    /**
+     * The driver the settings describe, or null when it cannot be built.
+     *
+     * @param array<string, mixed> $settings
+     */
+    private function driverFor(string $driverClass, array $settings): ?LLMDriverInterface
+    {
+        if ($this->driverFactory === null) {
+            return null;
+        }
+
+        try {
+            return $this->driverFactory->makeDriverFromSettings($driverClass, $settings);
+        } catch (DriverClassNotFoundException | InvalidArgumentException) {
+            return null;
+        }
     }
 
     /**

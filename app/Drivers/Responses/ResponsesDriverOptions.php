@@ -12,6 +12,10 @@ namespace Spora\Drivers\Responses;
  */
 final class ResponsesDriverOptions
 {
+    /**
+     * @param list<string> $configuredEffortLevels The levels the configuration
+     *        names. Empty means the model's own set applies.
+     */
     public function __construct(
         public readonly ?bool $supportsImageInput = null,
 
@@ -38,5 +42,13 @@ final class ResponsesDriverOptions
          * and its id-only fallback would have nothing to resolve.
          */
         public readonly bool $store = false,
+
+        public readonly array $configuredEffortLevels = [],
+
+        /**
+         * Null means "not configured" and behaves as enabled, so a row
+         * persisted before the toggle shipped keeps working.
+         */
+        public readonly ?bool $supportsEffort = null,
     ) {}
 }

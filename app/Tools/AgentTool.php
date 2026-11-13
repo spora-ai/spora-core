@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\Agent;
 use Spora\Services\AgentManifest;
 use Spora\Services\AgentManifestRenderer;
@@ -70,7 +71,10 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolOperation(
     name: 'update_agent',
     description: 'Update editable fields on this agent (name, description, system_prompt, max_steps, '
-               . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived). '
+               . 'default_effort, allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived). '
+               . '`default_effort` is the reasoning effort the agent runs with when nobody names one; '
+               . 'null means it inherits the LLM configuration\'s default, and a level the configuration '
+               . 'does not offer is refused. '
                . 'Notes MUST go through write_notes / write_notes_overwrite — they are stripped from '
                . 'this patch. llm_driver_config_id, speech_driver_config_id and '
                . 'voice_message_retention_count are REFUSED along with the whole patch — they decide '
@@ -135,7 +139,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolOperation(
     name: 'create_agent',
     description: 'Create a new agent from a slim payload: `name` (required, top level), '
-               . '`description`, `system_prompt`, `max_steps`, `allow_followup`, '
+               . '`description`, `system_prompt`, `max_steps`, `default_effort`, `allow_followup`, '
                . '`retry_after_minutes`, `max_retries`. Do NOT wrap fields in an `agent{}` '
                . 'block; do NOT send a `tools[]` block here — after the agent row exists, '
                . 'call `configure_tools(agent_id: N, tools: [...])` to apply a toolset, '
@@ -211,7 +215,7 @@ use Spora\Tools\ValueObjects\ToolResult;
     name: 'agent',
     type: 'object',
     description: 'ONLY for `update_agent`: a partial agent with the fields to update. '
-               . 'Allowed keys: name, description, system_prompt, max_steps, '
+               . 'Allowed keys: name, description, system_prompt, max_steps, default_effort, '
                . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived. '
                . 'Booleans take true / false or the strings "true" / "false" / 0 / 1, and numbers '
                . 'may be quoted — both are read as the value they name, then range-checked, so '
@@ -256,7 +260,7 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'object',
     description: 'ONLY for create_agent: a slim Agent record — top-level '
               . '`name` (required), `description`, `system_prompt`, `max_steps`, '
-              . '`allow_followup`, `retry_after_minutes`, `max_retries`. '
+              . '`default_effort`, `allow_followup`, `retry_after_minutes`, `max_retries`. '
               . 'Do NOT nest fields under `agent{}` and do NOT send `tools[]` or '
               . '`required_plugins` — the LLM-facing flow is two-phase '
               . '(create_agent → configure_tools(agent_id: N) → '
@@ -372,18 +376,22 @@ final class AgentTool extends AbstractTool
             return $this->redirectReadAgentConfiguration($agentId, $userId);
         }
 
-        return match ($operation) {
-            'update_agent'              => $this->writeConfiguration($agentId, $userId, $arguments),
-            'read_notes'                => $this->notesHandler->read($agentId),
-            'write_notes'               => $this->notesHandler->write($agentId, $arguments, 'append'),
-            'write_notes_overwrite'     => $this->notesHandler->write($agentId, $arguments, 'overwrite'),
-            'get_available_tools'       => $this->catalogPresenter->present($agentId, $userId, $context),
-            'create_agent'              => $this->createAgent($agentId, $arguments, $context),
-            'configure_tools'           => $this->configureTools($agentId, $userId, $arguments, $context),
-            'read_agent'                => $this->readAgent($agentId, $userId, $arguments),
-            'list_agents'               => $this->listAgents($agentId, $context),
-            default                     => ToolResult::fail("Invalid action '{$operation}'."),
-        };
+        try {
+            return match ($operation) {
+                'update_agent'              => $this->writeConfiguration($agentId, $userId, $arguments),
+                'read_notes'                => $this->notesHandler->read($agentId),
+                'write_notes'               => $this->notesHandler->write($agentId, $arguments, 'append'),
+                'write_notes_overwrite'     => $this->notesHandler->write($agentId, $arguments, 'overwrite'),
+                'get_available_tools'       => $this->catalogPresenter->present($agentId, $userId, $context),
+                'create_agent'              => $this->createAgent($agentId, $arguments, $context),
+                'configure_tools'           => $this->configureTools($agentId, $userId, $arguments, $context),
+                'read_agent'                => $this->readAgent($agentId, $userId, $arguments),
+                'list_agents'               => $this->listAgents($agentId, $context),
+                default                     => ToolResult::fail("Invalid action '{$operation}'."),
+            };
+        } catch (EffortValidationException $e) {
+            return ToolResult::fail(sprintf('%s: %s', $operation, $e->getMessage()));
+        }
     }
 
     public function describeAction(array $arguments): string

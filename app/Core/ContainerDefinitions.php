@@ -858,6 +858,7 @@ final class ContainerDefinitions
                     $c->get(AgentPictureService::class),
                     $c->get(PrincipalResolver::class),
                     $c->get(AgentPrincipalService::class),
+                    $c->get(EffortService::class),
                 );
             },
 
@@ -970,7 +971,7 @@ final class ContainerDefinitions
             },
 
             LlmConfigSchemaValidator::class => static fn(ContainerInterface $c): LlmConfigSchemaValidator
-                => new LlmConfigSchemaValidator(),
+                => new LlmConfigSchemaValidator($c->get(DriverFactory::class)),
 
             UserPreferenceController::class => static function (ContainerInterface $c): UserPreferenceController {
                 return new UserPreferenceController(
