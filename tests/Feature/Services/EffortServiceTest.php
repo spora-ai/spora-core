@@ -186,21 +186,148 @@ test('the configuration default effort is read by one rule', function (): void {
 });
 
 /**
+ * The configured list and the agent's own default.
+ *
+ * Two independent things are called "effort": the capability — which
+ * levels the configuration offers — and the default — which level a run
+ * uses when nobody names one. The report carries both.
+ */
+test('the reported levels are the configured list', function (): void {
+    [$service, $agent] = effortServiceFixture(
+        AnthropicCompatibleDriver::class,
+        'claude-sonnet-5-5',
+        null,
+        ['effort_levels' => 'low, high'],
+    );
+
+    $described = $service->describe($agent);
+
+    expect($described['supported'])->toBeTrue()
+        ->and($described['levels'])->toBe([
+            ['value' => 'low', 'label' => 'Low'],
+            ['value' => 'high', 'label' => 'High'],
+        ]);
+});
+
+test('the reported default is the agent\'s effective default', function (): void {
+    [$service, $agent] = effortServiceFixture(
+        AnthropicCompatibleDriver::class,
+        'claude-sonnet-5-5',
+        'medium',
+        ['effort_levels' => 'low, high'],
+        'high',
+    );
+
+    expect($service->describe($agent)['default'])->toBe('high');
+});
+
+test('the agent\'s own default wins over the configuration\'s', function (): void {
+    [$service, $agent] = effortServiceFixture(
+        AnthropicCompatibleDriver::class,
+        'claude-sonnet-5-5',
+        'medium',
+        [],
+        'high',
+    );
+
+    expect($service->defaultFor($agent))->toBe('high');
+});
+
+test('the configuration\'s default applies when the agent names none', function (): void {
+    [$service, $agent] = effortServiceFixture(
+        AnthropicCompatibleDriver::class,
+        'claude-sonnet-5-5',
+        'medium',
+    );
+
+    expect($service->defaultFor($agent))->toBe('medium');
+});
+
+test('neither an agent default nor a configuration default means the model default', function (): void {
+    [$service, $agent] = effortServiceFixture();
+
+    expect($service->defaultFor($agent))->toBeNull();
+});
+
+test('an agent default the driver does not offer falls back to the configuration\'s', function (): void {
+    // The Anthropic driver offers no `none`, so an agent default left
+    // behind by a configuration change would be dropped on the way to the
+    // provider.
+    [$service, $agent] = effortServiceFixture(
+        AnthropicCompatibleDriver::class,
+        'claude-sonnet-5-5',
+        'medium',
+        [],
+        'none',
+    );
+
+    expect($service->defaultFor($agent))->toBe('medium');
+});
+
+test('the level set of the agent is the configuration\'s', function (): void {
+    [$service, $agent] = effortServiceFixture(
+        AnthropicCompatibleDriver::class,
+        'claude-sonnet-5-5',
+        null,
+        ['effort_levels' => 'low, high'],
+    );
+
+    expect($service->levelSetFor($agent)->names())->toBe(['low', 'high'])
+        ->and($service->levelSetFor($agent)->has('low'))->toBeTrue()
+        ->and($service->levelSetFor($agent)->has('medium'))->toBeFalse();
+});
+
+test('a level the configuration names is accepted', function (): void {
+    [$service, $agent] = effortServiceFixture(
+        AnthropicCompatibleDriver::class,
+        'claude-sonnet-5-5',
+        null,
+        ['effort_levels' => 'low, high'],
+    );
+
+    expect(fn() => $service->assertLevel('low', $agent))->not->toThrow(EffortValidationException::class);
+});
+
+test('a level the configuration does not name is refused', function (): void {
+    [$service, $agent] = effortServiceFixture(
+        AnthropicCompatibleDriver::class,
+        'claude-sonnet-5-5',
+        null,
+        ['effort_levels' => 'low, high'],
+    );
+
+    try {
+        $service->assertLevel('medium', $agent);
+    } catch (EffortValidationException $e) {
+        expect($e->errorCode())->toBe('EFFORT_LEVEL_UNSUPPORTED')
+            ->and($e->getMessage())->toContain('Supported levels: low, high');
+
+        return;
+    }
+
+    $this->fail('Expected an EffortValidationException.');
+});
+
+/**
+ * @param array<string, mixed> $extraSettings
  * @return array{0: EffortService, 1: Agent} the service and the agent it answers for
  */
 function effortServiceFixture(
     string  $driverClass = AnthropicCompatibleDriver::class,
     string  $model = 'claude-sonnet-5-5',
     ?string $configuredEffort = null,
+    array   $extraSettings = [],
+    ?string $agentDefault = null,
 ): array {
     $authService = bootAuthLayer();
     $userId = bootAuth($authService);
 
-    $settings = [
+    $settings = array_merge([
         'api_key' => 'test',
         'model' => $model,
         'base_url' => 'https://example.invalid',
-    ];
+    ], $extraSettings);
+
     if ($configuredEffort !== null) {
         $settings['effort'] = $configuredEffort;
     }
@@ -219,6 +346,7 @@ function effortServiceFixture(
         'name' => 'Effort Service Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps' => 10,
+        'default_effort' => $agentDefault,
         'is_active' => true,
     ]);
 

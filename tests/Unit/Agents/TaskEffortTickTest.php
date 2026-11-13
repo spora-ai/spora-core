@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Psr\Log\NullLogger;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\TaskStartOptions;
@@ -14,14 +15,18 @@ use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
+use Spora\Services\EffortService;
+use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
 
 /**
  * The effort the tick sends.
  *
  * The task row is the last word: the tick copies `tasks.effort` onto the
- * request and never consults the configuration again. The configuration
- * only decides what lands on the row, and that happens at write time.
+ * request and never consults the configuration again. The row is written
+ * when the task starts, and the chain that decides it — the agent's own
+ * default, then the configuration's, then nothing — belongs to
+ * {@see EffortService::defaultFor()}.
  */
 afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -54,7 +59,22 @@ it('sends the effort the request named, not the configured default', function ()
     expect($captured?->effort)->toBe('low');
 });
 
-it('falls back to the configured default when the request names no effort', function (): void {
+it('falls back to the agent\'s own default when the request names no effort', function (): void {
+    [$agentId] = effortTickSeedAgent('medium', 'high');
+
+    $captured = null;
+    $orch = effortTickOrchestrator($captured);
+
+    $task = $orch->start($agentId, 'hello', maxSteps: 5);
+
+    expect($task->effort)->toBe('high');
+
+    claimAndTick($orch, $task->id);
+
+    expect($captured?->effort)->toBe('high');
+});
+
+it('falls back to the configuration\'s default when the agent names none', function (): void {
     [$agentId] = effortTickSeedAgent('medium');
 
     $captured = null;
@@ -69,7 +89,7 @@ it('falls back to the configured default when the request names no effort', func
     expect($captured?->effort)->toBe('medium');
 });
 
-it('sends nothing when neither the request nor the configuration names an effort', function (): void {
+it('sends nothing when neither the agent nor the configuration names an effort', function (): void {
     [$agentId] = effortTickSeedAgent(null);
 
     $captured = null;
@@ -104,7 +124,7 @@ it('stores null for an empty effort, so the model default is sent', function ():
  *
  * @return array{0: int} the agent id
  */
-function effortTickSeedAgent(?string $configuredEffort): array
+function effortTickSeedAgent(?string $configuredEffort, ?string $agentDefault = null): array
 {
     $authService = bootAuthLayer();
     $userId = $authService->register('effort-tick@example.com', 'Password1!', 'EffortTick');
@@ -132,6 +152,7 @@ function effortTickSeedAgent(?string $configuredEffort): array
         'name' => 'Effort Tick Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps' => 10,
+        'default_effort' => $agentDefault,
         'is_active' => true,
     ]);
 
@@ -140,6 +161,11 @@ function effortTickSeedAgent(?string $configuredEffort): array
 
 /**
  * An orchestrator whose driver records the request it was handed.
+ *
+ * The effort service is built from a real driver factory, because the
+ * default chain asks the configuration's driver which levels it offers —
+ * a factory that cannot build the driver would report no levels and the
+ * chain would resolve to nothing.
  */
 function effortTickOrchestrator(?LLMRequest &$captured): Orchestrator
 {
@@ -165,8 +191,14 @@ function effortTickOrchestrator(?LLMRequest &$captured): Orchestrator
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $llmConfigService = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
+    $effortService = new EffortService(
+        new LLMConfigPreferences(),
+        $llmConfigService,
+        new DriverFactory(new NullLogger(), $llmConfigService, 60),
+    );
+
     return new Orchestrator(
         $factory,
-        new OrchestratorConfig(llmConfigService: $llmConfigService),
+        new OrchestratorConfig(llmConfigService: $llmConfigService, effortService: $effortService),
     );
 }

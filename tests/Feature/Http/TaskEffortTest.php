@@ -93,7 +93,38 @@ test('an unknown effort level is refused with 422', function (): void {
     expect($response->getStatusCode())->toBe(422);
 
     $payload = json_decode($response->getContent(), true);
-    expect($payload['error']['code'])->toBe('INVALID_EFFORT');
+    expect($payload['error']['code'])->toBe('EFFORT_LEVEL_UNSUPPORTED');
+});
+
+test('a level the configuration names is accepted, canonical or not', function (): void {
+    [$controller, , $agentId] = effortHttpController('high', OpenAICompatibleDriver::class, ['effort_levels' => 'low, turbo']);
+
+    $response = $controller->store(effortJsonRequest([
+        'agent_id' => $agentId,
+        'prompt' => 'hello',
+        'effort' => 'turbo',
+    ]));
+
+    expect($response->getStatusCode())->toBe(201);
+
+    $task = Task::query()->orderByDesc('id')->first();
+    expect($task?->effort)->toBe('turbo');
+});
+
+test('a level the configuration does not name is refused', function (): void {
+    [$controller, , $agentId] = effortHttpController('high', OpenAICompatibleDriver::class, ['effort_levels' => 'low, turbo']);
+
+    $response = $controller->store(effortJsonRequest([
+        'agent_id' => $agentId,
+        'prompt' => 'hello',
+        'effort' => 'medium',
+    ]));
+
+    expect($response->getStatusCode())->toBe(422);
+
+    $payload = json_decode($response->getContent(), true);
+    expect($payload['error']['code'])->toBe('EFFORT_LEVEL_UNSUPPORTED')
+        ->and($payload['error']['message'])->toContain('Supported levels: low, turbo');
 });
 
 test('a non-string effort is refused with 422', function (): void {
@@ -196,7 +227,7 @@ test('a continued task with an unknown effort level is refused with 422', functi
     expect($response->getStatusCode())->toBe(422);
 
     $payload = json_decode($response->getContent(), true);
-    expect($payload['error']['code'])->toBe('INVALID_EFFORT');
+    expect($payload['error']['code'])->toBe('EFFORT_LEVEL_UNSUPPORTED');
 });
 
 test('an effort the agent\'s driver does not offer is refused with 422', function (): void {
@@ -265,18 +296,23 @@ function effortJsonRequest(array $body): Request
  * A controller wired to the real service and orchestrator, so the row the
  * request writes is the row the test reads.
  *
+ * @param array<string, mixed> $extraSettings
  * @return array{0: TaskController, 1: int, 2: int} the controller, the user id and the agent id
  */
-function effortHttpController(?string $configuredEffort, string $driverClass = OpenAICompatibleDriver::class): array
-{
+function effortHttpController(
+    ?string $configuredEffort,
+    string $driverClass = OpenAICompatibleDriver::class,
+    array $extraSettings = [],
+): array {
     $authService = bootAuthLayer();
     $userId = bootAuth($authService);
 
-    $settings = [
+    $settings = array_merge([
         'api_key' => 'test',
         'model' => 'gpt-4o-mini',
         'base_url' => 'https://example.invalid/v1',
-    ];
+    ], $extraSettings);
+
     if ($configuredEffort !== null) {
         $settings['effort'] = $configuredEffort;
     }

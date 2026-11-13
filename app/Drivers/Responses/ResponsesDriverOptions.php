@@ -42,7 +42,6 @@ final class ResponsesDriverOptions
          * and its id-only fallback would have nothing to resolve.
          */
         public readonly bool $store = false,
-
         public readonly array $configuredEffortLevels = [],
 
         /**

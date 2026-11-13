@@ -23,7 +23,6 @@ final class AnthropicDriverOptions
          * Enables driver-wide cache breakpoints on stable system and tool prefixes.
          */
         public readonly bool $enablePromptCaching = true,
-
         public readonly array $configuredEffortLevels = [],
 
         /**

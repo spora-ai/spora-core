@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Drivers;
 
+use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use ReflectionMethod;
 use Spora\Agents\Exceptions\LlmConfigurationMissingException;
@@ -98,7 +99,7 @@ class DriverFactory
      *
      * @param array<string, mixed> $settings
      * @throws DriverClassNotFoundException when the driver class does not exist
-     * @throws \InvalidArgumentException when `effort_levels` is malformed
+     * @throws InvalidArgumentException when `effort_levels` is malformed
      */
     public function makeDriverFromSettings(string $driverClass, array $settings): LLMDriverInterface
     {
@@ -163,7 +164,7 @@ class DriverFactory
      *
      * @param array<string, mixed> $settings
      * @return list<string>
-     * @throws \InvalidArgumentException when the value is malformed
+     * @throws InvalidArgumentException when the value is malformed
      */
     private function decodeEffortLevels(array $settings): array
     {
