@@ -240,17 +240,19 @@ final class AgentController
         }
         $body = $bodyOrError;
 
+        // One variable for the refusal and the patched agent: a second
+        // guard would put the endpoint over the S1142 three-return ceiling.
         try {
-            $agent = $this->applyAgentPatch($agentId, $userId, $body);
+            $patched = $this->applyAgentPatch($agentId, $userId, $body);
         } catch (EffortValidationException $e) {
-            return $this->unprocessable($e->errorCode(), $e->getMessage());
+            $patched = $this->unprocessable($e->errorCode(), $e->getMessage());
         }
 
-        if ($agent instanceof JsonResponse) {
-            return $agent;
+        if ($patched instanceof JsonResponse) {
+            return $patched;
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($patched, $this->agentResourceContext($patched))]]);
     }
 
     /**

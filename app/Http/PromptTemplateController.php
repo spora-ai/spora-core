@@ -135,16 +135,23 @@ final class PromptTemplateController
         $agentId = (int) $request->attributes->get('id', 0);
         $templateId = (int) $request->attributes->get('templateId', 0);
 
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
-        }
+        // One try, one error variable: the decode cannot throw an effort
+        // refusal and the service cannot throw a parse error, and a second
+        // guard would put the method over the S1142 three-return ceiling.
+        $error = null;
+        $result = null;
 
         try {
+            $body = $this->decodeJson($request);
             $result = $this->promptTemplateService->updateTemplate($templateId, $agentId, $userId, $body);
+        } catch (JsonException) {
+            $error = $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         } catch (EffortValidationException $e) {
-            return $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+            $error = $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if ($error !== null) {
+            return $error;
         }
 
         if ($result === null) {
