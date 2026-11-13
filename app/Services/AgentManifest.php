@@ -24,6 +24,7 @@ use Spora\Tools\ToolSchemaPresenter;
  *   "template_id": <string|null>,  // optional, only set if known
  *   "version":    <string|null>,   // optional, only set if known
  *   "max_steps":  <int>,
+ *   "default_effort": <string|null>,
  *   "allow_followup": <bool>,
  *   "retry_after_minutes": <int>,
  *   "max_retries": <int>,
@@ -132,6 +133,9 @@ final class AgentManifest
             'template_id'         => null,
             'version'             => null,
             'max_steps'           => (int) $agent->max_steps,
+            // The reasoning effort the agent runs with when nobody names
+            // one; null means it inherits the configuration's default.
+            'default_effort'      => $agent->default_effort,
             'allow_followup'      => (bool) $agent->allow_followup,
             'retry_after_minutes' => (int) ($agent->retry_after_minutes ?? 0),
             'max_retries'         => (int) ($agent->max_retries ?? 0),

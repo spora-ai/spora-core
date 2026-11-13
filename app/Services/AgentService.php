@@ -56,6 +56,7 @@ final class AgentService implements AgentServiceInterface
         'llm_driver_config_id',
         'speech_driver_config_id',
         'max_steps',
+        'default_effort',
         'allow_followup',
         'retry_after_minutes',
         'max_retries',
@@ -70,6 +71,7 @@ final class AgentService implements AgentServiceInterface
         private readonly ?AgentPictureService $pictureService = null,
         private readonly ?PrincipalResolver $principalResolver = null,
         private readonly ?AgentPrincipalServiceInterface $principalService = null,
+        private readonly ?EffortService $effortService = null,
     ) {}
 
 
@@ -163,6 +165,14 @@ final class AgentService implements AgentServiceInterface
      */
     private function persistNewAgent(array $allowed, int $principalId): Agent
     {
+        // The agent does not exist yet, so the level set is the one its
+        // principal's effective configuration offers — the agent has no
+        // configuration of its own to narrow it.
+        $this->effortService?->assertAgentDefault(
+            $allowed['default_effort'] ?? null,
+            new Agent(['principal_id' => $principalId]),
+        );
+
         $id = Capsule::table('agents')->insertGetId([
             'principal_id'           => $principalId,
             'name'                   => $allowed['name'],
@@ -170,6 +180,7 @@ final class AgentService implements AgentServiceInterface
             'system_prompt'          => $allowed['system_prompt'] ?? null,
             'llm_driver_config_id'   => $allowed['llm_driver_config_id'] ?? null,
             'max_steps'              => (int) ($allowed['max_steps'] ?? 10),
+            'default_effort'         => $allowed['default_effort'] ?? null,
             'allow_followup'         => (bool) ($allowed['allow_followup'] ?? true) ? 1 : 0,
             'retry_after_minutes'    => (int) ($allowed['retry_after_minutes'] ?? 0),
             'max_retries'            => (int) ($allowed['max_retries'] ?? 0),
@@ -252,6 +263,10 @@ final class AgentService implements AgentServiceInterface
     private function applyAgentPatch(int $agentId, Agent $agent, array $data): Agent
     {
         $filtered = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
+
+        // A default the configuration does not offer is refused rather
+        // than stored: the run would silently happen at another depth.
+        $this->effortService?->assertAgentDefault($filtered['default_effort'] ?? null, $agent);
 
         if ($filtered !== []) {
             Capsule::table('agents')

@@ -255,6 +255,9 @@ final class AgentTemplateExporter
         if ($agent->system_prompt !== null && $agent->system_prompt !== '') {
             $block['system_prompt'] = $agent->system_prompt;
         }
+        if ($agent->default_effort !== null && $agent->default_effort !== '') {
+            $block['default_effort'] = $agent->default_effort;
+        }
         return $block;
     }
 

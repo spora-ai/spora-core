@@ -15,13 +15,12 @@ namespace Spora\Drivers;
 interface EffortAwareDriverInterface
 {
     /**
-     * The canonical effort levels this driver can express, mapped to the
-     * value the provider expects.
+     * The effort levels this driver can express, mapped to the value the
+     * provider expects.
      *
-     * The set may be narrower than the driver's `effort` setting offers:
-     * a level the model does not take is not one the driver can send, and
-     * the levels are a subset of the options rather than the whole of
-     * them.
+     * The set is the configuration's own: the operator may name the levels
+     * their endpoint takes, and the driver's model-derived set applies only
+     * while they name none.
      *
      * @return array<string, string> canonical level value => provider wire value
      */

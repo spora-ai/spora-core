@@ -24,7 +24,9 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 #[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.openai.com/v1).', required: false, default: 'https://api.openai.com/v1')]
 #[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. gpt-4o, gpt-4-turbo, o1-preview).', required: false, default: 'gpt-4o')]
 #[ToolSetting(key: 'temperature', label: 'Temperature', type: 'text', description: 'Sampling temperature (0.0–2.0). Lower is more deterministic.', required: false, default: '0.7', validation: '/^[0-2](\.[0-9]+)?$/')]
-#[ToolSetting(key: 'effort', label: 'Effort', type: 'select', default: '', description: "Default reasoning effort. Empty = the model default. On GPT-5.4 and later, Chat Completions only accepts 'None' when the agent uses tools — use the OpenAI Responses driver for reasoning with tools.", options: ['' => 'Model default', 'none' => 'None', 'minimal' => 'Minimal', 'low' => 'Low', 'medium' => 'Medium', 'high' => 'High', 'xhigh' => 'xHigh', 'max' => 'Max'])]
+#[ToolSetting(key: 'effort', label: 'Effort', type: 'text', default: '', description: "Default reasoning effort. Empty = the model default. On GPT-5.4 and later, Chat Completions only accepts 'None' when the agent uses tools — use the OpenAI Responses driver for reasoning with tools. A level this endpoint does not offer is refused.")]
+#[ToolSetting(key: 'effort_levels', label: 'Effort levels', type: 'textarea', default: '', description: 'Comma-separated list of the reasoning-effort levels this endpoint accepts. Empty = the model\'s own set. A level the endpoint does not take is refused.')]
+#[ToolSetting(key: 'supports_effort', label: 'Supports reasoning effort', type: 'toggle', default: true, description: 'Turn this off for an endpoint with no reasoning-effort parameter at all — the agent then has no effort picker and any effort sent is refused.')]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
 final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 {
@@ -32,6 +34,10 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 
     private readonly ChatCompletionsReasoning $reasoning;
 
+    /**
+     * @param list<string> $effortLevels The levels the configuration names.
+     *        Empty means the model's own set applies.
+     */
     public function __construct(
         string              $apiKey,
         string              $model,
@@ -40,8 +46,20 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
         ?LoggerInterface    $logger = null,
         ?int                $timeout = null,
         ?bool               $supportsImageInput = null,
+        array               $effortLevels = [],
+        ?bool               $supportsEffort = null,
     ) {
-        parent::__construct($apiKey, $model, $baseUrl, $httpClient, $logger, $timeout, $supportsImageInput);
+        parent::__construct(
+            $apiKey,
+            $model,
+            $baseUrl,
+            $httpClient,
+            $logger,
+            $timeout,
+            $supportsImageInput,
+            $effortLevels,
+            $supportsEffort,
+        );
 
         $this->reasoning = new ChatCompletionsReasoning($model);
     }
@@ -67,7 +85,7 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
      *
      * @return array<string, string>
      */
-    public function effortLevels(): array
+    protected function defaultEffortLevels(): array
     {
         return [
             EffortLevel::None->value    => EffortLevel::None->value,

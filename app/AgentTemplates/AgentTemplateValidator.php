@@ -69,7 +69,7 @@ final class AgentTemplateValidator
     ];
 
     private const ALLOWED_AGENT_KEYS = [
-        'description', 'system_prompt', 'notes', 'max_steps',
+        'description', 'system_prompt', 'notes', 'max_steps', 'default_effort',
         'allow_followup', 'retry_after_minutes', 'max_retries',
     ];
 
@@ -250,6 +250,18 @@ final class AgentTemplateValidator
 
         if (array_key_exists('max_steps', $agent)) {
             $this->validateMaxSteps($agent['max_steps'], $result);
+        }
+
+        if (array_key_exists('default_effort', $agent)
+            && $agent['default_effort'] !== null
+            && !is_string($agent['default_effort'])
+        ) {
+            $result->addError([
+                'code'     => 'DEFAULT_EFFORT_INVALID',
+                'severity' => 'error',
+                'message'  => "Field 'agent.default_effort' must be a string.",
+                'path'     => 'agent.default_effort',
+            ]);
         }
     }
 

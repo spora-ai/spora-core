@@ -26,6 +26,7 @@ use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\EffortService;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MediaArchive\MediaAssetAccess;
 use Spora\Services\MercurePublisherInterface;
@@ -138,9 +139,18 @@ final class Orchestrator implements OrchestratorInterface
         $this->mediaAssetAccess      = new MediaAssetAccess($authService, $this->principalResolver);
         $this->driverFactory         = $driverFactory;
         $this->errorClassifier       = new ErrorClassifier();
+        $preferences                 = $config->principalPreferences ?? new \Spora\Services\LLMConfigPreferences();
+        // The effort service the resolver delegates the default chain to.
+        // Built here from the same collaborators the resolver gets, so the
+        // two cannot disagree about which level a run defaults to.
+        $effortService               = $config->effortService
+            ?? ($config->llmConfigService !== null
+                ? new EffortService($preferences, $config->llmConfigService, $driverFactory)
+                : null);
         $this->llmConfigResolver     = new LlmConfigResolver(
-            $config->principalPreferences ?? new \Spora\Services\LLMConfigPreferences(),
+            $preferences,
             $config->llmConfigService,
+            $effortService,
         );
         $this->toolDefinitionBuilder = new ToolDefinitionBuilder(
             $config->toolInstances,
@@ -251,9 +261,10 @@ final class Orchestrator implements OrchestratorInterface
      * the chat path sends the configured default, and the same agent would
      * behave differently depending on who started it.
      *
-     * A message that names no effort gets the configuration's default; an
-     * empty string asks for the model default, which is stored as null
-     * because the column never holds an empty string.
+     * A message that names no effort gets the resolved default — the
+     * agent's own, else the configuration's; an empty string asks for the
+     * model default, which is stored as null because the column never
+     * holds an empty string.
      */
     private function resolveEffort(Agent $agent, ?string $requested): ?string
     {

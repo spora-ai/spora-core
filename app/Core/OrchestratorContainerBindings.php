@@ -42,6 +42,7 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\DbRateLimiter;
 use Spora\Services\EffortService;
 use Spora\Services\EmailTemplateLoader;
+use Spora\Services\EffortService;
 use Spora\Services\HousekeepingLock;
 use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
@@ -133,6 +134,7 @@ final class OrchestratorContainerBindings
                         toolCallSerializer: $c->get(ToolCallSerializer::class),
                         agentService: $c->get(AgentServiceInterface::class),
                         principalPreferences: $c->get(LLMConfigPreferences::class),
+                        effortService: $c->get(EffortService::class),
                         usageMeter: $c->get(UsageMeterInterface::class),
                         llmCallRunner: $c->get(LlmCallRunner::class),
                     ),
@@ -156,6 +158,7 @@ final class OrchestratorContainerBindings
                 return new LlmConfigResolver(
                     $c->get(LLMConfigPreferences::class),
                     $c->get(LLMConfigService::class),
+                    $c->get(EffortService::class),
                 );
             },
 

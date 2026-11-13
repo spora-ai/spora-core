@@ -31,6 +31,7 @@ final class SlimPayloadValidator
         'description',
         'system_prompt',
         'max_steps',
+        'default_effort',
         'allow_followup',
         'retry_after_minutes',
         'max_retries',
@@ -87,6 +88,7 @@ final class SlimPayloadValidator
             // unreachable once validate* has run — they only keep this
             // method total if it is ever called without them.
             'max_steps'            => $this->coercePositiveInt($raw['max_steps'] ?? 10) ?? 10,
+            'default_effort'       => is_string($raw['default_effort'] ?? null) ? $raw['default_effort'] : null,
             'allow_followup'       => $this->coerceBool($raw['allow_followup'] ?? true) ?? true,
             'retry_after_minutes'  => $this->coerceNonNegativeInt($raw['retry_after_minutes'] ?? 0) ?? 0,
             'max_retries'          => $this->coerceNonNegativeInt($raw['max_retries'] ?? 0) ?? 0,
