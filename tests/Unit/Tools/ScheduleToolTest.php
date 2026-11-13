@@ -42,8 +42,8 @@ function makeScheduleToolTestFixture(): array
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
 
-    $scheduledRunService = new ScheduledRunService($orchestrator, $mercure);
-    $promptTemplateService = new PromptTemplateService();
+    $scheduledRunService = new ScheduledRunService($orchestrator, $mercure, makeEffortService());
+    $promptTemplateService = new PromptTemplateService(makeEffortService());
 
     $principalResolver = new PrincipalResolver();
     $principalService = new PrincipalService($principalResolver);

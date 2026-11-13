@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $prompt_template
  * @property array|null $variables
  * @property int|null $max_steps
+ * @property string|null $effort
  * @property bool $is_active
  * @property \Carbon\Carbon $created_at
  * @property \Carbon\Carbon $updated_at
@@ -30,6 +31,7 @@ final class AgentPromptTemplate extends Model
         'prompt_template',
         'variables',
         'max_steps',
+        'effort',
         'is_active',
     ];
 
@@ -37,6 +39,7 @@ final class AgentPromptTemplate extends Model
         'variables' => 'array',
         'is_active' => 'boolean',
         'max_steps' => 'integer',
+        'effort' => 'string',
     ];
 
     public function agent(): BelongsTo

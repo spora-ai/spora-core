@@ -452,6 +452,7 @@
   "effort \"%s\" is not offered by this agent's LLM driver: it cannot express a reasoning effort for this model.": "Der Denkaufwand \"%s\" wird von dem LLM-Treiber dieses Agenten nicht angeboten: Er kann für dieses Modell keinen Denkaufwand ausdrücken.",
   "effort must be a string.": "Der Denkaufwand muss eine Zeichenkette sein.",
   "effort must be one of: %s.": "Der Denkaufwand muss einer der folgenden sein: %s.",
+  "effort_override must be a string.": "effort_override muss eine Zeichenkette sein.",
   "information must be a string.": "information muss eine Zeichenkette sein.",
   "kind must be one of: %s.": "kind muss eines der folgenden sein: %s.",
   "media_id is required.": "media_id ist erforderlich.",

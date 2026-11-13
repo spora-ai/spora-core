@@ -74,13 +74,14 @@ final class ScheduledRunProcessor
             $template = $this->findTemplate($run);
             $prompt   = $this->buildPrompt($run, $template, $agent);
             $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
+            $effort   = $this->resolveEffort($run, $template);
 
             $task = $this->orchestrator->start(
                 (int) $run->agent_id,
                 $prompt,
                 (int) $maxSteps,
                 null,
-                new TaskStartOptions(runId: $run->id),
+                new TaskStartOptions(runId: $run->id, effort: $effort),
             );
         } catch (Throwable $e) {
             $this->logger->error('Scheduled run failed', [
@@ -185,6 +186,7 @@ final class ScheduledRunProcessor
             $template = $this->findTemplate($run);
             $prompt   = $this->buildPrompt($run, $template, $agent);
             $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
+            $effort   = $this->resolveEffort($run, $template);
 
             // Explicit caller id lands in `trigger_user_id`; null would fall
             // back to the agent's most-recent trigger for credential
@@ -194,7 +196,7 @@ final class ScheduledRunProcessor
                 userPrompt: $prompt,
                 maxSteps: (int) $maxSteps,
                 parentTaskId: null,
-                options: new TaskStartOptions(runId: $run->id, userId: $userId),
+                options: new TaskStartOptions(runId: $run->id, userId: $userId, effort: $effort),
             );
 
             // CAS-claim the row inside a transaction so two /housekeeping calls
@@ -428,6 +430,19 @@ final class ScheduledRunProcessor
             return (int) $template->max_steps;
         }
         return (int) $agent->max_steps;
+    }
+
+    /**
+     * The reasoning effort the run is sent with: the run's own override,
+     * else the template's, else nothing.
+     *
+     * Nothing is not a level — it leaves the choice to the agent's default,
+     * which the orchestrator resolves the same way a chat message's missing
+     * effort does.
+     */
+    private function resolveEffort(ScheduledRun $run, ?AgentPromptTemplate $template): ?string
+    {
+        return $run->effort_override ?? $template?->effort;
     }
 
     /**
