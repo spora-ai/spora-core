@@ -219,6 +219,9 @@ final class AuthWorkflow
                 'roles'      => $user['roles'] ?? [],
                 'registered' => $registered,
                 'is_admin'   => in_array('ADMIN', $user['roles'] ?? [], true),
+                // The SPA restores its session from this payload, so a picture
+                // left out here is one the user believes they uploaded.
+                'profile_picture' => $user['profile_picture'] ?? null,
             ], 'csrf_token' => $this->csrfService->getOrCreateToken()]],
             Response::HTTP_OK,
         );
