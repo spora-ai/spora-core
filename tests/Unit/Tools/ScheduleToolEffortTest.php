@@ -37,7 +37,7 @@ function makeScheduleToolEffortFixture(): array
         return Spora\Models\Task::create([
             'agent_id'        => $agentId,
             'principal_id'    => (int) Agent::find($agentId)->principal_id,
-            'trigger_user_id' => 1,
+            'trigger_user_id' => null,
             'status'          => 'RUNNING',
             'user_prompt'     => $prompt,
             'max_steps'       => $maxSteps,
@@ -210,12 +210,12 @@ it('create_schedule stores the effort override the agent asked for', function ()
 });
 
 it('update_schedule replaces the effort override', function (): void {
-    [, $agentId, $context] = makeScheduleToolEffortOwner();
+    [$userId, $agentId, $context] = makeScheduleToolEffortOwner();
     [$tool] = makeScheduleToolEffortFixture();
 
     $run = ScheduledRun::create([
         'agent_id'        => $agentId,
-        'user_id'         => 1,
+        'user_id'         => $userId,
         'raw_prompt'      => 'Daily standup prompt',
         'cron_expression' => '0 7 * * *',
         'timezone'        => 'UTC',
@@ -252,12 +252,12 @@ it('create_schedule refuses an override the driver does not offer, and names the
 });
 
 it('update_schedule refuses an override the driver does not offer', function (): void {
-    [, $agentId, $context] = makeScheduleToolEffortOwner();
+    [$userId, $agentId, $context] = makeScheduleToolEffortOwner();
     [$tool] = makeScheduleToolEffortFixture();
 
     $run = ScheduledRun::create([
         'agent_id'        => $agentId,
-        'user_id'         => 1,
+        'user_id'         => $userId,
         'raw_prompt'      => 'Daily standup prompt',
         'cron_expression' => '0 7 * * *',
         'timezone'        => 'UTC',

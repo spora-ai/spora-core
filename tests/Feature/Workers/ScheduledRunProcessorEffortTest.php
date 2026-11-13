@@ -51,7 +51,7 @@ function makeEffortProcessorFixture(): array
             return Task::create([
                 'agent_id'        => $agentId,
                 'principal_id'    => (int) Agent::find($agentId)->principal_id,
-                'trigger_user_id' => 1,
+                'trigger_user_id' => null,
                 'status'          => 'QUEUED',
                 'user_prompt'     => $prompt,
                 'max_steps'       => $maxSteps,

@@ -72,7 +72,7 @@ function makeEffortHttpControllers(): array
         return Spora\Models\Task::create([
             'agent_id'        => $agentId,
             'principal_id'    => (int) Agent::find($agentId)->principal_id,
-            'trigger_user_id' => 1,
+            'trigger_user_id' => null,
             'status'          => 'RUNNING',
             'user_prompt'     => $prompt,
             'max_steps'       => $maxSteps,
@@ -158,12 +158,12 @@ it('creating a schedule with an unsupported effort override is a 422 that names 
 });
 
 it('updating a schedule with an unsupported effort override is a 422', function (): void {
-    [, $agentId, $authMiddleware] = makeEffortHttpOwner();
+    [$userId, $agentId, $authMiddleware] = makeEffortHttpOwner();
     [, $runController] = makeEffortHttpControllers();
 
     $run = ScheduledRun::create([
         'agent_id'        => $agentId,
-        'user_id'         => 1,
+        'user_id'         => $userId,
         'raw_prompt'      => 'Summarize the inbox',
         'cron_expression' => '0 7 * * *',
         'timezone'        => 'UTC',

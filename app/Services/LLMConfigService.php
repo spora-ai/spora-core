@@ -64,6 +64,16 @@ final class LLMConfigService implements LLMConfigServiceInterface
         return $this->schemaInspector->getDrivers();
     }
 
+    /**
+     * The registered driver classes.
+     *
+     * @return list<class-string<\Spora\Drivers\LLMDriverConfigInterface>>
+     */
+    public function driverClasses(): array
+    {
+        return $this->schemaInspector->driverClasses();
+    }
+
     // Settings encode, decode and mask.
 
     /**

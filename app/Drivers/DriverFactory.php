@@ -97,14 +97,22 @@ class DriverFactory
      * values and cannot disagree about which levels a configuration
      * offers.
      *
+     * The class that is built is the registry's own, never the name the
+     * request carried: a save request names a driver, and a name nobody
+     * registered is not one. The registry is the set of drivers this
+     * installation ships, and a class outside it is not a driver however
+     * it is spelled.
+     *
      * @param array<string, mixed> $settings
-     * @throws DriverClassNotFoundException when the driver class does not exist
+     * @throws DriverClassNotFoundException when the driver class is not registered
      * @throws InvalidArgumentException when `effort_levels` is malformed
      */
     public function makeDriverFromSettings(string $driverClass, array $settings): LLMDriverInterface
     {
-        if (! class_exists($driverClass)) {
-            throw new DriverClassNotFoundException("LLM driver class {$driverClass} does not exist.");
+        $registered = $this->registeredDriverClass($driverClass);
+
+        if ($registered === null) {
+            throw new DriverClassNotFoundException("LLM driver class {$driverClass} is not a registered driver.");
         }
 
         $commonArgs = [
@@ -119,11 +127,30 @@ class DriverFactory
             'supportsEffort' => $this->decodeToggle($settings, 'supports_effort'),
         ];
 
-        if (is_a($driverClass, DriverOptionsAwareInterface::class, true)) {
-            return $driverClass::makeFromSettings($commonArgs, $settings);
+        if (is_a($registered, DriverOptionsAwareInterface::class, true)) {
+            return $registered::makeFromSettings($commonArgs, $settings);
         }
 
-        return new $driverClass(...$this->acceptedArguments($driverClass, $commonArgs));
+        return new $registered(...$this->acceptedArguments($registered, $commonArgs));
+    }
+
+    /**
+     * The registry's own class for a driver name, or null when the name is
+     * not one of the registered drivers.
+     *
+     * The returned string is the registry's, so what reaches the
+     * instantiation is a class this installation ships rather than a name
+     * a request carried.
+     */
+    private function registeredDriverClass(string $driverClass): ?string
+    {
+        foreach ($this->llmConfigService->driverClasses() as $registered) {
+            if ($registered === $driverClass) {
+                return $registered;
+            }
+        }
+
+        return null;
     }
 
     /**
