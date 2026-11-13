@@ -7,7 +7,6 @@ namespace Spora\Http;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Services\AgentServiceInterface;
-use Spora\Services\EffortService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -15,8 +14,9 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * The reasoning-effort levels an agent can use, and the one it defaults to.
  *
- * Read-only, and the only place the tiers of the configuration resolution
- * are worked out for the client — the frontend asks, it does not compute.
+ * Read-only, and the operator-facing half of the effort endpoints: the
+ * agent, group and global surfaces report the same thing about an agent
+ * through the same projection, so the four answers cannot drift.
  */
 final class AgentEffortController
 {
@@ -25,7 +25,7 @@ final class AgentEffortController
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
-        private readonly EffortService $effortService,
+        private readonly EffortProjection $projection,
     ) {}
 
     #[OA\Get(
@@ -54,6 +54,6 @@ final class AgentEffortController
             );
         }
 
-        return new JsonResponse(['data' => $this->effortService->describe($agent)]);
+        return $this->projection->respond($agent);
     }
 }

@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Tests\Feature\AgentApi;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Http\AgentApi\AgentApiSpeechController;
 use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
+use Spora\OpenApi\RouteToOpenApi;
 use Spora\Services\ApiKeys\ApiKeyFileIngest;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -178,6 +180,20 @@ describe('Agent API speech', function (): void {
     function speechRequest(string $path, string $key, array $body = []): Request
     {
         return jsonRequest('POST', $path, $body, ['Authorization' => 'Bearer ' . $key]);
+    }
+
+    /**
+     * The `effort` property the transcribe-and-send endpoint documents.
+     *
+     * @return array<string, mixed>|null null when the endpoint does not offer the field
+     */
+    function transcribeAndSendEffortProperty(): ?array
+    {
+        $spec = json_decode((string) json_encode((new RouteToOpenApi())->build()), true);
+
+        $property = $spec['paths']['/api/v1/agent-api/transcribe-and-send']['post']['requestBody']['content']['application/json']['schema']['properties']['effort'] ?? null;
+
+        return is_array($property) ? $property : null;
     }
 
     it('transcribes an asset and caches the transcript on it', function (): void {
@@ -427,6 +443,82 @@ describe('Agent API speech', function (): void {
         // The audio is not attached: only the transcript travels, because a
         // model handed raw audio with no text on top guesses at the bytes.
         expect(TaskHistory::where('task_id', $chatId)->where('role', 'attachment')->count())->toBe(0);
+    });
+
+    it('sends the transcript with the effort the caller named', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('send-effort');
+        [, $key] = AgentApiTestSupport::mintKey($seed['agentId'], 'send-effort');
+
+        $container = speechContainer([new StubSpeechProvider()]);
+        registerDriver(StubSpeechProvider::class);
+
+        $mediaId = ingestRecording($container, $seed);
+
+        $response = AgentApiTestSupport::call(
+            $container,
+            AgentApiSpeechController::class,
+            'transcribeAndSend',
+            speechRequest('/api/v1/agent-api/transcribe-and-send', $key, [
+                'media_id' => $mediaId,
+                'effort' => 'high',
+            ]),
+        );
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_ACCEPTED);
+
+        $chatId = (int) AgentApiTestSupport::decode($response)['data']['chat']['id'];
+        expect(Task::find($chatId)?->effort)->toBe('high');
+    });
+
+    it('sends the transcript without an effort when the caller names none', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('send-no-effort');
+        [, $key] = AgentApiTestSupport::mintKey($seed['agentId'], 'send-no-effort');
+
+        $container = speechContainer([new StubSpeechProvider()]);
+        registerDriver(StubSpeechProvider::class);
+
+        $mediaId = ingestRecording($container, $seed);
+
+        $response = AgentApiTestSupport::call(
+            $container,
+            AgentApiSpeechController::class,
+            'transcribeAndSend',
+            speechRequest('/api/v1/agent-api/transcribe-and-send', $key, ['media_id' => $mediaId]),
+        );
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_ACCEPTED);
+
+        $chatId = (int) AgentApiTestSupport::decode($response)['data']['chat']['id'];
+        expect(Task::find($chatId)?->effort)->toBeNull();
+
+        // The field is optional, and the endpoint says so: a caller that
+        // leaves it out is answered, not refused.
+        expect(transcribeAndSendEffortProperty())->not->toBeNull();
+    });
+
+    it('refuses an effort the agent\'s LLM configuration does not offer with 422', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('send-effort-unsupported', AnthropicCompatibleDriver::class);
+        [, $key] = AgentApiTestSupport::mintKey($seed['agentId'], 'send-effort-unsupported');
+
+        $container = speechContainer([new StubSpeechProvider()]);
+        registerDriver(StubSpeechProvider::class);
+
+        $mediaId = ingestRecording($container, $seed);
+        $before = Task::count();
+
+        $response = AgentApiTestSupport::call(
+            $container,
+            AgentApiSpeechController::class,
+            'transcribeAndSend',
+            speechRequest('/api/v1/agent-api/transcribe-and-send', $key, [
+                'media_id' => $mediaId,
+                'effort' => 'none',
+            ]),
+        );
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+        expect(AgentApiTestSupport::decode($response)['error']['code'])->toBe('EFFORT_LEVEL_UNSUPPORTED');
+        expect(Task::count())->toBe($before);
     });
 
     it('puts the caller\'s text after the transcript', function (): void {
