@@ -6,6 +6,7 @@ namespace Tests\Feature\Drivers;
 
 use ReflectionClass;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Drivers\OpenAIDriverOptions;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
@@ -190,7 +191,7 @@ test('OpenAI driver constructor exposes supportsImageInput getter', function ():
         model: 'gpt-3.5-turbo',
         baseUrl: 'https://api.openai.com/v1',
         httpClient: new MockHttpClient(),
-        supportsImageInput: false,
+        options: new OpenAIDriverOptions(supportsImageInput: false),
     );
 
     // Even though gpt-3.5-turbo is non-vision by the model heuristic, the
@@ -204,7 +205,7 @@ test('OpenAI driver constructor exposes supportsImageInput=true override on a no
         model: 'gpt-3.5-turbo',
         baseUrl: 'https://api.openai.com/v1',
         httpClient: new MockHttpClient(),
-        supportsImageInput: true,
+        options: new OpenAIDriverOptions(supportsImageInput: true),
     );
 
     expect($driver->supportsImageInput())->toBeTrue();

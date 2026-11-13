@@ -6,6 +6,7 @@ use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Drivers\OpenAIDriverOptions;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
@@ -84,7 +85,7 @@ function captureOpenAIBody(string $model, LLMRequest $request, array $effortLeve
         model: $model,
         baseUrl: 'https://api.openai.com/v1',
         httpClient: $client,
-        effortLevels: $effortLevels,
+        options: new OpenAIDriverOptions(configuredEffortLevels: $effortLevels),
     ))->complete($request);
 
     return $captured;

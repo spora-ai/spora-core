@@ -156,9 +156,11 @@ class DriverFactory
     /**
      * The arguments a driver's constructor actually declares.
      *
-     * A driver that predates the effort parameters keeps working: it does
-     * not receive them, so its own level set applies. A named-argument
-     * spread of the whole set would fail on the first unknown key instead.
+     * A driver that is not options-aware keeps working: it receives only
+     * the arguments it declares, so one that predates the effort
+     * parameters does not receive them and its own level set applies. A
+     * named-argument spread of the whole set would fail on the first
+     * unknown key instead.
      *
      * @param array<string, mixed> $commonArgs
      * @return array<string, mixed>

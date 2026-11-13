@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\AnthropicDriverOptions;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Drivers\OpenAIDriverOptions;
 use Symfony\Component\HttpClient\MockHttpClient;
 
 /**
@@ -28,8 +29,10 @@ function effortPrecedenceOpenAi(array $levels = [], ?bool $supportsEffort = null
         model: 'gpt-4o',
         baseUrl: 'https://example.test',
         httpClient: new MockHttpClient(),
-        effortLevels: $levels,
-        supportsEffort: $supportsEffort,
+        options: new OpenAIDriverOptions(
+            configuredEffortLevels: $levels,
+            supportsEffort: $supportsEffort,
+        ),
     );
 }
 
