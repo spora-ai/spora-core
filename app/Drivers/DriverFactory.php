@@ -85,23 +85,22 @@ class DriverFactory
             );
         }
 
-        return $this->makeDriverFromSettings($driverClass, $settings);
+        return $this->build($driverClass, $settings);
     }
 
     /**
      * The driver a driver class and a set of settings describe.
      *
-     * The settings are the plaintext ones a save request carries — the
-     * stored blob is decrypted by {@see self::makeDriverFromConfig()}
-     * before it gets here, so the validator and the runtime read the same
-     * values and cannot disagree about which levels a configuration
-     * offers.
+     * The settings are the plaintext ones a save request carries, and the
+     * class is the one the request named — so the class that is built is
+     * the registry's own, never the name the request carried. A save
+     * request names a driver, and a name nobody registered is not one. The
+     * registry is the set of drivers this installation ships, and a class
+     * outside it is not a driver however it is spelled.
      *
-     * The class that is built is the registry's own, never the name the
-     * request carried: a save request names a driver, and a name nobody
-     * registered is not one. The registry is the set of drivers this
-     * installation ships, and a class outside it is not a driver however
-     * it is spelled.
+     * The stored path ({@see self::makeDriverFromConfig()}) does not go
+     * through this gate: a configuration saved while its driver was
+     * registered keeps working after the registry moves on.
      *
      * @param array<string, mixed> $settings
      * @throws DriverClassNotFoundException when the driver class is not registered
@@ -115,6 +114,20 @@ class DriverFactory
             throw new DriverClassNotFoundException("LLM driver class {$driverClass} is not a registered driver.");
         }
 
+        return $this->build($registered, $settings);
+    }
+
+    /**
+     * Build a driver from a class and its settings.
+     *
+     * The class reaches this method already vetted: the registry's own on
+     * the save path, the stored configuration's on the runtime path.
+     *
+     * @param array<string, mixed> $settings
+     * @throws InvalidArgumentException when `effort_levels` is malformed
+     */
+    private function build(string $driverClass, array $settings): LLMDriverInterface
+    {
         $commonArgs = [
             'apiKey' => (string) ($settings['api_key'] ?? ''),
             'model' => (string) ($settings['model'] ?? ''),
@@ -127,11 +140,11 @@ class DriverFactory
             'supportsEffort' => $this->decodeToggle($settings, 'supports_effort'),
         ];
 
-        if (is_a($registered, DriverOptionsAwareInterface::class, true)) {
-            return $registered::makeFromSettings($commonArgs, $settings);
+        if (is_a($driverClass, DriverOptionsAwareInterface::class, true)) {
+            return $driverClass::makeFromSettings($commonArgs, $settings);
         }
 
-        return new $registered(...$this->acceptedArguments($registered, $commonArgs));
+        return new $driverClass(...$this->acceptedArguments($driverClass, $commonArgs));
     }
 
     /**

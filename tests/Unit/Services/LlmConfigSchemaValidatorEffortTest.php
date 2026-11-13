@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Psr\Log\NullLogger;
 use Spora\Core\SecurityManager;
+use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\LLMDriverConfiguration;
@@ -27,7 +28,7 @@ function effortValidatorDriverFactory(): DriverFactory
 {
     $llmConfigService = new LLMConfigService(
         new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
-        [OpenAICompatibleDriver::class],
+        [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class],
     );
 
     return new DriverFactory(new NullLogger(), $llmConfigService, 60);
