@@ -269,35 +269,46 @@ final class AgentService implements AgentServiceInterface
     {
         $filtered = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
 
-        // A default the configuration does not offer is refused rather
-        // than stored: the run would silently happen at another depth.
-        //
-        // The configuration is the one the agent resolves to *after* the
-        // write: a patch that re-points the agent at another configuration
-        // is judged by that configuration's levels — both the default it
-        // names and the one it leaves in place have to be levels that
-        // configuration offers. A patch that touches neither leaves the
-        // pair as it was, so there is nothing to judge.
-        if (array_key_exists('default_effort', $filtered) || array_key_exists('llm_driver_config_id', $filtered)) {
-            $this->effortService?->assertAgentDefault(
-                array_key_exists('default_effort', $filtered) ? $filtered['default_effort'] : $agent->default_effort,
-                new Agent([
-                    'principal_id'         => $agent->principal_id,
-                    'llm_driver_config_id' => array_key_exists('llm_driver_config_id', $filtered)
-                        ? $filtered['llm_driver_config_id']
-                        : $agent->llm_driver_config_id,
-                ]),
-            );
+        if ($filtered === []) {
+            return $agent;
         }
 
-        if ($filtered !== []) {
+        // The default effort and the configuration it resolves to are a
+        // pair, and the check reads one while the write changes the other.
+        // Two concurrent patches could each pass the check against the same
+        // starting state and leave a pair that does not belong together —
+        // so the read, the check and the write happen under one row lock.
+        return Capsule::connection()->transaction(function () use ($agentId, $agent, $filtered): Agent {
+            $current = Agent::where('id', $agentId)->lockForUpdate()->first() ?? $agent;
+
+            // A default the configuration does not offer is refused rather
+            // than stored: the run would silently happen at another depth.
+            //
+            // The configuration is the one the agent resolves to *after* the
+            // write: a patch that re-points the agent at another configuration
+            // is judged by that configuration's levels — both the default it
+            // names and the one it leaves in place have to be levels that
+            // configuration offers. A patch that touches neither leaves the
+            // pair as it was, so there is nothing to judge.
+            if (array_key_exists('default_effort', $filtered) || array_key_exists('llm_driver_config_id', $filtered)) {
+                $this->effortService?->assertAgentDefault(
+                    array_key_exists('default_effort', $filtered) ? $filtered['default_effort'] : $current->default_effort,
+                    new Agent([
+                        'principal_id'         => $current->principal_id,
+                        'llm_driver_config_id' => array_key_exists('llm_driver_config_id', $filtered)
+                            ? $filtered['llm_driver_config_id']
+                            : $current->llm_driver_config_id,
+                    ]),
+                );
+            }
+
             Capsule::table('agents')
                 ->where('id', $agentId)
                 ->update(array_merge($filtered, ['updated_at' => date(self::DATETIME_FORMAT)]));
-            $agent->refresh();
-        }
+            $current->refresh();
 
-        return $agent;
+            return $current;
+        });
     }
 
     public function deleteAgent(int $agentId, int $userId): bool
