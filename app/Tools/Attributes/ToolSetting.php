@@ -124,5 +124,20 @@ final class ToolSetting
          */
         public readonly string $resolveAs = 'agent',
         public readonly string $scope = self::SCOPE_ANY,
+        /**
+         * Whether the setting's default is the value the setting takes when
+         * a stored configuration does not carry the key.
+         *
+         * The settings form renders the stored settings, so a setting a
+         * configuration never saved shows as unset — and for a toggle that
+         * reads as "off", which is the opposite of what runs. A setting
+         * whose absent value is its default says so here, and the form
+         * shows that default instead.
+         *
+         * False where the driver decides from something else:
+         * `supports_image_input` falls back to the model when the key is
+         * absent, so its default is not what an absent key takes.
+         */
+        public readonly bool $defaultAppliesWhenAbsent = false,
     ) {}
 }

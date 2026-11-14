@@ -57,7 +57,7 @@ final class LLMConfigSchemaInspector
     }
 
     /**
-     * @return list<array{key: string, label: string, type: string, description: string, default: mixed, required: bool, options: array|null}>
+     * @return list<array{key: string, label: string, type: string, description: string, default: mixed, required: bool, options: array|null, default_applies_when_absent: bool}>
      */
     public function buildSchemaFromClass(string $class): array
     {
@@ -74,6 +74,7 @@ final class LLMConfigSchemaInspector
                 'default' => $setting->default,
                 'required' => $setting->required,
                 'options' => $setting->options,
+                'default_applies_when_absent' => $setting->defaultAppliesWhenAbsent,
             ];
         }
 
