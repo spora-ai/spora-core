@@ -41,6 +41,11 @@ function makeController(): AgentTemplateController
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
         new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
+        null,
+        // The container wires the same service: the template's
+        // `agent.default_effort` is checked against the target
+        // configuration before it is written.
+        makeEffortService(),
     );
     $exporter = new AgentTemplateExporter($plugins, $toolConfig, new Spora\Services\ToolConfigSchemaInspector());
     $agentService = new AgentService();
@@ -138,6 +143,38 @@ test('import returns 422 VALIDATION_ERROR when validator reports errors', functi
     $response = $this->controller->import($request);
     expect($response->getStatusCode())->toBe(422);
     expect(json_decode($response->getContent(), true)['error']['code'])->toBe('VALIDATION_ERROR');
+});
+
+test('import returns 422 when the template names a default the configuration does not offer', function (): void {
+    Spora\Models\LLMDriverConfiguration::create([
+        'principal_id' => null,
+        'name'         => 'Controller Template Config',
+        'driver_class' => Spora\Drivers\OpenAICompatibleDriver::class,
+        'settings'     => json_encode([
+            'api_key'       => 'test',
+            'model'         => 'gpt-5.5',
+            'base_url'      => 'https://example.invalid',
+            'effort_levels' => 'low',
+        ]),
+        'is_global'  => true,
+        'is_default' => true,
+    ]);
+
+    $request = jsonRequest('POST', '/api/v1/agent-templates/import', [
+        'id' => 'deep', 'name' => 'Deep', 'version' => '1.0.0',
+        'agent' => ['system_prompt' => 'x', 'default_effort' => 'high'],
+        'tools' => [],
+        'required_plugins' => [],
+    ]);
+    $response = $this->controller->import($request);
+
+    expect($response->getStatusCode())->toBe(422);
+
+    $error = json_decode($response->getContent(), true)['error'];
+    expect($error['code'])->toBe('EFFORT_LEVEL_UNSUPPORTED')
+        ->and($error['message'])->toContain('Supported levels: low');
+
+    expect(Agent::where('name', 'Deep')->count())->toBe(0);
 });
 
 test('import accepts a body with `principal_id` as API metadata, not a template field', function (): void {

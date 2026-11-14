@@ -165,12 +165,17 @@ final class AgentService implements AgentServiceInterface
      */
     private function persistNewAgent(array $allowed, int $principalId): Agent
     {
-        // The agent does not exist yet, so the level set is the one its
-        // principal's effective configuration offers — the agent has no
-        // configuration of its own to narrow it.
+        // The agent does not exist yet, so the level set is the one the
+        // configuration it names offers. The agent's own pointer wins over
+        // the principal's fallback, so the default is judged by the
+        // configuration the new agent will resolve to — not by the
+        // fallback, which the agent may never use.
         $this->effortService?->assertAgentDefault(
             $allowed['default_effort'] ?? null,
-            new Agent(['principal_id' => $principalId]),
+            new Agent([
+                'principal_id'         => $principalId,
+                'llm_driver_config_id' => $allowed['llm_driver_config_id'] ?? null,
+            ]),
         );
 
         $id = Capsule::table('agents')->insertGetId([
@@ -266,7 +271,24 @@ final class AgentService implements AgentServiceInterface
 
         // A default the configuration does not offer is refused rather
         // than stored: the run would silently happen at another depth.
-        $this->effortService?->assertAgentDefault($filtered['default_effort'] ?? null, $agent);
+        //
+        // The configuration is the one the agent resolves to *after* the
+        // write: a patch that re-points the agent at another configuration
+        // is judged by that configuration's levels — both the default it
+        // names and the one it leaves in place have to be levels that
+        // configuration offers. A patch that touches neither leaves the
+        // pair as it was, so there is nothing to judge.
+        if (array_key_exists('default_effort', $filtered) || array_key_exists('llm_driver_config_id', $filtered)) {
+            $this->effortService?->assertAgentDefault(
+                array_key_exists('default_effort', $filtered) ? $filtered['default_effort'] : $agent->default_effort,
+                new Agent([
+                    'principal_id'         => $agent->principal_id,
+                    'llm_driver_config_id' => array_key_exists('llm_driver_config_id', $filtered)
+                        ? $filtered['llm_driver_config_id']
+                        : $agent->llm_driver_config_id,
+                ]),
+            );
+        }
 
         if ($filtered !== []) {
             Capsule::table('agents')

@@ -23,6 +23,7 @@ use Spora\Services\ApiKeys\ApiKeyCallbackDispatcher;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\PrincipalResolver;
+use Spora\Services\ScheduledRunEffortResolver;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -111,6 +112,12 @@ final class WorkerRunCommand extends Command
             $logger,
             $mercure,
             $notificationService,
+            // Optional for the same reason the due-work dispatcher is: a
+            // test container that does not know the resolver must still be
+            // able to build this command.
+            $container->has(ScheduledRunEffortResolver::class)
+                ? $container->get(ScheduledRunEffortResolver::class)
+                : null,
         );
 
         parent::__construct('worker:run');
