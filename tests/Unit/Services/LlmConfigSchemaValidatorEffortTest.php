@@ -67,9 +67,9 @@ test('an effort outside the model\'s own set is refused when no list is configur
     $validator = effortValidator();
 
     $error = $validator->validateSettings(
-        Spora\Drivers\AnthropicCompatibleDriver::class,
+        AnthropicCompatibleDriver::class,
         ['effort' => 'none'],
-        $validator->getSchemaForDriver(Spora\Drivers\AnthropicCompatibleDriver::class),
+        $validator->getSchemaForDriver(AnthropicCompatibleDriver::class),
     );
 
     expect($error)->toContain('effort "none" is not offered by this LLM configuration.')
