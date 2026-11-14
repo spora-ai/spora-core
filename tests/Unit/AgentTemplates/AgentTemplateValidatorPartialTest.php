@@ -89,4 +89,23 @@ describe('AgentTemplateValidator::validatePartial', function (): void {
         expect($result->isValid())->toBeFalse();
         expect(array_column($result->errors(), 'code'))->toContain('MAX_STEPS_INVALID');
     });
+
+    it('accepts a default effort of the column\'s length', function (): void {
+        // The column is a `string(16)`, so a name of exactly that length
+        // is the longest one that can be stored.
+        $result = (new AgentTemplateValidator())->validatePartial([
+            'agent' => ['default_effort' => str_repeat('a', 16)],
+        ]);
+
+        expect($result->isValid())->toBeTrue();
+    });
+
+    it('refuses a default effort longer than the column', function (): void {
+        $result = (new AgentTemplateValidator())->validatePartial([
+            'agent' => ['default_effort' => str_repeat('a', 17)],
+        ]);
+
+        expect($result->isValid())->toBeFalse();
+        expect(array_column($result->errors(), 'code'))->toContain('DEFAULT_EFFORT_TOO_LONG');
+    });
 });

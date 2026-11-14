@@ -113,3 +113,14 @@ test('the names of a set are the ones it carries', function (): void {
     expect(EffortLevelSet::fromNames(['low', 'high'])->names())->toBe(['low', 'high'])
         ->and(EffortLevelSet::fromNames([])->isEmpty())->toBeTrue();
 });
+
+test('a level named with digits keeps its name, whatever an array key does to it', function (): void {
+    // PHP turns a numeric-string array key into an int, so the levels of
+    // a driver that names a level "1" arrive as [1] rather than ["1"].
+    expect(EffortLevelSet::fromNames([1, 2])->names())->toBe(['1', '2']);
+});
+
+test('the names of a driver map are strings, whatever the keys are', function (): void {
+    expect(EffortLevelSet::namesFromMap([1 => '1', 2 => '2']))->toBe(['1', '2'])
+        ->and(EffortLevelSet::namesFromMap(['low' => 'low']))->toBe(['low']);
+});

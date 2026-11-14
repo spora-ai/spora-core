@@ -164,6 +164,12 @@ final class EffortService
      * this level". An empty string is not a state — the column never
      * distinguishes it from null — so it is refused.
      *
+     * The value is checked as it was given, not trimmed: a level name
+     * cannot carry whitespace, and the value that is checked is the value
+     * that is stored — a trimmed one would be a level the stored value is
+     * not, and the stored default would silently lose to the
+     * configuration's.
+     *
      * @throws EffortValidationException
      */
     public function assertAgentDefault(mixed $value, ?Agent $agent): void
@@ -179,7 +185,7 @@ final class EffortService
             );
         }
 
-        $this->assertLevel(trim($value), $agent);
+        $this->assertLevel($value, $agent);
     }
 
     /**
@@ -249,7 +255,7 @@ final class EffortService
             return [];
         }
 
-        return array_keys($driver->effortLevels());
+        return EffortLevelSet::namesFromMap($driver->effortLevels());
     }
 
     /**

@@ -18,6 +18,7 @@ use Spora\Auth\ApiKeyScope;
 use Spora\Auth\AuthService;
 use Spora\Core\Config;
 use Spora\Core\ContainerDefinitions;
+use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Drivers\ValueObjects\LLMResponse;
@@ -97,8 +98,12 @@ final class AgentApiTestSupport
 
         // The effort capability is read from the *configuration's* driver,
         // not from the scripted one, so it needs a driver factory that can
-        // build the real thing.
-        $container->set(EffortService::class, makeEffortService());
+        // build the real thing — and the driver classes the seeded
+        // configurations name have to be registered for it.
+        $container->set(EffortService::class, makeEffortService([
+            OpenAICompatibleDriver::class,
+            AnthropicCompatibleDriver::class,
+        ]));
 
         // The container's own orchestrator builds its tool list from
         // `InstalledToolClasses`, which reflects over the production

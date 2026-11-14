@@ -43,7 +43,15 @@ final class EffortLevelSet
     }
 
     /**
-     * @param list<string> $names
+     * The set the names describe.
+     *
+     * A name may arrive as an integer: PHP turns a numeric-string array
+     * key into an int, so the levels of a driver that names a level "1"
+     * come back as `[1]`. The name is put back into its string form
+     * here, because the name is compared against the string the operator
+     * wrote.
+     *
+     * @param list<int|string> $names
      * @throws InvalidArgumentException when a name breaks the pattern or the length cap
      */
     public static function fromNames(array $names): self
@@ -51,7 +59,7 @@ final class EffortLevelSet
         $unique = [];
 
         foreach ($names as $name) {
-            $trimmed = trim($name);
+            $trimmed = trim((string) $name);
 
             if ($trimmed === '' || in_array($trimmed, $unique, true)) {
                 continue;
@@ -70,6 +78,22 @@ final class EffortLevelSet
         }
 
         return new self($unique);
+    }
+
+    /**
+     * The level names a driver's name => wire value map carries.
+     *
+     * PHP turns a numeric-string array key into an integer, so the map of
+     * a configuration that names a level "1" is keyed by the int 1. The
+     * name is put back into its string form here, because it is compared
+     * against the string the operator wrote.
+     *
+     * @param array<int|string, string> $levels
+     * @return list<string>
+     */
+    public static function namesFromMap(array $levels): array
+    {
+        return array_map(strval(...), array_keys($levels));
     }
 
     public function isEmpty(): bool

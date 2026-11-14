@@ -357,16 +357,18 @@ function effortHttpController(
 
     $mediaCapability = new TaskMediaCapabilityService();
 
+    $effortService = makeEffortService([OpenAICompatibleDriver::class, $driverClass]);
+
     return [
         new TaskController(
             $authService,
             $taskService,
             $mediaCapability,
-            new ContinueTaskDispatcher($taskService, $mediaCapability, makeEffortService()),
+            new ContinueTaskDispatcher($taskService, $mediaCapability, $effortService),
             new DecisionsRequestValidator($taskService),
             new AnswerQuestionRequestValidator(new PrincipalResolver()),
             makeAgentService(),
-            makeEffortService(),
+            $effortService,
         ),
         $userId,
         (int) $agent->id,
