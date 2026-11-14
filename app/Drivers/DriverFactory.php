@@ -157,7 +157,9 @@ class DriverFactory
      */
     private function registeredDriverClass(string $driverClass): ?string
     {
-        foreach ($this->llmConfigService->driverClasses() as $registered) {
+        foreach ($this->llmConfigService->getDrivers() as $driver) {
+            $registered = $driver['driver_class'];
+
             if ($registered === $driverClass) {
                 return $registered;
             }

@@ -32,23 +32,6 @@ final class LLMConfigSchemaInspector
     }
 
     /**
-     * The registered driver classes.
-     *
-     * The set of drivers this installation ships. A driver class outside it
-     * is not a driver here, however it is spelled — the registry is what
-     * says so.
-     *
-     * @return list<class-string<LLMDriverConfigInterface>>
-     */
-    public function driverClasses(): array
-    {
-        return array_values(array_filter(
-            $this->driverClasses,
-            static fn(string $class): bool => class_exists($class),
-        ));
-    }
-
-    /**
      * Returns all registered driver classes with their resolved schemas.
      *
      * @return list<array{name: string, display_name: string, driver_class: string, settings_schema: list<array>}>
