@@ -176,11 +176,16 @@ final class LlmConfigSchemaValidator
     /**
      * The reason the reasoning-effort default cannot be accepted, or null.
      *
+     * The value is checked as it was given, not trimmed: a level name
+     * cannot carry whitespace, and the value that is checked is the value
+     * that is saved — a trimmed one would be a level the saved default is
+     * not, and the saved default would silently lose to the model's own.
+     *
      * @param array<string, mixed> $settings
      */
     private function effortMembershipError(?LLMDriverInterface $driver, array $settings): ?string
     {
-        $effort = trim((string) ($settings['effort'] ?? ''));
+        $effort = (string) ($settings['effort'] ?? '');
 
         if ($effort === '') {
             return null;
@@ -210,7 +215,7 @@ final class LlmConfigSchemaValidator
     private function levelNames(?LLMDriverInterface $driver, array $settings): ?array
     {
         if ($driver instanceof EffortAwareDriverInterface) {
-            return array_keys($driver->effortLevels());
+            return EffortLevelSet::namesFromMap($driver->effortLevels());
         }
 
         $configured = trim((string) ($settings['effort_levels'] ?? ''));

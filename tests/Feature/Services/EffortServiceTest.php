@@ -277,6 +277,59 @@ test('the level set of the agent is the configuration\'s', function (): void {
         ->and($service->levelSetFor($agent)->has('medium'))->toBeFalse();
 });
 
+test('a configuration whose levels are named with digits resolves them and its default', function (): void {
+    // The levels are named "1" and "2", so the driver's map is keyed by
+    // the int 1 and 2 — PHP turns a numeric-string key into an int.
+    [$service, $agent] = effortServiceFixture(
+        AnthropicCompatibleDriver::class,
+        'claude-sonnet-5-5',
+        null,
+        ['effort_levels' => '1,2'],
+        '1',
+    );
+
+    expect($service->levelSetFor($agent)->names())->toBe(['1', '2'])
+        ->and($service->defaultFor($agent))->toBe('1')
+        ->and(fn() => $service->assertLevel('1', $agent))->not->toThrow(EffortValidationException::class);
+});
+
+test('an agent default the level set does not name is refused, whitespace and all', function (): void {
+    // A level name cannot carry whitespace, so " high " is not a level
+    // name at all — and the value that is checked is the value that is
+    // stored, or the stored default would silently lose to the
+    // configuration's.
+    [$service, $agent] = effortServiceFixture(
+        AnthropicCompatibleDriver::class,
+        'claude-sonnet-5-5',
+        null,
+        ['effort_levels' => 'low, high'],
+    );
+
+    try {
+        $service->assertAgentDefault(' high ', $agent);
+    } catch (EffortValidationException $e) {
+        expect($e->errorCode())->toBe('EFFORT_LEVEL_UNSUPPORTED')
+            ->and($e->getMessage())->toContain('Supported levels: low, high');
+
+        return;
+    }
+
+    $this->fail('Expected an EffortValidationException.');
+});
+
+test('an agent default the level set names is accepted and is the default the chain returns', function (): void {
+    [$service, $agent] = effortServiceFixture(
+        AnthropicCompatibleDriver::class,
+        'claude-sonnet-5-5',
+        null,
+        ['effort_levels' => 'low, high'],
+        'high',
+    );
+
+    expect(fn() => $service->assertAgentDefault('high', $agent))->not->toThrow(EffortValidationException::class)
+        ->and($service->defaultFor($agent))->toBe('high');
+});
+
 test('a level the configuration names is accepted', function (): void {
     [$service, $agent] = effortServiceFixture(
         AnthropicCompatibleDriver::class,

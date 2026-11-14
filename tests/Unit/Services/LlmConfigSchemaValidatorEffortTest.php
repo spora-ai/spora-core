@@ -62,6 +62,20 @@ test('an effort the level set offers is accepted', function (): void {
     expect(effortValidatorError(['effort' => 'low', 'effort_levels' => 'low, high']))->toBeNull();
 });
 
+test('an effort with surrounding whitespace is refused, naming the levels it offers', function (): void {
+    // A level name cannot carry whitespace, so " high " is not a level
+    // name — and the value that is checked is the value that is saved, or
+    // the saved default would silently lose to the model's own.
+    expect(effortValidatorError(['effort' => ' high ', 'effort_levels' => 'low, high']))
+        ->toBe('effort " high " is not offered by this LLM configuration. Supported levels: low, high.');
+});
+
+test('a level named with digits is offered and accepted', function (): void {
+    // The levels are named "1" and "2", so the driver's map is keyed by
+    // the int 1 and 2 — PHP turns a numeric-string key into an int.
+    expect(effortValidatorError(['effort' => '1', 'effort_levels' => '1,2']))->toBeNull();
+});
+
 test('an effort outside the model\'s own set is refused when no list is configured', function (): void {
     // The Anthropic driver takes no `none` and no `minimal`.
     $validator = effortValidator();
