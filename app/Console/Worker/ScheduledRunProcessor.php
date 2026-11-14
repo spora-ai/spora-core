@@ -22,6 +22,7 @@ use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PromptTemplateExpander;
+use Spora\Services\ScheduledRunEffortResolver;
 use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 
@@ -43,6 +44,7 @@ final class ScheduledRunProcessor
         private readonly LoggerInterface $logger,
         private readonly MercurePublisherInterface $mercure,
         private readonly NotificationService $notificationService,
+        private readonly ?ScheduledRunEffortResolver $effortResolver = null,
     ) {
         $this->expander = new PromptTemplateExpander();
     }
@@ -74,7 +76,7 @@ final class ScheduledRunProcessor
             $template = $this->findTemplate($run);
             $prompt   = $this->buildPrompt($run, $template, $agent);
             $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
-            $effort   = $this->resolveEffort($run, $template);
+            $effort   = $this->resolveEffort($run, $template, $agent, $output);
 
             $task = $this->orchestrator->start(
                 (int) $run->agent_id,
@@ -186,7 +188,7 @@ final class ScheduledRunProcessor
             $template = $this->findTemplate($run);
             $prompt   = $this->buildPrompt($run, $template, $agent);
             $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
-            $effort   = $this->resolveEffort($run, $template);
+            $effort   = $this->resolveEffort($run, $template, $agent, $output);
 
             // Explicit caller id lands in `trigger_user_id`; null would fall
             // back to the agent's most-recent trigger for credential
@@ -439,10 +441,44 @@ final class ScheduledRunProcessor
      * Nothing is not a level — it leaves the choice to the agent's default,
      * which the orchestrator resolves the same way a chat message's missing
      * effort does.
+     *
+     * A level the configuration no longer offers is replaced by the agent's
+     * effective default, and the substitution is reported: the driver drops
+     * a level it does not map, so the run would otherwise happen at the
+     * provider's default without a word.
      */
-    private function resolveEffort(ScheduledRun $run, ?AgentPromptTemplate $template): ?string
-    {
-        return $run->effort_override ?? $template?->effort;
+    private function resolveEffort(
+        ScheduledRun $run,
+        ?AgentPromptTemplate $template,
+        Agent $agent,
+        OutputInterface $output,
+    ): ?string {
+        $requested = $run->effort_override ?? $template?->effort;
+
+        // An unwired resolver means nothing knows the agent's level set,
+        // so the run dispatches the level it was saved with.
+        if ($this->effortResolver === null) {
+            return $requested;
+        }
+
+        $resolved = $this->effortResolver->resolve($requested, $agent);
+
+        if ($resolved['replaced'] !== null) {
+            $this->logger->warning(ScheduledRunEffortResolver::SUBSTITUTION_MESSAGE, [
+                'run_id'           => $run->id,
+                'agent_id'         => $run->agent_id,
+                'requested_effort' => $resolved['replaced'],
+                'effective_effort' => $resolved['level'],
+            ]);
+            $output->writeln(sprintf(
+                '<comment>Scheduled run %d: effort "%s" is not offered by the agent\'s LLM configuration; the run fires at "%s" instead.</comment>',
+                $run->id,
+                $resolved['replaced'],
+                $resolved['level'] ?? 'the model default',
+            ));
+        }
+
+        return $resolved['level'];
     }
 
     /**

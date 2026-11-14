@@ -10,6 +10,7 @@ use DateInvalidTimeZoneException;
 use DateTimeImmutable;
 use DateTimeZone;
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\TaskStartOptions;
 use Spora\Http\Exceptions\EffortValidationException;
@@ -50,6 +51,8 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         private readonly EffortService $effortService,
         ?PrincipalService $principalService = null,
         ?PrincipalResolver $principalResolver = null,
+        private readonly ?ScheduledRunEffortResolver $effortResolver = null,
+        private readonly ?LoggerInterface $logger = null,
     ) {
         $this->orchestratorProvider = $orchestrator instanceof Closure
             ? $orchestrator
@@ -416,10 +419,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             $maxSteps = $agent->max_steps;
         }
 
-        // The same precedence the cron tick resolves: the run's own
-        // override wins, the template's effort is the fallback, and null
-        // leaves the choice to the agent's default.
-        $effort = $run->effort_override ?? $template?->effort;
+        $effort = $this->resolveDispatchEffort($run, $template, $agent);
 
         // The trigger is an authenticated action: the task records the caller
         // as its trigger user, so the tools the run executes resolve their
@@ -503,6 +503,45 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         $run->refresh();
 
         return ['scheduled_run' => $this->resource($run), 'task_id' => $task->id];
+    }
+
+    /**
+     * The effort the run is dispatched with.
+     *
+     * The same precedence the cron tick resolves: the run's own override
+     * wins, the template's effort is the fallback, and null leaves the
+     * choice to the agent's default.
+     *
+     * A level the configuration no longer offers is replaced by the agent's
+     * effective default, and the substitution is reported: the driver drops
+     * a level it does not map, so the run would otherwise happen at the
+     * provider's default without a word.
+     */
+    private function resolveDispatchEffort(
+        ScheduledRun $run,
+        ?AgentPromptTemplate $template,
+        Agent $agent,
+    ): ?string {
+        $requested = $run->effort_override ?? $template?->effort;
+
+        // An unwired resolver means nothing knows the agent's level set,
+        // so the run dispatches the level it was saved with.
+        if ($this->effortResolver === null) {
+            return $requested;
+        }
+
+        $resolved = $this->effortResolver->resolve($requested, $agent);
+
+        if ($resolved['replaced'] !== null) {
+            $this->logger?->warning(ScheduledRunEffortResolver::SUBSTITUTION_MESSAGE, [
+                'run_id'           => $run->id,
+                'agent_id'         => $run->agent_id,
+                'requested_effort' => $resolved['replaced'],
+                'effective_effort' => $resolved['level'],
+            ]);
+        }
+
+        return $resolved['level'];
     }
 
     private function findAgent(int $id, int $userId, bool $forRead): ?Agent
