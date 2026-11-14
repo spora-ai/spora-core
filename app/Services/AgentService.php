@@ -56,6 +56,7 @@ final class AgentService implements AgentServiceInterface
         'llm_driver_config_id',
         'speech_driver_config_id',
         'max_steps',
+        'default_effort',
         'allow_followup',
         'retry_after_minutes',
         'max_retries',
@@ -70,6 +71,7 @@ final class AgentService implements AgentServiceInterface
         private readonly ?AgentPictureService $pictureService = null,
         private readonly ?PrincipalResolver $principalResolver = null,
         private readonly ?AgentPrincipalServiceInterface $principalService = null,
+        private readonly ?EffortService $effortService = null,
     ) {}
 
 
@@ -163,6 +165,19 @@ final class AgentService implements AgentServiceInterface
      */
     private function persistNewAgent(array $allowed, int $principalId): Agent
     {
+        // The agent does not exist yet, so the level set is the one the
+        // configuration it names offers. The agent's own pointer wins over
+        // the principal's fallback, so the default is judged by the
+        // configuration the new agent will resolve to — not by the
+        // fallback, which the agent may never use.
+        $this->effortService?->assertAgentDefault(
+            $allowed['default_effort'] ?? null,
+            new Agent([
+                'principal_id'         => $principalId,
+                'llm_driver_config_id' => $allowed['llm_driver_config_id'] ?? null,
+            ]),
+        );
+
         $id = Capsule::table('agents')->insertGetId([
             'principal_id'           => $principalId,
             'name'                   => $allowed['name'],
@@ -170,6 +185,7 @@ final class AgentService implements AgentServiceInterface
             'system_prompt'          => $allowed['system_prompt'] ?? null,
             'llm_driver_config_id'   => $allowed['llm_driver_config_id'] ?? null,
             'max_steps'              => (int) ($allowed['max_steps'] ?? 10),
+            'default_effort'         => $allowed['default_effort'] ?? null,
             'allow_followup'         => (bool) ($allowed['allow_followup'] ?? true) ? 1 : 0,
             'retry_after_minutes'    => (int) ($allowed['retry_after_minutes'] ?? 0),
             'max_retries'            => (int) ($allowed['max_retries'] ?? 0),
@@ -253,14 +269,46 @@ final class AgentService implements AgentServiceInterface
     {
         $filtered = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
 
-        if ($filtered !== []) {
+        if ($filtered === []) {
+            return $agent;
+        }
+
+        // The default effort and the configuration it resolves to are a
+        // pair, and the check reads one while the write changes the other.
+        // Two concurrent patches could each pass the check against the same
+        // starting state and leave a pair that does not belong together —
+        // so the read, the check and the write happen under one row lock.
+        return Capsule::connection()->transaction(function () use ($agentId, $agent, $filtered): Agent {
+            $current = Agent::where('id', $agentId)->lockForUpdate()->first() ?? $agent;
+
+            // A default the configuration does not offer is refused rather
+            // than stored: the run would silently happen at another depth.
+            //
+            // The configuration is the one the agent resolves to *after* the
+            // write: a patch that re-points the agent at another configuration
+            // is judged by that configuration's levels — both the default it
+            // names and the one it leaves in place have to be levels that
+            // configuration offers. A patch that touches neither leaves the
+            // pair as it was, so there is nothing to judge.
+            if (array_key_exists('default_effort', $filtered) || array_key_exists('llm_driver_config_id', $filtered)) {
+                $this->effortService?->assertAgentDefault(
+                    array_key_exists('default_effort', $filtered) ? $filtered['default_effort'] : $current->default_effort,
+                    new Agent([
+                        'principal_id'         => $current->principal_id,
+                        'llm_driver_config_id' => array_key_exists('llm_driver_config_id', $filtered)
+                            ? $filtered['llm_driver_config_id']
+                            : $current->llm_driver_config_id,
+                    ]),
+                );
+            }
+
             Capsule::table('agents')
                 ->where('id', $agentId)
                 ->update(array_merge($filtered, ['updated_at' => date(self::DATETIME_FORMAT)]));
-            $agent->refresh();
-        }
+            $current->refresh();
 
-        return $agent;
+            return $current;
+        });
     }
 
     public function deleteAgent(int $agentId, int $userId): bool

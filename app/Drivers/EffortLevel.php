@@ -5,15 +5,17 @@ declare(strict_types=1);
 namespace Spora\Drivers;
 
 /**
- * The canonical reasoning-effort scale Spora speaks.
+ * The default reasoning-effort vocabulary Spora speaks, and the label map
+ * for it.
  *
  * The cases are declared in ascending order because the levels are a
- * scale: the picker renders them in that order. A provider that spells
- * a level differently maps it in its own driver — the canonical value
- * is what the database, the API and the UI carry.
+ * scale: the picker renders them in that order.
  *
- * The union of every provider's vocabulary; the accepted subset is a
- * per-driver question (see {@see EffortAwareDriverInterface::effortLevels()}).
+ * The enum is no longer the constraint on what a level may be called: a
+ * configuration names its own levels, and a provider that spells one
+ * differently (Groq's `default`, say) has to be expressible. What the enum
+ * still owns is the default vocabulary and the pretty label for a name that
+ * belongs to it.
  */
 enum EffortLevel: string
 {
@@ -24,4 +26,30 @@ enum EffortLevel: string
     case High    = 'high';
     case XHigh   = 'xhigh';
     case Max     = 'max';
+
+    /**
+     * The label of this case.
+     */
+    public function label(): string
+    {
+        return self::labelFor($this->value);
+    }
+
+    /**
+     * The label of a canonical name, or the name itself when the name is
+     * not canonical — an operator's own level shows as itself.
+     */
+    public static function labelFor(string $name): string
+    {
+        return match ($name) {
+            'none'    => 'None',
+            'minimal' => 'Minimal',
+            'low'     => 'Low',
+            'medium'  => 'Medium',
+            'high'    => 'High',
+            'xhigh'   => 'xHigh',
+            'max'     => 'Max',
+            default   => $name,
+        };
+    }
 }

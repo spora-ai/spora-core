@@ -6,6 +6,7 @@ namespace Spora\Agents;
 
 use Spora\Agents\Exceptions\LlmConfigurationMissingException;
 use Spora\Models\Agent;
+use Spora\Services\EffortService;
 use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
 use Throwable;
@@ -19,7 +20,7 @@ use Throwable;
  * Delegation keeps the principal-aware resolution logic in one place.
  *
  * The reasoning effort is not part of that shape: the tick sends the effort
- * the task row carries, which is the requested level or the configuration's
+ * the task row carries, which is the requested level or the resolved
  * default, and that row is written by the orchestrator.
  *
  * Package-private collaborator: constructed and called only by
@@ -30,6 +31,7 @@ final class LlmConfigResolver
     public function __construct(
         private readonly LLMConfigPreferences $preferences,
         private readonly ?LLMConfigService $llmConfigService = null,
+        private readonly ?EffortService $effortService = null,
     ) {}
 
     /**
@@ -56,23 +58,29 @@ final class LlmConfigResolver
     }
 
     /**
-     * The configuration's default effort, or null when there is no
-     * configuration or it names no effort.
+     * The level the agent runs with when nobody names one.
+     *
+     * The whole default chain lives in {@see EffortService::defaultFor()},
+     * so the writer at task creation and the reporter on the effort
+     * endpoint cannot drift apart.
      *
      * The write path asks for this, and the write path must never fail
      * because of a missing LLM configuration: a task can be created with no
      * configuration and fail at its first tick, which is a friendlier
-     * failure than refusing to create it at all. That is why this sibling
-     * of {@see self::resolveLlmConfig()} returns null instead of throwing.
+     * failure than refusing to create it at all. That is why this returns
+     * null instead of throwing.
      */
     public function resolveEffortDefault(Agent $agent): ?string
     {
-        $config = $this->preferences->getEffectiveConfigForAgent($agent);
-        if ($config === null) {
+        if ($this->effortService === null) {
             return null;
         }
 
-        return $this->llmConfigService?->defaultEffort($config);
+        try {
+            return $this->effortService->defaultFor($agent);
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function getTemperatureFromSettings(\Spora\Models\LLMDriverConfiguration $config, float $default): float

@@ -10,10 +10,12 @@ use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Auth\ApiKeyIssuer;
 use Spora\Auth\AuthService;
+use Spora\Http\EffortProjection;
 use Spora\Http\ScopedApi\ScopedApiAgentController;
 use Spora\Http\ScopedApi\ScopedApiChatActionController;
 use Spora\Http\ScopedApi\ScopedApiChatBody;
 use Spora\Http\ScopedApi\ScopedApiChatController;
+use Spora\Http\ScopedApi\ScopedApiEffortController;
 use Spora\Http\ScopedApi\ScopedApiGroupController;
 use Spora\Http\ScopedApi\ScopedApiKeyController;
 use Spora\Http\ScopedApi\ScopedApiMediaController;
@@ -71,6 +73,8 @@ final class ScopedApiContainerBindings
                 return new ScopedApiAgentController(
                     $c->get(ApiKeyAgentService::class),
                     $c->get(ApiKeyReach::class),
+                    $c->get(EffortService::class),
+                    $c->get(PrincipalService::class),
                 );
             },
 
@@ -91,6 +95,13 @@ final class ScopedApiContainerBindings
             ScopedApiChatBody::class => static function (ContainerInterface $c): ScopedApiChatBody {
                 return new ScopedApiChatBody(
                     $c->get(ApiKeyMediaAccess::class),
+                );
+            },
+
+            ScopedApiEffortController::class => static function (ContainerInterface $c): ScopedApiEffortController {
+                return new ScopedApiEffortController(
+                    $c->get(ApiKeyReach::class),
+                    $c->get(EffortProjection::class),
                 );
             },
 

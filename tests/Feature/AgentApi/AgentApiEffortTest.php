@@ -13,8 +13,9 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * The agent API carries the reasoning effort of a message.
  *
- * The field means the same thing here as on the operator API: the effort of
- * the message being sent, and a level nobody knows is refused.
+ * The field means the same thing here as on the operator API: the effort
+ * of the message being sent. A level the agent's driver does not offer
+ * is refused — the vocabulary is the configuration's, not a fixed one.
  */
 it('forwards a named effort to the chat', function (): void {
     $seed = AgentApiTestSupport::seedAgent('effort');
@@ -55,7 +56,7 @@ it('refuses an unknown effort with 422', function (): void {
     expect($response->getStatusCode())->toBe(422);
 
     $payload = json_decode($response->getContent(), true);
-    expect($payload['error']['code'])->toBe('INVALID_EFFORT');
+    expect($payload['error']['code'])->toBe('EFFORT_LEVEL_UNSUPPORTED');
 });
 
 it('refuses an effort the agent\'s driver does not offer with 422', function (): void {

@@ -87,6 +87,7 @@ final class AgentManifestRenderer
             'template_id'         => $manifest['template_id'] ?? null,
             'version'             => $manifest['version'] ?? null,
             'max_steps'           => $manifest['max_steps'] ?? null,
+            'default_effort'      => $manifest['default_effort'] ?? null,
             'allow_followup'      => $manifest['allow_followup'] ?? null,
             'retry_after_minutes' => $manifest['retry_after_minutes'] ?? null,
             'max_retries'         => $manifest['max_retries'] ?? null,

@@ -12,6 +12,7 @@ use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -153,7 +154,14 @@ final class AgentTemplateController
      */
     private function buildImportSuccess(int $userId, array $body, ?int $principalId = null): JsonResponse
     {
-        $import = $this->importer->importPayload($userId, $body, $principalId);
+        try {
+            $import = $this->importer->importPayload($userId, $body, $principalId);
+        } catch (EffortValidationException $e) {
+            // A default the target configuration cannot express is a
+            // property of the payload, not a server failure.
+            return $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
         return new JsonResponse(
             [
                 'data' => [

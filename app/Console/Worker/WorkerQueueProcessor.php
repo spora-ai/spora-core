@@ -306,11 +306,24 @@ final class WorkerQueueProcessor
         $stdout   = $this->childStreams[$pid]['stdout'];
         $stderr   = $this->childStreams[$pid]['stderr'];
         $status   = proc_get_status($proc);
-        $exitCode = $status['exitcode'];
         $signal   = (int) $status['termsig'];
 
         $stdoutExcerpt = $this->sanitizeExcerpt($this->truncateExcerpt($stdout));
         $stderrExcerpt = $this->sanitizeExcerpt($this->truncateExcerpt($stderr));
+
+        // The exit code comes from proc_close(), not from the status above.
+        // A child that closes its stdout has not necessarily been reaped
+        // yet, and a status read in that window reports -1 — which the
+        // level below would read as a failure even for a child that
+        // succeeded. proc_close() waits for the child and returns the code
+        // it really returned; a child killed by a signal has no exit code
+        // and reports -1, with the signal carrying the detail.
+        foreach ($pipes as $pipe) {
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
+        }
+        $exitCode = proc_close($proc);
 
         // The status decides the level, not the exit code: a child that
         // exits non-zero because the task is waiting for a human is not an
@@ -329,13 +342,6 @@ final class WorkerQueueProcessor
             'stdout_excerpt' => $stdoutExcerpt,
             'stderr_excerpt' => $stderrExcerpt,
         ]);
-
-        foreach ($pipes as $pipe) {
-            if (is_resource($pipe)) {
-                fclose($pipe);
-            }
-        }
-        proc_close($proc);
 
         // Surface one coherent status line per child to the operator's
         // terminal — replaces the "Task X finished with status: Y" line

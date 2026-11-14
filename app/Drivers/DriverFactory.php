@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Drivers;
 
+use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
+use ReflectionMethod;
 use Spora\Agents\Exceptions\LlmConfigurationMissingException;
 use Spora\Drivers\Exceptions\DriverClassNotFoundException;
 use Spora\Drivers\Exceptions\LLMConfigDecryptFailedException;
@@ -29,11 +31,12 @@ use Throwable;
  * markTaskNoLlmConfiguration() writes the friendly
  * NO_LLM_CONFIGURATION message to the task row.
  *
- * The `supports_image_input` toggle is read from the decoded settings blob.
- * The frontend round-trips booleans as the strings `"true"`/`"false"`,
- * so a value of `"false"` (or any falsy string) decodes to `false`, and
- * the absence of the key decodes to `null` so the driver falls back to
- * the model-name heuristic for legacy rows.
+ * The `supports_image_input` and `supports_effort` toggles are read from
+ * the settings blob. The frontend round-trips booleans as the strings
+ * `"true"`/`"false"`, so a value of `"false"` (or any falsy string) decodes
+ * to `false`, and the absence of the key decodes to `null` so the driver
+ * falls back to its legacy behaviour for rows persisted before the toggle
+ * shipped.
  */
 class DriverFactory
 {
@@ -61,6 +64,9 @@ class DriverFactory
         );
     }
 
+    /**
+     * The driver a configuration names, from its stored settings.
+     */
     public function makeDriverFromConfig(LLMDriverConfiguration $config): LLMDriverInterface
     {
         $driverClass = $config->driver_class;
@@ -79,43 +85,150 @@ class DriverFactory
             );
         }
 
-        // Per-LLM-config timeout override; falls back to the global default.
-        $timeout = isset($settings['timeout']) && $settings['timeout'] !== ''
-            ? (int) $settings['timeout']
-            : $this->llmTimeout;
+        return $this->build($driverClass, $settings);
+    }
 
-        $supportsImageInput = $this->decodeSupportsImageInput($settings);
+    /**
+     * The driver a driver class and a set of settings describe.
+     *
+     * The settings are the plaintext ones a save request carries, and the
+     * class is the one the request named — so the class that is built is
+     * the registry's own, never the name the request carried. A save
+     * request names a driver, and a name nobody registered is not one. The
+     * registry is the set of drivers this installation ships, and a class
+     * outside it is not a driver however it is spelled.
+     *
+     * The stored path ({@see self::makeDriverFromConfig()}) does not go
+     * through this gate: a configuration saved while its driver was
+     * registered keeps working after the registry moves on.
+     *
+     * @param array<string, mixed> $settings
+     * @throws DriverClassNotFoundException when the driver class is not registered
+     * @throws InvalidArgumentException when `effort_levels` is malformed
+     */
+    public function makeDriverFromSettings(string $driverClass, array $settings): LLMDriverInterface
+    {
+        $registered = $this->registeredDriverClass($driverClass);
 
+        if ($registered === null) {
+            throw new DriverClassNotFoundException("LLM driver class {$driverClass} is not a registered driver.");
+        }
+
+        return $this->build($registered, $settings);
+    }
+
+    /**
+     * Build a driver from a class and its settings.
+     *
+     * The class reaches this method already vetted: the registry's own on
+     * the save path, the stored configuration's on the runtime path.
+     *
+     * @param array<string, mixed> $settings
+     * @throws InvalidArgumentException when `effort_levels` is malformed
+     */
+    private function build(string $driverClass, array $settings): LLMDriverInterface
+    {
         $commonArgs = [
             'apiKey' => (string) ($settings['api_key'] ?? ''),
             'model' => (string) ($settings['model'] ?? ''),
             'baseUrl' => (string) ($settings['base_url'] ?? ''),
             'httpClient' => \Symfony\Component\HttpClient\HttpClient::create(),
             'logger' => $this->logger,
-            'timeout' => $timeout,
-            'supportsImageInput' => $supportsImageInput,
+            'timeout' => $this->timeoutFor($settings),
+            'supportsImageInput' => $this->decodeToggle($settings, 'supports_image_input'),
+            'effortLevels' => $this->decodeEffortLevels($settings),
+            'supportsEffort' => $this->decodeToggle($settings, 'supports_effort'),
         ];
 
         if (is_a($driverClass, DriverOptionsAwareInterface::class, true)) {
             return $driverClass::makeFromSettings($commonArgs, $settings);
         }
 
-        return new $driverClass(...$commonArgs);
+        return new $driverClass(...$this->acceptedArguments($driverClass, $commonArgs));
     }
 
     /**
-     * Decode the operator-controlled `supports_image_input` setting. The
-     * frontend form serialises booleans as the strings `"true"`/`"false"`,
-     * so we cast defensively. A missing key preserves the legacy null
-     * fallback (driver heuristic).
+     * The registry's own class for a driver name, or null when the name is
+     * not one of the registered drivers.
+     *
+     * The returned string is the registry's, so what reaches the
+     * instantiation is a class this installation ships rather than a name
+     * a request carried.
+     */
+    private function registeredDriverClass(string $driverClass): ?string
+    {
+        foreach ($this->llmConfigService->getDrivers() as $driver) {
+            $registered = $driver['driver_class'];
+
+            if ($registered === $driverClass) {
+                return $registered;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The arguments a driver's constructor actually declares.
+     *
+     * A driver that is not options-aware keeps working: it receives only
+     * the arguments it declares, so one that predates the effort
+     * parameters does not receive them and its own level set applies. A
+     * named-argument spread of the whole set would fail on the first
+     * unknown key instead.
+     *
+     * @param array<string, mixed> $commonArgs
+     * @return array<string, mixed>
+     */
+    private function acceptedArguments(string $driverClass, array $commonArgs): array
+    {
+        $declared = [];
+
+        foreach ((new ReflectionMethod($driverClass, '__construct'))->getParameters() as $parameter) {
+            $declared[$parameter->getName()] = true;
+        }
+
+        return array_intersect_key($commonArgs, $declared);
+    }
+
+    /**
+     * The per-configuration timeout, falling back to the global default.
      *
      * @param array<string, mixed> $settings
      */
-    private function decodeSupportsImageInput(array $settings): ?bool
+    private function timeoutFor(array $settings): int
     {
-        if (!array_key_exists('supports_image_input', $settings)) {
+        return isset($settings['timeout']) && $settings['timeout'] !== ''
+            ? (int) $settings['timeout']
+            : $this->llmTimeout;
+    }
+
+    /**
+     * The reasoning-effort levels the configuration names.
+     *
+     * @param array<string, mixed> $settings
+     * @return list<string>
+     * @throws InvalidArgumentException when the value is malformed
+     */
+    private function decodeEffortLevels(array $settings): array
+    {
+        $raw = $settings['effort_levels'] ?? '';
+
+        return EffortLevelSet::fromSetting(is_string($raw) ? $raw : '')->names();
+    }
+
+    /**
+     * Decode an operator-controlled toggle. The frontend form serialises
+     * booleans as the strings `"true"`/`"false"`, so we cast defensively.
+     * A missing key preserves the legacy null fallback.
+     *
+     * @param array<string, mixed> $settings
+     */
+    private function decodeToggle(array $settings, string $key): ?bool
+    {
+        if (!array_key_exists($key, $settings)) {
             return null;
         }
-        return filter_var($settings['supports_image_input'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        return filter_var($settings[$key], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
     }
 }

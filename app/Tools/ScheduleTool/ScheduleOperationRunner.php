@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Tools\ScheduleTool;
 
 use DateInvalidTimeZoneException;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunServiceInterface;
 use Spora\Tools\LlmScalarCoercion;
@@ -75,7 +76,8 @@ final class ScheduleOperationRunner
         } catch (
             \Spora\Services\Exceptions\AgentNotFoundException
             | \Spora\Services\Exceptions\PromptTemplateMissingException
-            | DateInvalidTimeZoneException $e
+            | DateInvalidTimeZoneException
+            | EffortValidationException $e
         ) {
             return match (true) {
                 $e instanceof \Spora\Services\Exceptions\AgentNotFoundException
@@ -100,6 +102,8 @@ final class ScheduleOperationRunner
             $result = $this->promptTemplateService->createTemplate($targetAgentId, $userId, $payload);
         } catch (\Spora\Services\Exceptions\AgentNotFoundException) {
             return ToolResult::fail('create_prompt_template: prompt template not found or not owned by this user');
+        } catch (EffortValidationException $e) {
+            return ToolResult::fail('create_prompt_template: ' . $e->getMessage());
         }
 
         $resource = $result['template'];
@@ -123,7 +127,11 @@ final class ScheduleOperationRunner
             return $patch;
         }
 
-        $result = $this->scheduledRunService->updateRun($scheduleId, $targetAgentId, $userId, $this->canonicaliseSchedulePatch($patch));
+        try {
+            $result = $this->scheduledRunService->updateRun($scheduleId, $targetAgentId, $userId, $this->canonicaliseSchedulePatch($patch));
+        } catch (EffortValidationException $e) {
+            return ToolResult::fail('update_schedule: ' . $e->getMessage());
+        }
 
         return $result === null
             ? ToolResult::fail('update_schedule: schedule not found or not owned by this user')
@@ -145,7 +153,11 @@ final class ScheduleOperationRunner
             return $patch;
         }
 
-        $result = $this->promptTemplateService->updateTemplate($templateId, $targetAgentId, $userId, $this->canonicaliseTemplatePatch($patch));
+        try {
+            $result = $this->promptTemplateService->updateTemplate($templateId, $targetAgentId, $userId, $this->canonicaliseTemplatePatch($patch));
+        } catch (EffortValidationException $e) {
+            return ToolResult::fail('update_prompt_template: ' . $e->getMessage());
+        }
 
         return $result === null
             ? ToolResult::fail('update_prompt_template: prompt template not found or not owned by this user')

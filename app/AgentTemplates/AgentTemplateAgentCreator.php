@@ -30,6 +30,7 @@ final class AgentTemplateAgentCreator
             'system_prompt'       => $this->nullIfEmpty($agent['system_prompt'] ?? null),
             'notes'               => $this->nullIfEmpty($agent['notes'] ?? null),
             'max_steps'           => (int) ($agent['max_steps'] ?? 10),
+            'default_effort'      => $this->nullIfEmpty($agent['default_effort'] ?? null),
             'allow_followup'      => $allowFollowup ? 1 : 0,
             'retry_after_minutes' => (int) ($agent['retry_after_minutes'] ?? 0),
             'max_retries'         => (int) ($agent['max_retries'] ?? 0),

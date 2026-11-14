@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\SpeechProviderConfiguration;
@@ -239,12 +240,19 @@ final class AgentController
         }
         $body = $bodyOrError;
 
-        $agent = $this->applyAgentPatch($agentId, $userId, $body);
-        if ($agent instanceof JsonResponse) {
-            return $agent;
+        // One variable for the refusal and the patched agent: a second
+        // guard would put the endpoint over the S1142 three-return ceiling.
+        try {
+            $patched = $this->applyAgentPatch($agentId, $userId, $body);
+        } catch (EffortValidationException $e) {
+            $patched = $this->unprocessable($e->errorCode(), $e->getMessage());
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]]);
+        if ($patched instanceof JsonResponse) {
+            return $patched;
+        }
+
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($patched, $this->agentResourceContext($patched))]]);
     }
 
     /**
@@ -265,7 +273,7 @@ final class AgentController
         // `is_favorite` is gone from this allowlist — the column
         // no longer exists on `agents`. The toggle is per-user via
         // `POST /agents/{id}/favorite` / `DELETE /agents/{id}/favorite`.
-        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'speech_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'voice_message_retention_count', 'is_pinned', 'is_archived'];
+        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'speech_driver_config_id', 'max_steps', 'default_effort', 'allow_followup', 'retry_after_minutes', 'max_retries', 'voice_message_retention_count', 'is_pinned', 'is_archived'];
         $data = array_intersect_key($body, array_flip($allowed));
         $this->coerceBooleanFlags($data);
         $validationError = $this->validateAgentPatch($data);

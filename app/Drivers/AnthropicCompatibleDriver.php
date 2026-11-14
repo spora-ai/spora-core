@@ -20,7 +20,9 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 #[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.anthropic.com).', required: false, default: 'https://api.anthropic.com')]
 #[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. claude-sonnet-5-5, claude-opus-4-6).', required: false, default: 'claude-sonnet-5-5')]
 #[ToolSetting(key: 'enable_prompt_caching', label: 'Enable prompt caching', type: 'toggle', default: true, description: 'Add `cache_control: ephemeral` breakpoints on the stable system and tool prefixes. Disable when the upstream proxy strips cache_control fields.')]
-#[ToolSetting(key: 'effort', label: 'Effort', type: 'select', default: '', description: 'Default reasoning effort. Empty = the model default (nothing is sent).', options: ['' => 'Model default', 'low' => 'Low', 'medium' => 'Medium', 'high' => 'High', 'xhigh' => 'xHigh', 'max' => 'Max'])]
+#[ToolSetting(key: 'effort', label: 'Effort', type: 'text', default: '', description: 'Default reasoning effort. Empty = the model default (nothing is sent). A level this endpoint does not offer is refused.')]
+#[ToolSetting(key: 'effort_levels', label: 'Effort levels', type: 'textarea', default: '', description: 'Comma-separated list of the reasoning-effort levels this endpoint accepts. Empty = the driver\'s own set. A level the endpoint does not take is refused.')]
+#[ToolSetting(key: 'supports_effort', label: 'Supports reasoning effort', type: 'toggle', default: true, description: 'Turn this off for an endpoint with no reasoning-effort parameter at all — the agent then has no effort picker and any effort sent is refused.')]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
 final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface
 {
@@ -47,6 +49,8 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
             $logger,
             $timeout,
             $options?->supportsImageInput,
+            $options !== null ? $options->configuredEffortLevels : [],
+            $options?->supportsEffort,
         );
         $this->requestBuilder = new AnthropicRequestBuilder(
             apiKey: $apiKey,
@@ -67,6 +71,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
 
         $logger = $args['logger'] ?? null;
         $supportsImageInput = $args['supportsImageInput'] ?? null;
+        $effortLevels = $args['effortLevels'] ?? [];
 
         return new self(
             apiKey: (string) ($args['apiKey'] ?? ''),
@@ -79,6 +84,10 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
                 supportsImageInput: is_bool($supportsImageInput) ? $supportsImageInput : null,
                 enablePromptCaching: !array_key_exists('enable_prompt_caching', $settings)
                     || filter_var($settings['enable_prompt_caching'], FILTER_VALIDATE_BOOLEAN),
+                configuredEffortLevels: is_array($effortLevels) ? array_values($effortLevels) : [],
+                supportsEffort: isset($args['supportsEffort']) && is_bool($args['supportsEffort'])
+                    ? $args['supportsEffort']
+                    : null,
             ),
         );
     }
@@ -105,7 +114,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
      *
      * @return array<string, string>
      */
-    public function effortLevels(): array
+    protected function defaultEffortLevels(): array
     {
         $levels = [];
         foreach (ModelFamily::claudeEffortLevels($this->model) as $level) {

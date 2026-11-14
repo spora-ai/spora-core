@@ -65,7 +65,7 @@ test('an error message reaches the catalogue with the line it is written on', fu
 
     expect($harvested)->toHaveKey('Request body must be valid JSON.')
         ->and(implode(' ', $harvested['Request body must be valid JSON.']))
-            ->toContain('app/Http/AgentTemplateController.php:105');
+            ->toContain('app/Http/AgentTemplateController.php:106');
 });
 
 test('a helper with its own argument order still yields the message, not the code', function (): void {

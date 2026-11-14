@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Services\Exceptions\AgentNotFoundException;
@@ -20,8 +21,11 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
     public const VISIBILITY_READ = true;
     public const VISIBILITY_WRITE = false;
 
-    public function __construct(?PrincipalService $principalService = null, ?PrincipalResolver $principalResolver = null)
-    {
+    public function __construct(
+        private readonly EffortService $effortService,
+        ?PrincipalService $principalService = null,
+        ?PrincipalResolver $principalResolver = null,
+    ) {
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
@@ -57,6 +61,7 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
             'prompt_template'  => $data['prompt_template'],
             'variables'        => isset($data['variables']) && is_array($data['variables']) ? json_encode($data['variables']) : null,
             'max_steps'        => isset($data['max_steps']) ? (int) $data['max_steps'] : null,
+            'effort'           => $this->resolveEffort($data['effort'] ?? null, $agent),
             'is_active'        => $this->resolveIsActive($data['is_active'] ?? null),
             'created_at'       => date(self::DATE_FORMAT),
             'updated_at'       => date(self::DATE_FORMAT),
@@ -94,10 +99,13 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
             return null;
         }
 
-        $allowed = ['name', 'description', 'prompt_template', 'variables', 'max_steps', 'is_active'];
+        $allowed = ['name', 'description', 'prompt_template', 'variables', 'max_steps', 'effort', 'is_active'];
         $updateData = array_intersect_key($data, array_flip($allowed));
 
         if ($updateData !== []) {
+            if (array_key_exists('effort', $updateData)) {
+                $updateData['effort'] = $this->resolveEffort($updateData['effort'], $agent);
+            }
             if (array_key_exists('variables', $updateData) && is_array($updateData['variables'])) {
                 $updateData['variables'] = json_encode($updateData['variables']);
             }
@@ -159,6 +167,39 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
         return $value ? 1 : 0;
     }
 
+    /**
+     * The reasoning effort a template stores: null means "inherit", and a
+     * level the agent's driver does not offer is refused.
+     *
+     * An empty string is inherit as well — the column has two states, and
+     * a stored `''` would be a third one nobody reads differently.
+     *
+     * @throws EffortValidationException
+     */
+    private function resolveEffort(mixed $value, Agent $agent): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (!is_string($value)) {
+            throw new EffortValidationException(
+                'effort must be a string.',
+                EffortValidationException::CODE_MALFORMED,
+            );
+        }
+
+        $effort = trim($value);
+
+        if ($effort === '') {
+            return null;
+        }
+
+        $this->effortService->assertLevel($effort, $agent);
+
+        return $effort;
+    }
+
     private function findTemplate(int $id, int $agentId): ?AgentPromptTemplate
     {
         return AgentPromptTemplate::where('id', $id)->where('agent_id', $agentId)->first();
@@ -174,6 +215,7 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
             'prompt_template' => $template->prompt_template,
             'variables'       => $template->variables ?? [],
             'max_steps'       => $template->max_steps,
+            'effort'          => $template->effort,
             'is_active'       => (bool) $template->is_active,
             'created_at'      => $template->created_at->toIso8601String(),
             'updated_at'      => $template->updated_at->toIso8601String(),

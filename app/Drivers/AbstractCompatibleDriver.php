@@ -11,6 +11,18 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 #[ToolSetting(key: 'supports_image_input', label: 'Allow images', type: 'toggle', default: false, description: 'When enabled, image attachments are forwarded to the LLM as image content blocks. Disable for non-vision endpoints to avoid API errors.')]
 abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface, EffortAwareDriverInterface
 {
+    /**
+     * The levels the configuration names. Empty means the driver's own set
+     * for the model applies.
+     *
+     * @var list<string>
+     */
+    protected readonly array $configuredEffortLevels;
+
+    /**
+     * @param list<string> $effortLevels The levels the configuration names.
+     *        Empty means the driver's own set for the model applies.
+     */
     public function __construct(
         protected readonly string              $apiKey,
         protected readonly string              $model,
@@ -19,7 +31,11 @@ abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriver
         protected readonly ?LoggerInterface    $logger = null,
         protected readonly ?int                $timeout = null,
         protected readonly ?bool               $supportsImageInput = null,
-    ) {}
+        array                                   $effortLevels = [],
+        protected readonly ?bool               $supportsEffort = null,
+    ) {
+        $this->configuredEffortLevels = $effortLevels;
+    }
 
     public function getModelName(): string
     {
@@ -48,11 +64,57 @@ abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriver
     }
 
     /**
-     * A driver that cannot express an effort level declares no levels.
+     * The levels this driver can express, mapped to the provider's wire value.
+     *
+     * The operator's list wins outright: they know their endpoint, and
+     * Spora has no business second-guessing them. An unset list keeps the
+     * driver's own set for the model.
+     *
+     * `supportsEffort === null` means "not configured" and behaves as
+     * enabled, so a row persisted before the toggle shipped keeps working.
+     * `false` is the only value that disables.
+     *
+     * @return array<string, string>
      */
     public function effortLevels(): array
     {
+        if ($this->supportsEffort === false) {
+            return [];
+        }
+
+        if ($this->configuredEffortLevels !== []) {
+            return $this->levelMap($this->configuredEffortLevels);
+        }
+
+        return $this->defaultEffortLevels();
+    }
+
+    /**
+     * The levels the driver's model takes when the operator names none.
+     *
+     * @return array<string, string>
+     */
+    protected function defaultEffortLevels(): array
+    {
         return [];
+    }
+
+    /**
+     * The configured names as a name => wire value map. The wire value is
+     * the name verbatim: every provider found sends the level unchanged.
+     *
+     * @param list<string> $names
+     * @return array<string, string>
+     */
+    private function levelMap(array $names): array
+    {
+        $map = [];
+
+        foreach ($names as $name) {
+            $map[$name] ??= $name;
+        }
+
+        return $map;
     }
 
     /**
