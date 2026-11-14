@@ -48,12 +48,12 @@ final class ScheduledRunEffortResolver
         }
 
         // Without a configuration there is no level set to compare the
-        // level with, and the run cannot run anyway.
-        if ($this->preferences->getEffectiveConfigForAgent($agent) === null) {
-            return ['level' => $requested, 'replaced' => null];
-        }
+        // level with, and the run cannot run anyway; a level the
+        // configuration still offers is dispatched as it stands.
+        $stillOffered = $this->preferences->getEffectiveConfigForAgent($agent) === null
+            || $this->effortService->levelSetFor($agent)->has($requested);
 
-        if ($this->effortService->levelSetFor($agent)->has($requested)) {
+        if ($stillOffered) {
             return ['level' => $requested, 'replaced' => null];
         }
 
