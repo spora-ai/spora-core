@@ -379,32 +379,41 @@ final class AgentController
      */
     private function validateAgentPatch(array $data): ?JsonResponse
     {
+        // The first failure wins, and the method answers it in one place:
+        // two fields to check, and a return per check would put the method
+        // over the ceiling.
+        $failure = null;
+
         if (array_key_exists('max_steps', $data)) {
             $capError = $this->stepCap->refuse($data['max_steps']);
             if ($capError !== null) {
-                return $this->unprocessable('VALIDATION_ERROR', $capError);
+                $failure = $this->unprocessable('VALIDATION_ERROR', $capError);
+            } else {
+                $data['max_steps'] = (int) $data['max_steps'];
             }
-            $data['max_steps'] = (int) $data['max_steps'];
         }
 
-        if (array_key_exists('voice_message_retention_count', $data)) {
+        if ($failure === null && array_key_exists('voice_message_retention_count', $data)) {
             $value = $data['voice_message_retention_count'];
             if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
-                return $this->unprocessable(
+                $failure = $this->unprocessable(
                     'VALIDATION_ERROR',
                     'voice_message_retention_count must be an integer between 0 and 100.',
                 );
+            } else {
+                $intValue = (int) $value;
+                if ($intValue < 0 || $intValue > 100) {
+                    $failure = $this->unprocessable(
+                        'VALIDATION_ERROR',
+                        'voice_message_retention_count must be between 0 and 100.',
+                    );
+                } else {
+                    $data['voice_message_retention_count'] = $intValue;
+                }
             }
-            $intValue = (int) $value;
-            if ($intValue < 0 || $intValue > 100) {
-                return $this->unprocessable(
-                    'VALIDATION_ERROR',
-                    'voice_message_retention_count must be between 0 and 100.',
-                );
-            }
-            $data['voice_message_retention_count'] = $intValue;
         }
-        return null;
+
+        return $failure;
     }
 
     /**
