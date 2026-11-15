@@ -9,8 +9,10 @@ use InvalidArgumentException;
 use JsonException;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\AgentPatchValidationException;
 use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentStepCap;
 use Spora\Services\EffortService;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\MediaArchive\MediaNotOwnedException;
@@ -43,6 +45,7 @@ final class TaskController
         private readonly AnswerQuestionRequestValidator $answerValidator,
         private readonly AgentServiceInterface $agentService,
         private readonly EffortService $effortService,
+        private readonly ?AgentStepCap $stepCap = null,
     ) {}
 
     /**
@@ -145,6 +148,20 @@ final class TaskController
 
         $prompt       = trim((string) ($body['prompt'] ?? ''));
         $maxSteps     = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
+
+        // The cap a task may carry is bounded by the instance's ceiling,
+        // like every other surface that takes one: an unbounded value
+        // reaches a column the database refuses to store.
+        if ($maxSteps !== null) {
+            try {
+                $this->stepCap?->assertValid($maxSteps);
+            } catch (AgentPatchValidationException $e) {
+                return new JsonResponse(
+                    ['error' => ['code' => $e->errorCode(), 'message' => $e->getMessage()]],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                );
+            }
+        }
         $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
         $mediaIds     = $this->mediaCapability->parseMediaIds($body['media_ids'] ?? null);
 

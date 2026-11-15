@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Core\Config;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Http\AgentController;
+use Spora\Http\Exceptions\AgentPatchValidationException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\AgentFavoriteService;
@@ -115,6 +116,32 @@ test('the ceiling follows the setting when it is set', function (): void {
     $stepCap = new AgentStepCap(new Config(['SPORA_MAX_STEPS' => 50]));
 
     expect($stepCap->limit())->toBe(50);
+});
+
+test('the ceiling never exceeds what the column can hold', function (): void {
+    // The cap is stored in `agents.max_steps`, copied into
+    // `tasks.max_steps` and carried by the template and schedule columns.
+    // A ceiling above the column's range would accept a cap the database
+    // refuses to store: the write fails on MySQL and succeeds on SQLite,
+    // which stores every integer it is given.
+    $stepCap = new AgentStepCap(new Config(['SPORA_MAX_STEPS' => 1000000]));
+
+    expect($stepCap->limit())->toBe(AgentStepCap::COLUMN_MAX);
+});
+
+test('a cap the column can hold is accepted', function (): void {
+    $stepCap = new AgentStepCap(new Config(['SPORA_MAX_STEPS' => 1000000]));
+
+    $stepCap->assertValid(400);
+
+    expect(true)->toBeTrue();
+});
+
+test('a cap above the column is refused, and the message names the bound', function (): void {
+    $stepCap = new AgentStepCap(new Config(['SPORA_MAX_STEPS' => 1000000]));
+
+    expect(fn() => $stepCap->assertValid(AgentStepCap::COLUMN_MAX + 1))
+        ->toThrow(AgentPatchValidationException::class, 'between 1 and 65535');
 });
 
 test('a new agent carries a hundred steps', function (): void {

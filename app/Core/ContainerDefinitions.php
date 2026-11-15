@@ -1334,6 +1334,7 @@ final class ContainerDefinitions
                     $c->get(AnswerQuestionRequestValidator::class),
                     $c->get(AgentServiceInterface::class),
                     $c->get(EffortService::class),
+                    $c->get(AgentStepCap::class),
                 );
             },
 

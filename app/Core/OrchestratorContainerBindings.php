@@ -39,6 +39,7 @@ use Spora\Scheduling\DueWorkProviderRegistry;
 use Spora\Search\SearchProviderRegistry;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentStepCap;
 use Spora\Services\DbRateLimiter;
 use Spora\Services\EffortService;
 use Spora\Services\EmailTemplateLoader;
@@ -293,7 +294,13 @@ final class OrchestratorContainerBindings
     private static function templates(): array
     {
         return [
-            AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
+            AgentTemplateValidator::class => static function (ContainerInterface $c): AgentTemplateValidator {
+                // The cap the template may carry is the instance's ceiling,
+                // so the validator needs it: without it the template path
+                // would answer with the built-in default whatever the
+                // operator set.
+                return new AgentTemplateValidator(stepCap: $c->get(AgentStepCap::class));
+            },
 
             // Resolves `resolveAs: 'skill'` settings against the same registry
             // the `skill` tool authorises against — see the note on
@@ -434,7 +441,9 @@ final class OrchestratorContainerBindings
                 );
             },
 
-            AgentTemplateAgentCreator::class => static fn(): AgentTemplateAgentCreator => new AgentTemplateAgentCreator(),
+            AgentTemplateAgentCreator::class => static function (ContainerInterface $c): AgentTemplateAgentCreator {
+                return new AgentTemplateAgentCreator($c->get(AgentStepCap::class));
+            },
 
             AgentTemplateSettingsApplier::class => static function (ContainerInterface $c): AgentTemplateSettingsApplier {
                 return new AgentTemplateSettingsApplier(

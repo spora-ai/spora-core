@@ -53,8 +53,8 @@
         "max_steps": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 100,
-          "default": 10
+          "maximum": 65535,
+          "default": 100
         },
         "default_effort": {
           "type": ["string", "null"],

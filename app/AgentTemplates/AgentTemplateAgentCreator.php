@@ -18,6 +18,10 @@ final class AgentTemplateAgentCreator
 {
     private const DATETIME_FORMAT = 'Y-m-d H:i:s';
 
+    public function __construct(
+        private readonly ?AgentStepCap $stepCap = null,
+    ) {}
+
     public function create(int $principalId, AgentTemplate $template): int
     {
         $agent = $template->agent();
@@ -31,7 +35,7 @@ final class AgentTemplateAgentCreator
             'system_prompt'       => $this->nullIfEmpty($agent['system_prompt'] ?? null),
             'notes'               => $this->nullIfEmpty($agent['notes'] ?? null),
             // The cap a new agent carries, bounded by the ceiling.
-            'max_steps'           => (int) ($agent['max_steps'] ?? AgentStepCap::DEFAULT_CAP),
+            'max_steps'           => (int) ($agent['max_steps'] ?? $this->stepCap?->defaultCap() ?? AgentStepCap::DEFAULT_CAP),
             'default_effort'      => $this->nullIfEmpty($agent['default_effort'] ?? null),
             'allow_followup'      => $allowFollowup ? 1 : 0,
             'retry_after_minutes' => (int) ($agent['retry_after_minutes'] ?? 0),

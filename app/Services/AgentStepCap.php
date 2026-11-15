@@ -30,6 +30,18 @@ final class AgentStepCap
     /** The cap a new agent carries when the caller names none. */
     public const DEFAULT_CAP = 100;
 
+    /**
+     * The largest cap a column can hold.
+     *
+     * The cap is stored in `agents.max_steps`, copied into
+     * `tasks.max_steps`, and carried by the template and schedule columns
+     * — all `SMALLINT UNSIGNED` on MySQL, so 65535 is where the storage
+     * ends. A ceiling above it would accept a cap the database refuses to
+     * store: the write fails on MySQL and succeeds on SQLite, which stores
+     * every integer it is given.
+     */
+    public const COLUMN_MAX = 65535;
+
     public function __construct(private readonly ?Config $config = null) {}
 
     /**
@@ -39,7 +51,11 @@ final class AgentStepCap
     {
         $limit = $this->config?->getInt('SPORA_MAX_STEPS');
 
-        return ($limit !== null && $limit > 0) ? $limit : self::DEFAULT_LIMIT;
+        if ($limit === null || $limit <= 0) {
+            return self::DEFAULT_LIMIT;
+        }
+
+        return min($limit, self::COLUMN_MAX);
     }
 
     /**

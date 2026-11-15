@@ -6,7 +6,7 @@ namespace Spora\Drivers;
 
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
-use ReflectionMethod;
+use ReflectionClass;
 use Spora\Agents\Exceptions\LlmConfigurationMissingException;
 use Spora\Drivers\Exceptions\DriverClassNotFoundException;
 use Spora\Drivers\Exceptions\LLMConfigDecryptFailedException;
@@ -182,9 +182,18 @@ class DriverFactory
      */
     private function acceptedArguments(string $driverClass, array $commonArgs): array
     {
+        // A driver with no declared constructor takes no arguments. Asking
+        // for the method itself would raise, and the raise would surface
+        // as a 500 on the effort endpoint rather than a clean refusal.
+        $constructor = (new ReflectionClass($driverClass))->getConstructor();
+
+        if ($constructor === null) {
+            return [];
+        }
+
         $declared = [];
 
-        foreach ((new ReflectionMethod($driverClass, '__construct'))->getParameters() as $parameter) {
+        foreach ($constructor->getParameters() as $parameter) {
             $declared[$parameter->getName()] = true;
         }
 

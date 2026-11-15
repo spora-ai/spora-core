@@ -96,6 +96,46 @@ function agentDefaultEffortRequest(int $agentId, array $body): Request
     return $request;
 }
 
+/**
+ * @param array<string, mixed> $body
+ */
+function agentCreateRequest(array $body): Request
+{
+    return Request::create(
+        '/api/v1/agents',
+        'POST',
+        [],
+        [],
+        [],
+        ['CONTENT_TYPE' => 'application/json'],
+        json_encode($body),
+    );
+}
+
+test('the create path accepts the agent\'s own default', function (): void {
+    [$controller] = agentDefaultEffortController(['effort_levels' => 'low, high']);
+
+    $response = $controller->store(agentCreateRequest(['name' => 'Fresh Agent', 'default_effort' => 'high']));
+
+    expect($response->getStatusCode())->toBe(201);
+
+    $payload = json_decode($response->getContent(), true);
+    expect($payload['data']['agent']['default_effort'])->toBe('high')
+        ->and(Agent::findOrFail($payload['data']['agent']['id'])->default_effort)->toBe('high');
+});
+
+test('the create path refuses a default the configuration does not offer', function (): void {
+    [$controller] = agentDefaultEffortController(['effort_levels' => 'low, high']);
+
+    $response = $controller->store(agentCreateRequest(['name' => 'Fresh Agent', 'default_effort' => 'medium']));
+
+    expect($response->getStatusCode())->toBe(422);
+
+    $payload = json_decode($response->getContent(), true);
+    expect($payload['error']['code'])->toBe('EFFORT_LEVEL_UNSUPPORTED')
+        ->and($payload['error']['message'])->toContain('Supported levels: low, high');
+});
+
 test('the agent\'s default round-trips through the REST API', function (): void {
     [$controller, $agentId] = agentDefaultEffortController();
 

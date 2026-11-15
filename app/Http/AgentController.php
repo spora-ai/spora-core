@@ -151,6 +151,10 @@ final class AgentController
                 ? $body['notes']
                 : null,
             'llm_driver_config_id' => isset($body['llm_driver_config_id']) ? (int) $body['llm_driver_config_id'] : null,
+            // The agent's own default, like the patch path. A level the
+            // configuration does not offer is refused below, so the row
+            // never carries a default the run would ignore.
+            'default_effort'   => $body['default_effort'] ?? null,
             // Per-agent STT override (tier 1 of the cascade). FK to
             // speech_provider_configurations.id; SET NULL on delete so
             // a deleted config silently falls back to the cascade. The
@@ -186,7 +190,11 @@ final class AgentController
             return $earlyExit;
         }
 
-        $agent = $this->agentService->createAgent($userId, $data, $principalId);
+        try {
+            $agent = $this->agentService->createAgent($userId, $data, $principalId);
+        } catch (EffortValidationException $e) {
+            return $this->unprocessable($e->errorCode(), $e->getMessage());
+        }
 
         return new JsonResponse(
             ['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]],
