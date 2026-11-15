@@ -121,7 +121,9 @@ test('All split controllers share a consistent constructor surface', function ()
     // transfer controller takes 6 (auth + AgentPrincipalService +
     // AgentFavoriteService [single-agent response hydration] +
     // DriverFactory + ToolIconResolver + AgentPictureService).
-    expect($crud->getNumberOfParameters())->toBe(8);
+    // The CRUD controller takes the step cap as well, so the range it
+    // enforces follows the instance's ceiling.
+    expect($crud->getNumberOfParameters())->toBe(9);
     expect($tool->getNumberOfParameters())->toBe(3);
     expect($override->getNumberOfParameters())->toBe(3);
     expect($transfer->getNumberOfParameters())->toBe(6);

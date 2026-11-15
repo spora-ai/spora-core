@@ -188,7 +188,7 @@ describe('update_agent — a stringified number is range-checked', function (): 
         ], $agent->id, context: agentToolContext($userId));
 
         expect($high->success)->toBeFalse()
-            ->and($high->content)->toContain('`max_steps` must be an integer in 1..100')
+            ->and($high->content)->toContain('`max_steps` must be an integer in 1..200')
             ->and((int) storedColumn($agent->id, 'max_steps'))->toBe($before);
 
         $negative = $tool->execute([
@@ -345,7 +345,7 @@ describe('create_agent — stringified scalars', function (): void {
         ], $caller->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('`max_steps` must be a whole number in 1..100');
+            ->and($result->content)->toContain('`max_steps` must be a whole number in 1..200');
     });
 
     it('still refuses a quoted boolean that names no flag', function (): void {

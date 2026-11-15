@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\AgentTemplates;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Services\AgentStepCap;
 
 /**
  * Inserts the agent row during a template import. Extracted from
@@ -29,7 +30,8 @@ final class AgentTemplateAgentCreator
             'description'         => $this->nullIfEmpty($agent['description'] ?? null),
             'system_prompt'       => $this->nullIfEmpty($agent['system_prompt'] ?? null),
             'notes'               => $this->nullIfEmpty($agent['notes'] ?? null),
-            'max_steps'           => (int) ($agent['max_steps'] ?? 10),
+            // The cap a new agent carries, bounded by the ceiling.
+            'max_steps'           => (int) ($agent['max_steps'] ?? AgentStepCap::DEFAULT_CAP),
             'default_effort'      => $this->nullIfEmpty($agent['default_effort'] ?? null),
             'allow_followup'      => $allowFollowup ? 1 : 0,
             'retry_after_minutes' => (int) ($agent['retry_after_minutes'] ?? 0),

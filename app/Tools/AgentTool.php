@@ -220,6 +220,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'Booleans take true / false or the strings "true" / "false" / 0 / 1, and numbers '
                . 'may be quoted — both are read as the value they name, then range-checked, so '
                . '"25" is accepted for max_steps and "999" is not. '
+               . 'The largest cap the instance allows is its SPORA_MAX_STEPS setting. '
                . '`description` is capped at 2000 chars; `system_prompt` is NOT capped here or on '
                . '`create_agent`, so any prompt you could create an agent with, you can send back to '
                . 'edit it. '
