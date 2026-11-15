@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Spora\Core\Config;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Http\Exceptions\AgentPatchValidationException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\AgentStepCap;
@@ -82,6 +83,25 @@ test('a template-created agent carries a cap inside the ceiling', function (): v
 
     // The constant is 100, which is above this instance's ceiling of 50.
     expect((int) Agent::findOrFail($agentId)->max_steps)->toBe(50);
+});
+
+test('a template that names a cap above the ceiling is refused', function (): void {
+    $creator = new Spora\AgentTemplates\AgentTemplateAgentCreator(
+        new AgentStepCap(new Config(['SPORA_MAX_STEPS' => 50])),
+    );
+
+    $template = new Spora\AgentTemplates\AgentTemplate([
+        'id'      => 'template-1',
+        'name'    => 'Example',
+        'version' => '1.0.0',
+        'agent'   => ['description' => 'Example', 'max_steps' => 80],
+    ]);
+
+    // A template on disk is not judged by the instance's ceiling — the
+    // scanner has no instance to judge it by — so the refusal belongs
+    // where the row is written.
+    expect(fn() => $creator->create(createUserPrincipalPublic(1), $template))
+        ->toThrow(AgentPatchValidationException::class, 'between 1 and 50');
 });
 
 test('a task cannot carry a cap above the ceiling', function (): void {

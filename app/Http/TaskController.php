@@ -147,12 +147,16 @@ final class TaskController
         }
 
         $prompt       = trim((string) ($body['prompt'] ?? ''));
-        $maxSteps     = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
+        // The value is checked as it was sent: PHP reads the leading
+        // numeric part of "100garbage" as 100, and a cap that was not a
+        // number is not a cap.
+        $rawMaxSteps  = $body['max_steps'] ?? null;
+        $maxSteps     = $rawMaxSteps === null ? null : (int) $rawMaxSteps;
 
         $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
         $mediaIds     = $this->mediaCapability->parseMediaIds($body['media_ids'] ?? null);
 
-        $validation = $this->validateStartTaskFields($prompt, $agentId, $maxSteps);
+        $validation = $this->validateStartTaskFields($prompt, $agentId, $rawMaxSteps);
         if ($validation !== null) {
             return $validation;
         }
@@ -199,7 +203,7 @@ final class TaskController
         return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_CREATED);
     }
 
-    private function validateStartTaskFields(string $prompt, ?int $agentId, ?int $maxSteps): ?JsonResponse
+    private function validateStartTaskFields(string $prompt, ?int $agentId, mixed $maxSteps): ?JsonResponse
     {
         // The first failure wins, and the method answers it in one place.
         $failure = null;

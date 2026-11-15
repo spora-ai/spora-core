@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\AgentTemplates;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Http\Exceptions\AgentPatchValidationException;
 use Spora\Services\AgentStepCap;
 
 /**
@@ -22,11 +23,22 @@ final class AgentTemplateAgentCreator
         private readonly ?AgentStepCap $stepCap = null,
     ) {}
 
+    /**
+     * @throws AgentPatchValidationException when the template names a cap this installation does not allow
+     */
     public function create(int $principalId, AgentTemplate $template): int
     {
         $agent = $template->agent();
         $now = date(self::DATETIME_FORMAT);
         $allowFollowup = (bool) ($agent['allow_followup'] ?? true);
+
+        // A cap the template names is judged by the instance's ceiling, the
+        // same as every other surface that takes one. A template on disk is
+        // not validated against it — the scanner has no instance to judge
+        // it by — so the refusal belongs here, before the row is written.
+        if (array_key_exists('max_steps', $agent)) {
+            $this->stepCap?->assertValid($agent['max_steps']);
+        }
 
         return Capsule::table('agents')->insertGetId([
             'principal_id'        => $principalId,

@@ -12,6 +12,7 @@ use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\AgentPatchValidationException;
 use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\PrincipalService;
@@ -156,9 +157,10 @@ final class AgentTemplateController
     {
         try {
             $import = $this->importer->importPayload($userId, $body, $principalId);
-        } catch (EffortValidationException $e) {
-            // A default the target configuration cannot express is a
-            // property of the payload, not a server failure.
+        } catch (EffortValidationException | AgentPatchValidationException $e) {
+            // A default the target configuration cannot express, and a
+            // step cap above the instance's ceiling, are properties of the
+            // payload — not server failures.
             return $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
