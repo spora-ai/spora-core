@@ -130,48 +130,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
         return $masked;
     }
 
-    /**
- * The defaults a configuration takes for the settings it does not carry.
- *
- * The settings form renders the stored settings, so a setting a
- * configuration never saved shows as unset — and for a toggle that reads
- * as "off", which is the opposite of what runs. A setting whose absent
- * value is its default says so in its schema entry, and the form shows
- * that default instead of an unset field.
- *
- * Only the settings that declare it are filled in. `supports_image_input`
- * does not: an absent key there means the driver decides from the model,
- * so its default is not what the key's absence means.
- *
- * @param array<string, mixed> $settings
- * @param list<array<string, mixed>> $schema
- * @return array<string, mixed>
- */
-    private function applyAbsentDefaults(array $settings, array $schema): array
-    {
-        foreach ($schema as $field) {
-            $key = $field['key'] ?? null;
-
-            if (!is_string($key) || ($field['default_applies_when_absent'] ?? false) !== true) {
-                continue;
-            }
-
-            if (array_key_exists($key, $settings) || !array_key_exists('default', $field)) {
-                continue;
-            }
-
-            $default = $field['default'];
-
-            if ($default === null) {
-                continue;
-            }
-
-            $settings[$key] = is_bool($default) ? ($default ? 'true' : 'false') : (string) $default;
-        }
-
-        return $settings;
-    }
-
     // Configuration listing and lookup.
 
     /**
@@ -335,7 +293,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
     {
         $settings = $this->decodeSettings($config->driver_class, $config->getRawOriginal('settings'));
         $schema = $this->schemaInspector->getSchemaForDriver($config->driver_class);
-        $masked = $this->maskForApi($this->applyAbsentDefaults($settings, $schema), $schema);
+        $masked = $this->maskForApi($this->schemaInspector->applyAbsentDefaults($settings, $schema), $schema);
 
         return [
             'id' => $config->id,

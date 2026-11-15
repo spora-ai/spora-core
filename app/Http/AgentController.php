@@ -56,7 +56,7 @@ final class AgentController
         private readonly ?AgentPictureService $pictureService = null,
         private readonly ?PrincipalService $principalService = null,
         private readonly ?PrincipalResolver $principalResolver = null,
-        private readonly ?AgentStepCap $stepCap = null,
+        private readonly AgentStepCap $stepCap = new AgentStepCap(),
     ) {}
 
     /**
@@ -159,7 +159,7 @@ final class AgentController
             // The cap a new agent carries. It is bounded by the ceiling,
             // so a limit the operator set below the default cannot leave
             // an agent with a cap it may not have.
-            'max_steps'     => (int) ($body['max_steps'] ?? $this->stepCap?->defaultCap() ?? AgentStepCap::DEFAULT_CAP),
+            'max_steps'     => (int) ($body['max_steps'] ?? $this->stepCap->defaultCap()),
             'allow_followup' => array_key_exists('allow_followup', $body) ? (bool) $body['allow_followup'] : true,
             // Mirror the schema default when the body omits the field
             // so a freshly-created agent exposes `voice_message_retention_count: 5`
@@ -167,10 +167,12 @@ final class AgentController
             'voice_message_retention_count' => (int) ($body['voice_message_retention_count'] ?? 5),
         ];
 
+        $capRefusal = array_key_exists('max_steps', $body) ? $this->stepCap->refuse($body['max_steps']) : null;
+
         $earlyExit = ($name === ''
                 ? $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY)
                 : null)
-            ?? (array_key_exists('max_steps', $body) ? $this->validateStepCap($body['max_steps']) : null)
+            ?? ($capRefusal !== null ? $this->unprocessable('VALIDATION_ERROR', $capRefusal) : null)
             ?? $this->validateProviderConfigReferences($principalId, $data);
         if ($earlyExit !== null) {
             return $earlyExit;
@@ -378,9 +380,9 @@ final class AgentController
     private function validateAgentPatch(array $data): ?JsonResponse
     {
         if (array_key_exists('max_steps', $data)) {
-            $capError = $this->validateStepCap($data['max_steps']);
+            $capError = $this->stepCap->refuse($data['max_steps']);
             if ($capError !== null) {
-                return $capError;
+                return $this->unprocessable('VALIDATION_ERROR', $capError);
             }
             $data['max_steps'] = (int) $data['max_steps'];
         }
@@ -403,45 +405,6 @@ final class AgentController
             $data['voice_message_retention_count'] = $intValue;
         }
         return null;
-    }
-
-    /**
-     * Refuse a step cap outside the range this installation allows.
-     *
-     * The cap bounds the agent loop, so the ceiling is what stops a
-     * looping model from taking the worker down with it.
-     *
-     * @param mixed $value
-     */
-    private function validateStepCap(mixed $value): ?JsonResponse
-    {
-        $limit = $this->stepCapLimit();
-
-        if ($value === null || !is_int($value) && !(is_string($value) && ctype_digit($value))) {
-            return $this->unprocessable(
-                'VALIDATION_ERROR',
-                sprintf('max_steps must be an integer between 1 and %d.', $limit),
-            );
-        }
-
-        $cap = (int) $value;
-
-        if ($cap < 1 || $cap > $limit) {
-            return $this->unprocessable(
-                'VALIDATION_ERROR',
-                sprintf('max_steps must be between 1 and %d.', $limit),
-            );
-        }
-
-        return null;
-    }
-
-    /**
-     * The largest cap an agent may carry.
-     */
-    private function stepCapLimit(): int
-    {
-        return $this->stepCap?->limit() ?? AgentStepCap::DEFAULT_LIMIT;
     }
 
     /**

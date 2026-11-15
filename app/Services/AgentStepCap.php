@@ -53,10 +53,25 @@ final class AgentStepCap
     }
 
     /**
-     * Whether a value is a cap this installation allows.
+     * The reason a cap is refused, or null when it is accepted.
+     *
+     * The refusal lives here so the bound cannot drift between the surfaces
+     * that enforce it: each one asks this and reports what it says.
+     *
+     * @param mixed $value
      */
-    public function isValid(int $value): bool
+    public function refuse(mixed $value): ?string
     {
-        return $value >= 1 && $value <= $this->limit();
+        if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
+            return sprintf('max_steps must be an integer between 1 and %d.', $this->limit());
+        }
+
+        $cap = (int) $value;
+
+        if ($cap < 1 || $cap > $this->limit()) {
+            return sprintf('max_steps must be between 1 and %d.', $this->limit());
+        }
+
+        return null;
     }
 }
