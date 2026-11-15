@@ -460,8 +460,6 @@
     "effort_override must be a string.": "effort_override must be a string.",
     "information must be a string.": "information must be a string.",
     "kind must be one of: %s.": "kind must be one of: %s.",
-    "max_steps must be an integer between 1 and %d.": "max_steps must be an integer between 1 and %d.",
-    "max_steps must be between 1 and %d.": "max_steps must be between 1 and %d.",
     "media_id is required.": "media_id is required.",
     "media_ids may carry at most ": "media_ids may carry at most ",
     "meta": "meta",

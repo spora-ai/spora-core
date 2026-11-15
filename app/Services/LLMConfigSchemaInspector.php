@@ -82,6 +82,53 @@ final class LLMConfigSchemaInspector
     }
 
     /**
+     * The defaults a configuration takes for the settings it does not carry.
+     *
+     * The settings form renders the stored settings, so a setting a
+     * configuration never saved shows as unset — and for a toggle that
+     * reads as "off", which is the opposite of what runs. A setting whose
+     * absent value is its default says so in its schema entry, and the
+     * default is filled in here.
+     *
+     * Only the settings that declare it are filled in. `supports_image_input`
+     * does not: an absent key there means the driver decides from the model,
+     * so its default is not what the key's absence means.
+     *
+     * @param array<string, mixed> $settings
+     * @param list<array<string, mixed>> $schema
+     * @return array<string, mixed>
+     */
+    public function applyAbsentDefaults(array $settings, array $schema): array
+    {
+        foreach ($schema as $field) {
+            $key = $field['key'] ?? null;
+
+            if (!is_string($key) || ($field['default_applies_when_absent'] ?? false) !== true) {
+                continue;
+            }
+
+            if (array_key_exists($key, $settings) || !array_key_exists('default', $field)) {
+                continue;
+            }
+
+            $default = $field['default'];
+
+            if ($default === null) {
+                continue;
+            }
+
+            if (is_bool($default)) {
+                $settings[$key] = $default ? 'true' : 'false';
+                continue;
+            }
+
+            $settings[$key] = (string) $default;
+        }
+
+        return $settings;
+    }
+
+    /**
      * @return list<array>
      */
     public function getSchemaForDriver(string $driverClass): array

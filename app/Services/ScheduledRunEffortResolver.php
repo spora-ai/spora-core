@@ -53,10 +53,13 @@ final class ScheduledRunEffortResolver
         $stillOffered = $this->preferences->getEffectiveConfigForAgent($agent) === null
             || $this->effortService->levelSetFor($agent)->has($requested);
 
-        if ($stillOffered) {
-            return ['level' => $requested, 'replaced' => null];
-        }
+        $level = $stillOffered
+            ? $requested
+            : $this->effortService->defaultFor($agent);
 
-        return ['level' => $this->effortService->defaultFor($agent), 'replaced' => $requested];
+        return [
+            'level' => $level,
+            'replaced' => $stillOffered ? null : $requested,
+        ];
     }
 }

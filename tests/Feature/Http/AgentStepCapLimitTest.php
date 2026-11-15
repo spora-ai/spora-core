@@ -81,7 +81,7 @@ function stepCapController(?AgentStepCap $stepCap = null): array
             null,
             null,
             null,
-            $stepCap,
+            $stepCap ?? new AgentStepCap(),
         ),
         (int) $agent->id,
     ];
