@@ -149,23 +149,10 @@ final class TaskController
         $prompt       = trim((string) ($body['prompt'] ?? ''));
         $maxSteps     = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
 
-        // The cap a task may carry is bounded by the instance's ceiling,
-        // like every other surface that takes one: an unbounded value
-        // reaches a column the database refuses to store.
-        if ($maxSteps !== null) {
-            try {
-                $this->stepCap?->assertValid($maxSteps);
-            } catch (AgentPatchValidationException $e) {
-                return new JsonResponse(
-                    ['error' => ['code' => $e->errorCode(), 'message' => $e->getMessage()]],
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
-            }
-        }
         $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
         $mediaIds     = $this->mediaCapability->parseMediaIds($body['media_ids'] ?? null);
 
-        $validation = $this->validateStartTaskFields($prompt, $agentId);
+        $validation = $this->validateStartTaskFields($prompt, $agentId, $maxSteps);
         if ($validation !== null) {
             return $validation;
         }
@@ -212,24 +199,39 @@ final class TaskController
         return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_CREATED);
     }
 
-    private function validateStartTaskFields(string $prompt, ?int $agentId): ?JsonResponse
+    private function validateStartTaskFields(string $prompt, ?int $agentId, ?int $maxSteps): ?JsonResponse
     {
+        // The first failure wins, and the method answers it in one place.
+        $failure = null;
+
         if ($prompt === '') {
-            return new JsonResponse(
+            $failure = new JsonResponse(
                 ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required.']],
                 Response::HTTP_UNPROCESSABLE_ENTITY,
             );
-        }
-        if ($agentId === null || $agentId <= 0) {
+        } elseif ($agentId === null || $agentId <= 0) {
             $message = $agentId === null
                 ? 'agent_id is required.'
                 : 'agent_id must be a positive integer.';
-            return new JsonResponse(
+            $failure = new JsonResponse(
                 ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $message]],
                 Response::HTTP_UNPROCESSABLE_ENTITY,
             );
+        } elseif ($maxSteps !== null) {
+            // The cap a task may carry is bounded by the instance's ceiling,
+            // like every other surface that takes one: an unbounded value
+            // reaches a column the database refuses to store.
+            try {
+                $this->stepCap?->assertValid($maxSteps);
+            } catch (AgentPatchValidationException $e) {
+                $failure = new JsonResponse(
+                    ['error' => ['code' => $e->errorCode(), 'message' => $e->getMessage()]],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                );
+            }
         }
-        return null;
+
+        return $failure;
     }
 
     /**

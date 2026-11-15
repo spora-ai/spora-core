@@ -190,16 +190,19 @@ final class AgentController
             return $earlyExit;
         }
 
+        $response = null;
+
         try {
             $agent = $this->agentService->createAgent($userId, $data, $principalId);
+            $response = new JsonResponse(
+                ['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]],
+                Response::HTTP_CREATED,
+            );
         } catch (EffortValidationException $e) {
-            return $this->unprocessable($e->errorCode(), $e->getMessage());
+            $response = $this->unprocessable($e->errorCode(), $e->getMessage());
         }
 
-        return new JsonResponse(
-            ['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]],
-            Response::HTTP_CREATED,
-        );
+        return $response;
     }
 
     /**
