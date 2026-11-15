@@ -293,7 +293,9 @@ describe('AgentService::createAgent', function (): void {
         expect($agent->name)->toBe('New Agent');
         expect($agent->user_id)->toBe($userId);
         expect($agent->is_active)->toBeTrue();
-        expect($agent->max_steps)->toBe(10); // default
+        // A new agent carries the default cap, not a token ten: the cap
+        // bounds the agent loop, and ten turns is not a workflow.
+        expect($agent->max_steps)->toBe(100);
     });
 
     it('respects custom max_steps', function (): void {

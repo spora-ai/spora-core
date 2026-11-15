@@ -6,6 +6,7 @@ namespace Spora\AgentTemplates;
 
 use ReflectionClass;
 use Spora\Drivers\EffortLevelSet;
+use Spora\Services\AgentStepCap;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\ToolInterface;
 
@@ -38,6 +39,7 @@ final class AgentTemplateValidator
     public function __construct(
         ?AgentTemplateSettingsValidator $settingsValidator = null,
         ?AgentTemplateMetadataValidator $metadataValidator = null,
+        private readonly ?AgentStepCap $stepCap = null,
     ) {
         $this->settingsValidator = $settingsValidator ?? new AgentTemplateSettingsValidator();
         $this->metadataValidator = $metadataValidator ?? new AgentTemplateMetadataValidator();
@@ -303,21 +305,23 @@ final class AgentTemplateValidator
      */
     private function validateMaxSteps(mixed $value, ValidationResult $result): void
     {
+        $limit = $this->stepCap?->limit() ?? AgentStepCap::DEFAULT_LIMIT;
+
         if (!is_int($value)) {
             $result->addError([
                 'code'     => 'MAX_STEPS_INVALID',
                 'severity' => 'error',
-                'message'  => "Field 'agent.max_steps' must be an integer between 1 and 100.",
+                'message'  => "Field 'agent.max_steps' must be an integer between 1 and {$limit}.",
                 'path'     => 'agent.max_steps',
             ]);
             return;
         }
 
-        if ($value < 1 || $value > 100) {
+        if ($value < 1 || $value > $limit) {
             $result->addError([
                 'code'     => 'MAX_STEPS_RANGE',
                 'severity' => 'error',
-                'message'  => "Field 'agent.max_steps' must be between 1 and 100.",
+                'message'  => "Field 'agent.max_steps' must be between 1 and {$limit}.",
                 'path'     => 'agent.max_steps',
             ]);
         }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Tools\AgentTool;
 
+use Spora\Services\AgentStepCap;
 use Spora\Tools\LlmScalarCoercion;
 use Spora\Tools\ValueObjects\ToolResult;
 
@@ -34,8 +35,19 @@ final class AgentPatchValidator
 {
     use LlmScalarCoercion;
 
+    public function __construct(
+        private readonly ?AgentStepCap $stepCap = null,
+    ) {}
+
+    /**
+     * The largest cap this installation allows.
+     */
+    private function stepCapLimit(): int
+    {
+        return $this->stepCap?->limit() ?? AgentStepCap::DEFAULT_LIMIT;
+    }
+
     private const MAX_STEPS_MIN   = 1;
-    private const MAX_STEPS_MAX   = 100;
     private const NAME_MAX_LENGTH = 200;
     private const DESC_MAX_LENGTH = 2000;
 
@@ -151,7 +163,7 @@ final class AgentPatchValidator
             self::T_TEXT         => $this->nullableString($key, $value),
             self::T_PROMPT       => $this->systemPrompt($key, $value),
             self::T_NAME         => $this->text($key, $value, self::NAME_MAX_LENGTH, 'a non-empty string'),
-            self::T_STEPS        => $this->boundedInt($key, $value, self::MAX_STEPS_MIN, self::MAX_STEPS_MAX),
+            self::T_STEPS        => $this->boundedInt($key, $value, self::MAX_STEPS_MIN, $this->stepCapLimit()),
             self::T_NON_NEGATIVE => $this->boundedInt($key, $value, 0, PHP_INT_MAX),
             default              => ToolResult::fail(self::ERR_PREFIX . "unhandled rule for '{$key}'."),
         };

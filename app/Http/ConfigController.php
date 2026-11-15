@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Core\Config;
+use Spora\Services\AgentStepCap;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 /**
@@ -28,6 +29,7 @@ final class ConfigController
         private readonly Config $config,
         private readonly WorkerRuntimeMode $workerRuntimeMode = WorkerRuntimeMode::Server,
         private readonly int $tickLeaseSeconds = 600,
+        private readonly ?AgentStepCap $stepCap = null,
     ) {}
 
     public function index(): JsonResponse
@@ -55,6 +57,11 @@ final class ConfigController
             // the only thing telling it which language the instance is in.
             // Without it the first paint is English on a German install.
             'default_lang'          => $this->config->getString('SPORA_DEFAULT_LANG'),
+            // The largest step cap an agent may carry. The agent settings
+            // form needs it to bound its input, and the admin settings are
+            // admin-only — a plain user editing their own agent cannot
+            // read the bound there.
+            'max_agent_steps'        => $this->stepCap?->limit() ?? AgentStepCap::DEFAULT_LIMIT,
             'worker_runtime_mode'    => $this->workerRuntimeMode->value,
             'client_worker'          => [
                 'enabled'                       => $this->workerRuntimeMode === WorkerRuntimeMode::Client,

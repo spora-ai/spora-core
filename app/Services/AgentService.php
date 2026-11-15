@@ -72,6 +72,7 @@ final class AgentService implements AgentServiceInterface
         private readonly ?PrincipalResolver $principalResolver = null,
         private readonly ?AgentPrincipalServiceInterface $principalService = null,
         private readonly ?EffortService $effortService = null,
+        private readonly ?AgentStepCap $stepCap = null,
     ) {}
 
 
@@ -184,7 +185,10 @@ final class AgentService implements AgentServiceInterface
             'description'            => $allowed['description'] ?? null,
             'system_prompt'          => $allowed['system_prompt'] ?? null,
             'llm_driver_config_id'   => $allowed['llm_driver_config_id'] ?? null,
-            'max_steps'              => (int) ($allowed['max_steps'] ?? 10),
+            // The cap a new agent carries, bounded by the ceiling.
+            'max_steps'              => (int) ($allowed['max_steps']
+                ?? $this->stepCap?->defaultCap()
+                ?? AgentStepCap::DEFAULT_CAP),
             'default_effort'         => $allowed['default_effort'] ?? null,
             'allow_followup'         => (bool) ($allowed['allow_followup'] ?? true) ? 1 : 0,
             'retry_after_minutes'    => (int) ($allowed['retry_after_minutes'] ?? 0),
