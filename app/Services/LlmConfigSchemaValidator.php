@@ -32,12 +32,20 @@ use Symfony\Component\HttpFoundation\Response;
 final class LlmConfigSchemaValidator
 {
     /**
-     * Upper bound on `context_window` and `max_tokens_output`. Covers every
-     * known provider ceiling with headroom (Anthropic 200k, OpenAI o-series
-     * 100k). Above this, we reject with a generic 422 — the cap is internal
+     * Upper bound on `context_window` and `max_tokens_output`.
+     *
+     * The context window is bounded by the largest window a hosted API
+     * publishes — Gemini 3 Pro and Grok 4.20 sit at two million, the
+     * GPT-6 family at 1,050,000 and Gemini 4 Argon at 1,048,576. Above
+     * that, the value is a typo rather than a window: the cap is internal
      * operator hygiene, not something the UI should advertise.
+     *
+     * The output budget is bounded separately and lower: it is the
+     * per-request `max_output_tokens`, so a stray zero asks the provider
+     * for a response an order of magnitude larger than any model allows
+     * and the operator pays for the tokens.
      */
-    private const MAX_CONTEXT_WINDOW = 1_000_000;
+    private const MAX_CONTEXT_WINDOW = 2_000_000;
     private const MAX_OUTPUT_TOKENS = 1_000_000;
 
     public function __construct(
@@ -48,7 +56,8 @@ final class LlmConfigSchemaValidator
      * Validate `context_window` and `max_tokens_output` if present.
      * Absent keys are treated as "leave unchanged" / "use default" so a
      * partial update payload can update one field without resetting the
-     * other. A present-but-invalid value is rejected with a generic 422.
+     * other. A present-but-invalid value is rejected with a 422 naming the
+     * field and the bound it broke.
      *
      * @param array<string, mixed> $body
      */
@@ -63,7 +72,7 @@ final class LlmConfigSchemaValidator
             if (!$this->isValidPositiveInteger($value, $max)) {
                 return $this->errorResponse(
                     'VALIDATION_ERROR',
-                    "Value must be a positive integer up to {$max}.",
+                    "{$key} must be a positive integer up to {$max}.",
                 );
             }
         }
