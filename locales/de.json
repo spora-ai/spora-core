@@ -460,6 +460,8 @@
   "information must be a string.": "information muss eine Zeichenkette sein.",
   "kind must be one of: %s.": "kind muss eines der folgenden sein: %s.",
   "The largest step cap an agent may carry. The cap is what bounds the agent loop: a tick that finishes a tool batch hands the task straight back to the loop, so an agent whose model keeps calling tools would otherwise recurse until the worker exhausted its memory. Raise it for long-running agentic workflows; the default is 100 steps per agent.": "Der größte Schrittdeckel, den ein Agent tragen kann. Der Deckel begrenzt die Agentenschleife: Ein Tick, der einen Werkzeugaufruf abschließt, übergibt die Aufgabe direkt zurück an die Schleife — ein Agent, dessen Modell immer wieder Werkzeuge aufruft, würde sonst so lange rekursieren, bis der Worker seinen Speicher erschöpft hat. Für langlebige agentische Abläufe erhöhen; der Standard sind 100 Schritte pro Agent.",
+  "max_steps must be an integer between 1 and %d.": "max_steps muss eine ganze Zahl zwischen 1 und %d sein.",
+  "max_steps must be between 1 and %d.": "max_steps muss zwischen 1 und %d liegen.",
   "media_id is required.": "media_id ist erforderlich.",
   "media_ids may carry at most ": "media_ids darf höchstens ",
   "meta": "Meta",

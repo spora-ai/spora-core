@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Core\Config;
+use Spora\Http\Exceptions\AgentPatchValidationException;
 
 /**
  * The step cap an agent may carry.
@@ -53,25 +54,29 @@ final class AgentStepCap
     }
 
     /**
-     * The reason a cap is refused, or null when it is accepted.
+     * Refuse a cap this installation does not allow.
      *
-     * The refusal lives here so the bound cannot drift between the surfaces
-     * that enforce it: each one asks this and reports what it says.
+     * The refusal is thrown rather than returned, because the message
+     * reaches the operator through the error envelope — and a message that
+     * only ever existed as a return value would be untranslatable.
      *
      * @param mixed $value
+     * @throws AgentPatchValidationException when the value is not a cap this installation allows
      */
-    public function refuse(mixed $value): ?string
+    public function assertValid(mixed $value): void
     {
         if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
-            return sprintf('max_steps must be an integer between 1 and %d.', $this->limit());
+            throw new AgentPatchValidationException(
+                sprintf('max_steps must be an integer between 1 and %d.', $this->limit()),
+            );
         }
 
         $cap = (int) $value;
 
         if ($cap < 1 || $cap > $this->limit()) {
-            return sprintf('max_steps must be between 1 and %d.', $this->limit());
+            throw new AgentPatchValidationException(
+                sprintf('max_steps must be between 1 and %d.', $this->limit()),
+            );
         }
-
-        return null;
     }
 }

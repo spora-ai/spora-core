@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
+use Spora\Http\Exceptions\AgentPatchValidationException;
 use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
@@ -167,12 +168,19 @@ final class AgentController
             'voice_message_retention_count' => (int) ($body['voice_message_retention_count'] ?? 5),
         ];
 
-        $capRefusal = array_key_exists('max_steps', $body) ? $this->stepCap->refuse($body['max_steps']) : null;
+        $capRefusal = null;
+        if (array_key_exists('max_steps', $body)) {
+            try {
+                AgentPatchRequestValidator::validate(['max_steps' => $body['max_steps']], $this->stepCap);
+            } catch (AgentPatchValidationException $e) {
+                $capRefusal = $this->unprocessable($e->errorCode(), $e->getMessage());
+            }
+        }
 
         $earlyExit = ($name === ''
                 ? $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY)
                 : null)
-            ?? ($capRefusal !== null ? $this->unprocessable('VALIDATION_ERROR', $capRefusal) : null)
+            ?? $capRefusal
             ?? $this->validateProviderConfigReferences($principalId, $data);
         if ($earlyExit !== null) {
             return $earlyExit;
@@ -379,41 +387,13 @@ final class AgentController
      */
     private function validateAgentPatch(array $data): ?JsonResponse
     {
-        // The first failure wins, and the method answers it in one place:
-        // two fields to check, and a return per check would put the method
-        // over the ceiling.
-        $failure = null;
-
-        if (array_key_exists('max_steps', $data)) {
-            $capError = $this->stepCap->refuse($data['max_steps']);
-            if ($capError !== null) {
-                $failure = $this->unprocessable('VALIDATION_ERROR', $capError);
-            } else {
-                $data['max_steps'] = (int) $data['max_steps'];
-            }
+        try {
+            AgentPatchRequestValidator::validate($data, $this->stepCap);
+        } catch (AgentPatchValidationException $e) {
+            return $this->unprocessable($e->errorCode(), $e->getMessage());
         }
 
-        if ($failure === null && array_key_exists('voice_message_retention_count', $data)) {
-            $value = $data['voice_message_retention_count'];
-            if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
-                $failure = $this->unprocessable(
-                    'VALIDATION_ERROR',
-                    'voice_message_retention_count must be an integer between 0 and 100.',
-                );
-            } else {
-                $intValue = (int) $value;
-                if ($intValue < 0 || $intValue > 100) {
-                    $failure = $this->unprocessable(
-                        'VALIDATION_ERROR',
-                        'voice_message_retention_count must be between 0 and 100.',
-                    );
-                } else {
-                    $data['voice_message_retention_count'] = $intValue;
-                }
-            }
-        }
-
-        return $failure;
+        return null;
     }
 
     /**
