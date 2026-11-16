@@ -29,6 +29,10 @@ final class ErrorClassifier
      *
      * `USAGE_LIMIT_REACHED` is deliberately absent: a hard usage decision is
      * terminal, and a retry would spend the very budget the decision refused.
+     *
+     * `ORPHANED` is the code the reaper used to write; `WORKER_DISCONNECTED`
+     * is what it writes now. Both are here: the reaper arms the retry it
+     * just created, so the code it writes has to be one this list accepts.
      */
     public const RETRYABLE_ERROR_CODES = [
         'RATE_LIMIT',
@@ -38,6 +42,7 @@ final class ErrorClassifier
         'AUTH_ERROR',
         'LLM_TIMEOUT',
         'ORPHANED',
+        'WORKER_DISCONNECTED',
     ];
 
     public function __construct()
@@ -72,24 +77,21 @@ final class ErrorClassifier
             return $classified;
         }
 
-        if ($e instanceof TimeoutExceptionInterface) {
-            return 'LLM_TIMEOUT';
-        }
-
-        // A provider that cannot be reached at all — DNS failure, connection
-        // reset, refused TLS handshake. As transient as a 5xx, and the most
-        // common failure there is. `TransportExceptionInterface` is the
-        // parent of the timeout interface, so this branch has to come after
-        // it: a timeout is a transport failure too, but it has its own code.
+        // A timeout is a transport failure too, but it has its own code —
+        // so the timeout branch has to come first, or every timeout would
+        // be reported as a generic gateway failure.
         //
-        // Without this branch the failure lands on UNKNOWN, which the
-        // auto-retry policy does not accept, so an agent's configured retry
-        // never arms for the one failure a retry policy exists for.
-        if ($e instanceof TransportExceptionInterface) {
-            return 'GATEWAY_ERROR';
-        }
-
-        return 'UNKNOWN';
+        // A provider that cannot be reached at all — DNS failure, connection
+        // reset, refused TLS handshake — is as transient as a 5xx, and the
+        // most common failure there is. Without the transport branch it
+        // lands on UNKNOWN, which the auto-retry policy does not accept, so
+        // an agent's configured retry never arms for the one failure a
+        // retry policy exists for.
+        return match (true) {
+            $e instanceof TimeoutExceptionInterface  => 'LLM_TIMEOUT',
+            $e instanceof TransportExceptionInterface => 'GATEWAY_ERROR',
+            default                                  => 'UNKNOWN',
+        };
     }
 
     private function classifySpecificError(Throwable $e): ?string

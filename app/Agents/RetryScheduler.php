@@ -27,6 +27,7 @@ final class RetryScheduler
         'AUTH_ERROR',
         'LLM_TIMEOUT',
         'ORPHANED',
+        'WORKER_DISCONNECTED',
     ];
 
     public function __construct(

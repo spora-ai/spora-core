@@ -43,7 +43,7 @@ final class TaskResourceBuilder
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string,
+     *     retry_after: string|null,
      *     tool_calls: list<array<string, mixed>>,
      *     history: list<array<string, mixed>>,
      *     totals: array<string, int>
@@ -104,9 +104,12 @@ final class TaskResourceBuilder
             $resource['retry_after_minutes'] = $task->agent->retry_after_minutes ?? 0;
         }
 
-        if ($task->retry_after !== null) {
-            $resource['retry_after'] = $task->retry_after->toIso8601String();
-        }
+        // Always present, null when nothing is pending. The browser decides
+        // whether to promise an automatic retry from this key, and a key the
+        // payload omits arrives there as `undefined` — which is not `null`,
+        // so an omitted key reads as "a retry is scheduled" and the
+        // dashboard promises one for every failed task.
+        $resource['retry_after'] = $task->retry_after?->toIso8601String();
 
         $abortedAt = is_array($task->data) ? ($task->data['aborted_at'] ?? null) : null;
         if ($abortedAt !== null) {
@@ -141,7 +144,7 @@ final class TaskResourceBuilder
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string
+     *     retry_after: string|null
      * }
      */
     public function taskListResource(Task $task): array
@@ -167,7 +170,7 @@ final class TaskResourceBuilder
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string,
+     *     retry_after: string|null,
      *     tool_calls: list<array<string, mixed>>,
      *     history: list<array<string, mixed>>,
      *     totals: array<string, int>,

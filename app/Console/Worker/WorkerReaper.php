@@ -7,6 +7,8 @@ namespace Spora\Console\Worker;
 use DateTimeImmutable;
 use DateTimeZone;
 use Psr\Log\LoggerInterface;
+use Spora\Agents\RetryScheduler;
+use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Models\Task;
 use Spora\Services\NotificationService;
 use Spora\Services\SubAgentServiceInterface;
@@ -29,6 +31,8 @@ final class WorkerReaper
         private readonly LoggerInterface $logger,
         private readonly NotificationService $notificationService,
         private readonly ?SubAgentServiceInterface $subAgent = null,
+        private readonly ?RetryScheduler $retryScheduler = null,
+        private readonly WorkerRuntimeMode $workerRuntimeMode = WorkerRuntimeMode::Server,
     ) {}
 
     public function reapStaleTasks(OutputInterface $output, int $staleMinutes): void
@@ -76,15 +80,64 @@ final class WorkerReaper
             'status'         => 'FAILED',
             'failure_reason' => "Task orphaned: lease expired and no progress for {$staleMinutes} minutes.",
             'error_code'     => 'WORKER_DISCONNECTED',
-            'error_message'  => 'The browser driving this task disconnected. Click Retry to start a fresh attempt.',
+            'error_message'  => $this->disconnectMessage(),
         ]);
         if ($updated <= 0) {
             return;
         }
 
+        $this->armRetries($orphanedIds);
         $this->reportReaped($updated, $staleMinutes, $output);
         $this->notifyOrphans($orphanedIds);
         $this->fireSubAgentResumeHooks($orphanedIds);
+    }
+
+    /**
+     * What the operator is told when the task's worker vanished.
+     *
+     * The reaper runs in both runtime modes, and the thing that vanished is
+     * the browser's SharedWorker in one and the server worker in the other.
+     * Naming the browser on a server-worker install describes an actor that
+     * is not there.
+     */
+    private function disconnectMessage(): string
+    {
+        return $this->workerRuntimeMode === WorkerRuntimeMode::Client
+            ? 'The browser driving this task disconnected. Click Retry to start a fresh attempt.'
+            : 'The worker running this task stopped before it finished. Click Retry to start a fresh attempt.';
+    }
+
+    /**
+     * Arm the retry the operator's policy asks for.
+     *
+     * A task whose worker vanished is exactly the case an auto-retry policy
+     * exists for: the run did not fail because the agent misbehaved. The
+     * row is FAILED now, and the scheduler puts it back in the queue after
+     * the agent's configured delay.
+     *
+     * Only the server worker claims scheduled retries — in client-worker mode
+     * nothing would ever pick the row up, so arming it there would promise a
+     * retry that never comes.
+     *
+     * @param list<int> $orphanedIds
+     */
+    private function armRetries(array $orphanedIds): void
+    {
+        if ($this->retryScheduler === null || $this->workerRuntimeMode === WorkerRuntimeMode::Client) {
+            return;
+        }
+
+        foreach (Task::findMany($orphanedIds) as $task) {
+            try {
+                $this->retryScheduler->scheduleAutoRetry($task, 'WORKER_DISCONNECTED');
+            } catch (Throwable $e) {
+                $this->logger->warning('Failed to arm a retry for an orphaned task', [
+                    'task_id'         => $task->id,
+                    'exception_class' => get_class($e),
+                    'message'         => $e->getMessage(),
+                ]);
+            }
+        }
     }
 
     private function reportReaped(int $updated, int $staleMinutes, OutputInterface $output): void

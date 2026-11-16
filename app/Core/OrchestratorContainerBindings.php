@@ -13,6 +13,7 @@ use Spora\Agents\LlmConfigResolver;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\RetryScheduler;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\AgentTemplates\AgentTemplateAgentCreator;
 use Spora\AgentTemplates\AgentTemplateAgentUpdater;
@@ -196,6 +197,8 @@ final class OrchestratorContainerBindings
                     $c->has(SubAgentServiceInterface::class)
                         ? $c->get(SubAgentServiceInterface::class)
                         : null,
+                    $c->get(RetryScheduler::class),
+                    $c->get(WorkerRuntimeMode::class),
                 );
             },
 
