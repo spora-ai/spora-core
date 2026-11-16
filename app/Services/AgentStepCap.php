@@ -75,6 +75,10 @@ final class AgentStepCap
      * reaches the operator through the error envelope — and a message that
      * only ever existed as a return value would be untranslatable.
      *
+     * One message covers both refusals: a value that is not an integer and
+     * a value outside the range break the same rule, and two wordings for
+     * it would be two catalogue entries for one thing to fix.
+     *
      * @param mixed $value
      * @throws AgentPatchValidationException when the value is not a cap this installation allows
      */
@@ -90,8 +94,26 @@ final class AgentStepCap
 
         if ($cap < 1 || $cap > $this->limit()) {
             throw new AgentPatchValidationException(
-                sprintf('max_steps must be between 1 and %d.', $this->limit()),
+                sprintf('max_steps must be an integer between 1 and %d.', $this->limit()),
             );
         }
+    }
+
+    /**
+     * Refuse a cap this installation does not allow, unless there is none.
+     *
+     * A null cap is the column's own null: the row carries no cap of its
+     * own, and there is nothing to refuse.
+     *
+     * @param mixed $value
+     * @throws AgentPatchValidationException when the value is not a cap this installation allows
+     */
+    public function assertValidWhenPresent(mixed $value): void
+    {
+        if ($value === null) {
+            return;
+        }
+
+        $this->assertValid($value);
     }
 }

@@ -19,6 +19,7 @@ use Spora\Http\ScopedApi\ScopedApiEffortController;
 use Spora\Http\ScopedApi\ScopedApiGroupController;
 use Spora\Http\ScopedApi\ScopedApiKeyController;
 use Spora\Http\ScopedApi\ScopedApiMediaController;
+use Spora\Services\AgentStepCap;
 use Spora\Services\ApiKeys\ApiKeyAgentService;
 use Spora\Services\ApiKeys\ApiKeyCallbackRecorder;
 use Spora\Services\ApiKeys\ApiKeyChatAccess;
@@ -89,6 +90,7 @@ final class ScopedApiContainerBindings
                     $c->get(Config::class),
                     $c->get(ScopedApiChatBody::class),
                     $c->get(EffortService::class),
+                    $c->get(AgentStepCap::class),
                 );
             },
 

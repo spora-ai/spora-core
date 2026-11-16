@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\AgentTemplates;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Http\Exceptions\AgentPatchValidationException;
+use Spora\Services\AgentStepCap;
 
 /**
  * Writes the agent columns a template names, and only those.
@@ -19,10 +21,16 @@ final class AgentTemplateAgentUpdater
 {
     private const DATETIME_FORMAT = 'Y-m-d H:i:s';
 
+    public function __construct(
+        private readonly ?AgentStepCap $stepCap = null,
+    ) {}
+
     /**
      * The columns this updater writes. The `agents` table has more, and
      * they are not the template's to set: ownership (`principal_id`),
      * activation and the timestamps belong to the surrounding flow.
+     *
+     * @throws AgentPatchValidationException when the template names a cap this installation does not allow
      */
     public function update(int $agentId, AgentTemplate $template): void
     {
@@ -63,6 +71,10 @@ final class AgentTemplateAgentUpdater
         }
 
         if (array_key_exists('max_steps', $agent)) {
+            // The same refusal the create path makes: a template on disk
+            // is judged by the instance's ceiling, not by the scanner that
+            // read it.
+            $this->stepCap?->assertValid($agent['max_steps']);
             $updates['max_steps'] = (int) $agent['max_steps'];
         }
 

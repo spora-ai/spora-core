@@ -13,6 +13,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\TaskStartOptions;
+use Spora\Http\Exceptions\AgentPatchValidationException;
 use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
@@ -53,6 +54,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         ?PrincipalResolver $principalResolver = null,
         private readonly ?ScheduledRunEffortResolver $effortResolver = null,
         private readonly ?LoggerInterface $logger = null,
+        ?AgentStepCap $stepCap = null,
     ) {
         $this->orchestratorProvider = $orchestrator instanceof Closure
             ? $orchestrator
@@ -60,6 +62,10 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
         $this->expander = new PromptTemplateExpander();
+        // A cap this installation does not allow is refused whatever the
+        // caller's wiring: the fallback answers with the default ceiling
+        // rather than with no ceiling at all.
+        $this->stepCap = $stepCap ?? new AgentStepCap();
     }
 
     /** @var Closure(): OrchestratorInterface */
@@ -68,6 +74,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
     private readonly PrincipalService $principalService;
     private readonly PrincipalResolver $principalResolver;
     private readonly PromptTemplateExpander $expander;
+    private readonly AgentStepCap $stepCap;
 
     public function getRunsForAgent(int $agentId, int $userId): ?array
     {
@@ -85,12 +92,29 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         return $runs->all();
     }
 
+    /**
+     * @param array<string, mixed> $data
+     * @throws AgentNotFoundException when the agent does not exist or the caller cannot write it
+     * @throws AgentPatchValidationException when the run names a cap this installation does not allow
+     * @throws EffortValidationException when the effort override is not a level the agent's driver offers
+     */
     public function createRun(int $agentId, int $userId, array $data): array
     {
         $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_WRITE);
         if ($agent === null) {
             throw new AgentNotFoundException('Agent not found');
         }
+
+        // The column is `INT UNSIGNED`, so the storage no longer bounds the
+        // override — the ceiling does, here, before the row is written. A
+        // run's override reaches a task's step budget untouched, so a
+        // value above the ceiling would run the task past the bound the
+        // ceiling exists to enforce.
+        //
+        // The value is checked as it was sent: the cast that follows would
+        // turn "100garbage" into 100, and a cap that was never a cap would
+        // be stored as one.
+        $this->stepCap->assertValidWhenPresent($data['max_steps_override'] ?? null);
 
         $isRecurring = !empty($data['cron_expression']);
         $timezone   = $data['timezone'] ?? 'UTC';
@@ -164,6 +188,11 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         return ['scheduled_run' => $this->resource($run)];
     }
 
+    /**
+     * @param array<string, mixed> $data
+     * @throws AgentPatchValidationException when the run names a cap this installation does not allow
+     * @throws EffortValidationException when the effort override is not a level the agent's driver offers
+     */
     public function updateRun(int $runId, int $agentId, int $userId, array $data): ?array
     {
         $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_WRITE);
@@ -177,6 +206,10 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         $updateData = array_intersect_key($data, array_flip($allowed));
 
         if ($updateData !== []) {
+            if (array_key_exists('max_steps_override', $updateData)) {
+                $this->stepCap->assertValidWhenPresent($updateData['max_steps_override']);
+            }
+
             $this->normalizeUpdateFields($updateData);
 
             if (array_key_exists('effort_override', $updateData)) {

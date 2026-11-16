@@ -299,12 +299,11 @@ final class WorkerQueueProcessor
         // of -1 and no signal at all.
         $status = proc_get_status($proc);
 
-        // Done gate: feof() on stdout is the reliable signal that
-        // (a) the child has closed its write end (i.e. exited) AND
-        // (b) we've consumed everything it wrote. PHP's
-        // `proc_get_status` reports `running === true` until the parent
-        // fully drains the pipes AND calls proc_close, so it isn't
-        // sufficient on its own.
+        // Done gate: `running === false` says the child has ended, and
+        // `feof()` on stdout says we have consumed everything it wrote.
+        // They are complementary: the status turns false the moment the
+        // child exits, whether or not the pipes are drained, and the pipe
+        // stays open while output is still to read.
         //
         // A child that closed its stdout and is still running is not
         // done: it gets another sweep. Waiting for it here would block

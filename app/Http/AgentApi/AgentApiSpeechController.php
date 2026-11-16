@@ -11,6 +11,7 @@ use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Http\Exceptions\SpeechTranscribeException;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Http\TaskEffortRequestValidator;
+use Spora\Services\AgentStepCap;
 use Spora\Services\ApiKeys\ApiKeyCallbackRecorder;
 use Spora\Services\ApiKeys\ApiKeyChatAccess;
 use Spora\Services\ApiKeys\ApiKeyChatProjection;
@@ -60,6 +61,7 @@ final class AgentApiSpeechController
         private readonly SpeechTranscriber $transcriber,
         private readonly SsrfGuard $ssrf,
         private readonly EffortService $effortService,
+        private readonly AgentStepCap $stepCap = new AgentStepCap(),
     ) {}
 
     #[OA\Post(
@@ -306,7 +308,15 @@ final class AgentApiSpeechController
             'extra'           => $this->optionalString($body, 'text'),
             'chatId'          => $this->optionalInt($body, 'chat_id'),
             'callbackUrl'     => $this->stringField($body, 'callback_url'),
-            'maxSteps'        => $this->boundedInt($this->intField($body, 'max_steps'), 1, 100),
+            // The cap is the instance's, not a constant: an operator who
+            // raises the ceiling for long-running workflows expects the
+            // agent API to hand out the same cap the agent carries.
+            'maxSteps'        => $this->boundedInt($this->intField($body, 'max_steps'), 1, $this->stepCap->limit()),
+            // The additional steps a continue may add are not the agent's
+            // cap: they are bounded by their own policy, and the service
+            // refuses anything above it. A bound the service does not
+            // share would turn a request that used to succeed into one
+            // that fails downstream.
             'additionalSteps' => $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
             'effort'          => $effort,
         ];

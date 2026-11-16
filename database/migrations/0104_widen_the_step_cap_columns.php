@@ -26,9 +26,11 @@ use Illuminate\Database\Schema\Blueprint;
  * operator may select fits in the column whatever it is.
  *
  * The nullability of each column is kept as it was, and the agent and task
- * columns' default follows the application default — a cap of ten was the
- * old application default, and a row inserted without the column would
- * still have carried it.
+ * columns' default follows the application default: a cap of a hundred, which
+ * is what `Spora\Services\AgentStepCap::DEFAULT_CAP` hands out. The old
+ * column default was ten — the cap the application carried before the
+ * ceiling existed — so a row inserted without the column now carries the cap
+ * the application hands out today.
  *
  * Idempotency: the change declares the column's type and its default, so
  * applying it again leaves the same schema.

@@ -282,6 +282,10 @@ final class AgentService implements AgentServiceInterface
         // Two concurrent patches could each pass the check against the same
         // starting state and leave a pair that does not belong together —
         // so the read, the check and the write happen under one row lock.
+        //
+        // The row lock is a MySQL/MariaDB guarantee. SQLite has no row
+        // locks, so `lockForUpdate()` is a no-op there and the exclusion
+        // comes from the transaction itself: SQLite serialises its writers.
         return Capsule::connection()->transaction(function () use ($agentId, $agent, $filtered): Agent {
             $current = Agent::where('id', $agentId)->lockForUpdate()->first() ?? $agent;
 

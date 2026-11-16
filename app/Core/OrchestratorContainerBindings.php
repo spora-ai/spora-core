@@ -445,6 +445,10 @@ final class OrchestratorContainerBindings
                 return new AgentTemplateAgentCreator($c->get(AgentStepCap::class));
             },
 
+            AgentTemplateAgentUpdater::class => static function (ContainerInterface $c): AgentTemplateAgentUpdater {
+                return new AgentTemplateAgentUpdater($c->get(AgentStepCap::class));
+            },
+
             AgentTemplateSettingsApplier::class => static function (ContainerInterface $c): AgentTemplateSettingsApplier {
                 return new AgentTemplateSettingsApplier(
                     $c->get(ToolConfigService::class),
@@ -474,7 +478,10 @@ final class OrchestratorContainerBindings
             },
 
             PromptTemplateServiceInterface::class => static function (ContainerInterface $c): PromptTemplateServiceInterface {
-                return new PromptTemplateService($c->get(EffortService::class));
+                return new PromptTemplateService(
+                    $c->get(EffortService::class),
+                    stepCap: $c->get(AgentStepCap::class),
+                );
             },
 
             EmailTemplateLoader::class => static function (ContainerInterface $c): EmailTemplateLoader {
@@ -493,6 +500,7 @@ final class OrchestratorContainerBindings
                     effortService: $c->get(EffortService::class),
                     effortResolver: $c->get(ScheduledRunEffortResolver::class),
                     logger: $c->get(LoggerInterface::class),
+                    stepCap: $c->get(AgentStepCap::class),
                 );
             },
 

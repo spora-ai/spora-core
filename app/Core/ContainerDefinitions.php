@@ -1599,6 +1599,7 @@ final class ContainerDefinitions
                     $c->get(SsrfGuard::class),
                     $c->get(Config::class),
                     $c->get(EffortService::class),
+                    $c->get(AgentStepCap::class),
                 );
             },
 
@@ -1627,6 +1628,7 @@ final class ContainerDefinitions
                     $c->get(SpeechTranscriber::class),
                     $c->get(SsrfGuard::class),
                     $c->get(EffortService::class),
+                    $c->get(AgentStepCap::class),
                 );
             },
 

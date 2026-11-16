@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use RuntimeException;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\AgentPatchValidationException;
 use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Services\PromptTemplateServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -72,7 +73,7 @@ final class PromptTemplateController
                 ['data' => $result],
                 Response::HTTP_CREATED,
             );
-        } catch (EffortValidationException $e) {
+        } catch (EffortValidationException | AgentPatchValidationException $e) {
             return $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (RuntimeException) {
             return $this->notFound();
@@ -135,9 +136,10 @@ final class PromptTemplateController
         $agentId = (int) $request->attributes->get('id', 0);
         $templateId = (int) $request->attributes->get('templateId', 0);
 
-        // One try, one error variable: the decode cannot throw an effort
-        // refusal and the service cannot throw a parse error, and a second
-        // guard would put the method over the S1142 three-return ceiling.
+        // One try, one error variable: the decode cannot throw a refusal
+        // the service can, and the service cannot throw a parse error, and
+        // a second guard would put the method over the S1142 three-return
+        // ceiling.
         $error = null;
         $result = null;
 
@@ -146,7 +148,7 @@ final class PromptTemplateController
             $result = $this->promptTemplateService->updateTemplate($templateId, $agentId, $userId, $body);
         } catch (JsonException) {
             $error = $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
-        } catch (EffortValidationException $e) {
+        } catch (EffortValidationException | AgentPatchValidationException $e) {
             $error = $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 

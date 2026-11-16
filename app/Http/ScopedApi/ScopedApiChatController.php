@@ -13,6 +13,7 @@ use Spora\Http\JsonControllerHelpers;
 use Spora\Http\TaskEffortRequestValidator;
 use Spora\Models\Agent;
 use Spora\Models\Task;
+use Spora\Services\AgentStepCap;
 use Spora\Services\ApiKeys\ApiKeyCallbackRecorder;
 use Spora\Services\ApiKeys\ApiKeyChatAccess;
 use Spora\Services\ApiKeys\ApiKeyChatProjection;
@@ -55,6 +56,7 @@ final class ScopedApiChatController
         private readonly Config $config,
         private readonly ScopedApiChatBody $body,
         private readonly EffortService $effortService,
+        private readonly AgentStepCap $stepCap = new AgentStepCap(),
     ) {}
 
     #[OA\Get(summary: 'List the chats this key may reach')]
@@ -351,7 +353,7 @@ final class ScopedApiChatController
             'agentId' => (int) $agent->id,
             'text' => (string) $this->body->text($body),
             'callbackUrl' => $this->body->string($body, 'callback_url'),
-            'maxSteps' => $this->boundedInt($this->body->int($body, 'max_steps'), 1, 100),
+            'maxSteps' => $this->boundedInt($this->body->int($body, 'max_steps'), 1, $this->stepCap->limit()),
             'mediaIds' => $mediaIds,
             'effort' => $effort,
         ];
