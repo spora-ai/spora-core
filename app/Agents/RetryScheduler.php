@@ -41,18 +41,26 @@ final class RetryScheduler
             return;
         }
 
-        $agent = $this->resolveRetryAgent($failedTask);
-        if ($agent === null) {
-            return;
+        try {
+            $agent = $this->resolveRetryAgent($failedTask);
+            if ($agent === null) {
+                return;
+            }
+
+            $retryAfterMinutes = $agent->retry_after_minutes ?? 0;
+            $maxRetries = $agent->max_retries ?? 0;
+
+            $rootTaskId = $failedTask->retry_of_task_id ?? $failedTask->id;
+            $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
+
+            $this->dispatchRetryTask($failedTask, $rootTaskId, $retryCount, $retryAfterMinutes, $maxRetries);
+        } catch (Throwable $e) {
+            $this->logger?->warning('Failed to schedule auto-retry', [
+                'task_id'          => $failedTask->id,
+                'exception_class'  => get_class($e),
+                'message'          => $e->getMessage(),
+            ]);
         }
-
-        $retryAfterMinutes = $agent->retry_after_minutes ?? 0;
-        $maxRetries = $agent->max_retries ?? 0;
-
-        $rootTaskId = $failedTask->retry_of_task_id ?? $failedTask->id;
-        $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
-
-        $this->dispatchRetryTask($failedTask, $rootTaskId, $retryCount, $retryAfterMinutes, $maxRetries);
     }
 
     private function resolveRetryAgent(Task $failedTask): ?Agent
@@ -80,38 +88,31 @@ final class RetryScheduler
         int $retryAfterMinutes,
         int $maxRetries,
     ): void {
-        try {
-            // Schedule the retry IN PLACE on the failed task itself rather than
-            // spawning a separate QUEUED row. The task keeps its full history
-            // (the LLM re-sees the prior failed turn when it ticks), its URL
-            // doesn't change, and the worker's main QUEUED loop correctly
-            // skips it because `retry_of_task_id IS NULL` is part of its claim
-            // predicate. WorkerQueueProcessor::processRetryQueue() picks the
-            // task up once `retry_after` elapses and calls Orchestrator::retry()
-            // to reset error fields and start the loop again.
-            // `retry_after` is a UTC column: the worker's claim query reads
-            // it as UTC, so the stamp has to be UTC too. The process that
-            // schedules the retry is not the worker daemon and does not pin
-            // the timezone, so `date()` would write the host's local wall
-            // clock here — and the worker would compare it against UTC,
-            // firing the retry an hour off on every host that is not UTC.
-            $retryAfter = gmdate(Orchestrator::DB_TIMESTAMP_FORMAT, time() + $retryAfterMinutes * 60);
+        // Schedule the retry IN PLACE on the failed task itself rather than
+        // spawning a separate QUEUED row. The task keeps its full history
+        // (the LLM re-sees the prior failed turn when it ticks), its URL
+        // doesn't change, and the worker's main QUEUED loop correctly
+        // skips it because `retry_of_task_id IS NULL` is part of its claim
+        // predicate. WorkerQueueProcessor::processRetryQueue() picks the
+        // task up once `retry_after` elapses and calls Orchestrator::retry()
+        // to reset error fields and start the loop again.
+        //
+        // `retry_after` is a UTC column: the worker's claim query reads
+        // it as UTC, so the stamp has to be UTC too. The process that
+        // schedules the retry is not the worker daemon and does not pin
+        // the timezone, so `date()` would write the host's local wall
+        // clock here — and the worker would compare it against UTC,
+        // firing the retry an hour off on every host that is not UTC.
+        $retryAfter = gmdate(Orchestrator::DB_TIMESTAMP_FORMAT, time() + $retryAfterMinutes * 60);
 
-            $failedTask->update([
-                'retry_count'      => $retryCount,
-                'retry_of_task_id' => $rootTaskId,
-                'retry_after'      => $retryAfter,
-            ]);
+        $failedTask->update([
+            'retry_count'      => $retryCount,
+            'retry_of_task_id' => $rootTaskId,
+            'retry_after'      => $retryAfter,
+        ]);
 
-            $failedTask->refresh();
+        $failedTask->refresh();
 
-            $this->notificationService?->notifyRetryQueued($failedTask, $retryCount, $maxRetries);
-        } catch (Throwable $e) {
-            $this->logger?->warning('Failed to schedule auto-retry', [
-                'task_id'          => $failedTask->id,
-                'exception_class'  => get_class($e),
-                'message'          => $e->getMessage(),
-            ]);
-        }
+        $this->notificationService?->notifyRetryQueued($failedTask, $retryCount, $maxRetries);
     }
 }

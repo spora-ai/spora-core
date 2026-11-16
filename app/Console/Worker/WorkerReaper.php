@@ -128,15 +128,7 @@ final class WorkerReaper
         }
 
         foreach (Task::findMany($orphanedIds) as $task) {
-            try {
-                $this->retryScheduler->scheduleAutoRetry($task, 'WORKER_DISCONNECTED');
-            } catch (Throwable $e) {
-                $this->logger->warning('Failed to arm a retry for an orphaned task', [
-                    'task_id'         => $task->id,
-                    'exception_class' => get_class($e),
-                    'message'         => $e->getMessage(),
-                ]);
-            }
+            $this->retryScheduler->scheduleAutoRetry($task, 'WORKER_DISCONNECTED');
         }
     }
 

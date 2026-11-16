@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Monolog\Handler\TestHandler;
+use Monolog\Logger as MonologLogger;
 use Psr\Log\NullLogger;
 use Spora\Agents\ErrorClassifier;
 use Spora\Agents\RetryScheduler;
@@ -214,4 +216,40 @@ it('leaves an already-armed retry chain alone', function (): void {
     expect((string) $task->status)->toBe('RUNNING')
         ->and((int) $task->retry_count)->toBe(1)
         ->and($task->retry_after)->not->toBeNull();
+});
+
+it('never lets a failed arming stop the reaper', function (): void {
+    // The scheduler swallows its own failures and logs them — the reaper
+    // relies on that contract, because a reaper that died on one task
+    // would leave the rest of the orphans behind.
+    [$agentId, $userId] = orphanSeedAgent();
+    $task = orphanStaleTask($agentId, $userId);
+
+    $notification = Mockery::mock(NotificationService::class);
+    $notification->shouldReceive('notifyRetryQueued')->andThrow(new RuntimeException('the channel is down'));
+
+    $handler = new TestHandler();
+    $logger = new MonologLogger('test', [$handler]);
+
+    $reaperNotification = Mockery::mock(NotificationService::class);
+    $reaperNotification->shouldIgnoreMissing();
+
+    $reaper = new WorkerReaper(
+        $logger,
+        $reaperNotification,
+        null,
+        new RetryScheduler($logger, $notification),
+        WorkerRuntimeMode::Server,
+    );
+
+    $reaper->reapStaleTasks(new BufferedOutput(), 60);
+
+    $task->refresh();
+
+    // The task was still reaped …
+    expect((string) $task->status)->toBe('FAILED')
+        ->and((string) $task->error_code)->toBe('WORKER_DISCONNECTED')
+        // … and the scheduler reported why it could not arm the retry.
+        ->and($handler->getRecords())->not->toBeEmpty()
+        ->and($handler->getRecords()[0]->message)->toBe('Failed to schedule auto-retry');
 });
