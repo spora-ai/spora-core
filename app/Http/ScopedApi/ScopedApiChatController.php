@@ -7,6 +7,7 @@ namespace Spora\Http\ScopedApi;
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Spora\Core\Config;
+use Spora\Http\EffortOpenApi;
 use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Http\TaskEffortRequestValidator;
@@ -106,8 +107,7 @@ final class ScopedApiChatController
                 property: 'effort',
                 type: 'string',
                 nullable: true,
-                enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
-                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent\'s LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.',
+                description: EffortOpenApi::FIELD_DESCRIPTION,
             ),
         ],
     ))]
@@ -222,8 +222,7 @@ final class ScopedApiChatController
                 property: 'effort',
                 type: 'string',
                 nullable: true,
-                enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
-                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent\'s LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.',
+                description: EffortOpenApi::FIELD_DESCRIPTION,
             ),
         ],
     ))]

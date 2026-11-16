@@ -48,6 +48,7 @@ final class SettingsRegistry
      */
     public const SECTION_LABELS = [
         'general'   => 'General',
+        'agents'    => 'Agents',
         'access'    => 'Access',
         'timeouts'  => 'Timeouts',
         'worker'    => 'Worker',

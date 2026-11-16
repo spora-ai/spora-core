@@ -6,6 +6,7 @@ namespace Spora\Tools\AgentTool;
 
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentStepCap;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\ToolIconResolver;
@@ -32,6 +33,7 @@ final class AgentToolCollaborators
         private readonly ?SlimPayloadValidator $payloadValidator = null,
         private readonly ?AgentPatchValidator $patchValidator = null,
         private readonly ?AgentTargetResolver $targetResolver = null,
+        private readonly ?AgentStepCap $stepCap = null,
     ) {}
 
     public function notesHandler(AgentServiceInterface $agentService): NotesHandler
@@ -62,12 +64,12 @@ final class AgentToolCollaborators
 
     public function payloadValidator(): SlimPayloadValidator
     {
-        return $this->payloadValidator ?? new SlimPayloadValidator();
+        return $this->payloadValidator ?? new SlimPayloadValidator($this->stepCap);
     }
 
     public function patchValidator(): AgentPatchValidator
     {
-        return $this->patchValidator ?? new AgentPatchValidator();
+        return $this->patchValidator ?? new AgentPatchValidator($this->stepCap);
     }
 
     public function targetResolver(): AgentTargetResolver

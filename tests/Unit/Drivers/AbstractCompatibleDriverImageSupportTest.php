@@ -74,7 +74,7 @@ test('OpenAI driver respects toggle override', function (): void {
         model: 'gpt-4o',
         baseUrl: '',
         httpClient: new MockHttpClient(),
-        supportsImageInput: false,
+        options: new \Spora\Drivers\OpenAIDriverOptions(supportsImageInput: false),
     );
     expect($visionModel->supportsImageInput())->toBeFalse();
 
@@ -83,16 +83,16 @@ test('OpenAI driver respects toggle override', function (): void {
         model: 'gpt-3.5-turbo',
         baseUrl: '',
         httpClient: new MockHttpClient(),
-        supportsImageInput: true,
+        options: new \Spora\Drivers\OpenAIDriverOptions(supportsImageInput: true),
     );
     expect($nonVisionModel->supportsImageInput())->toBeTrue();
 });
 
 test('OpenAI driver falls back to model heuristic when toggle is null', function (): void {
-    expect((new OpenAICompatibleDriver(apiKey: '', model: 'gpt-4o', baseUrl: '', httpClient: new MockHttpClient(), supportsImageInput: null))->supportsImageInput())->toBeTrue();
-    expect((new OpenAICompatibleDriver(apiKey: '', model: 'gpt-3.5-turbo', baseUrl: '', httpClient: new MockHttpClient(), supportsImageInput: null))->supportsImageInput())->toBeFalse();
-    expect((new OpenAICompatibleDriver(apiKey: '', model: 'o1-mini', baseUrl: '', httpClient: new MockHttpClient(), supportsImageInput: null))->supportsImageInput())->toBeFalse();
-    expect((new OpenAICompatibleDriver(apiKey: '', model: 'gpt-4-turbo', baseUrl: '', httpClient: new MockHttpClient(), supportsImageInput: null))->supportsImageInput())->toBeTrue();
+    expect((new OpenAICompatibleDriver(apiKey: '', model: 'gpt-4o', baseUrl: '', httpClient: new MockHttpClient()))->supportsImageInput())->toBeTrue();
+    expect((new OpenAICompatibleDriver(apiKey: '', model: 'gpt-3.5-turbo', baseUrl: '', httpClient: new MockHttpClient()))->supportsImageInput())->toBeFalse();
+    expect((new OpenAICompatibleDriver(apiKey: '', model: 'o1-mini', baseUrl: '', httpClient: new MockHttpClient()))->supportsImageInput())->toBeFalse();
+    expect((new OpenAICompatibleDriver(apiKey: '', model: 'gpt-4-turbo', baseUrl: '', httpClient: new MockHttpClient()))->supportsImageInput())->toBeTrue();
 });
 
 test('Anthropic driver respects toggle override', function (): void {

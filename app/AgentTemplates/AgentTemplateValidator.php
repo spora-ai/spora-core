@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\AgentTemplates;
 
 use ReflectionClass;
+use Spora\Drivers\EffortLevelSet;
+use Spora\Services\AgentStepCap;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\ToolInterface;
 
@@ -37,6 +39,7 @@ final class AgentTemplateValidator
     public function __construct(
         ?AgentTemplateSettingsValidator $settingsValidator = null,
         ?AgentTemplateMetadataValidator $metadataValidator = null,
+        private readonly ?AgentStepCap $stepCap = null,
     ) {
         $this->settingsValidator = $settingsValidator ?? new AgentTemplateSettingsValidator();
         $this->metadataValidator = $metadataValidator ?? new AgentTemplateMetadataValidator();
@@ -69,7 +72,7 @@ final class AgentTemplateValidator
     ];
 
     private const ALLOWED_AGENT_KEYS = [
-        'description', 'system_prompt', 'notes', 'max_steps',
+        'description', 'system_prompt', 'notes', 'max_steps', 'default_effort',
         'allow_followup', 'retry_after_minutes', 'max_retries',
     ];
 
@@ -251,6 +254,46 @@ final class AgentTemplateValidator
         if (array_key_exists('max_steps', $agent)) {
             $this->validateMaxSteps($agent['max_steps'], $result);
         }
+
+        if (array_key_exists('default_effort', $agent)) {
+            $this->validateDefaultEffort($agent['default_effort'], $result);
+        }
+    }
+
+    /**
+     * The default effort's own bounds.
+     *
+     * The column is a `string(16)`, and a name that does not fit it is
+     * truncated by the database rather than refused by it — so the bound
+     * is enforced here, where the operator sees it.
+     */
+    private function validateDefaultEffort(mixed $value, ValidationResult $result): void
+    {
+        if ($value === null) {
+            return;
+        }
+
+        if (!is_string($value)) {
+            $result->addError([
+                'code'     => 'DEFAULT_EFFORT_INVALID',
+                'severity' => 'error',
+                'message'  => "Field 'agent.default_effort' must be a string.",
+                'path'     => 'agent.default_effort',
+            ]);
+            return;
+        }
+
+        if (mb_strlen($value) > EffortLevelSet::MAX_NAME_LENGTH) {
+            $result->addError([
+                'code'     => 'DEFAULT_EFFORT_TOO_LONG',
+                'severity' => 'error',
+                'message'  => sprintf(
+                    "Field 'agent.default_effort' must be %d characters or fewer.",
+                    EffortLevelSet::MAX_NAME_LENGTH,
+                ),
+                'path'     => 'agent.default_effort',
+            ]);
+        }
     }
 
     /**
@@ -262,21 +305,23 @@ final class AgentTemplateValidator
      */
     private function validateMaxSteps(mixed $value, ValidationResult $result): void
     {
+        $limit = $this->stepCap?->limit() ?? AgentStepCap::DEFAULT_LIMIT;
+
         if (!is_int($value)) {
             $result->addError([
                 'code'     => 'MAX_STEPS_INVALID',
                 'severity' => 'error',
-                'message'  => "Field 'agent.max_steps' must be an integer between 1 and 100.",
+                'message'  => "Field 'agent.max_steps' must be an integer between 1 and {$limit}.",
                 'path'     => 'agent.max_steps',
             ]);
             return;
         }
 
-        if ($value < 1 || $value > 100) {
+        if ($value < 1 || $value > $limit) {
             $result->addError([
                 'code'     => 'MAX_STEPS_RANGE',
                 'severity' => 'error',
-                'message'  => "Field 'agent.max_steps' must be between 1 and 100.",
+                'message'  => "Field 'agent.max_steps' must be between 1 and {$limit}.",
                 'path'     => 'agent.max_steps',
             ]);
         }

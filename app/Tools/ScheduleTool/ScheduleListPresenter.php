@@ -114,7 +114,7 @@ final class ScheduleListPresenter
 
     /**
      * @param  array<string, mixed> $t
-     * @return array{template_id: int, name: string, description: ?string, max_steps: ?int, is_active: bool}
+     * @return array{template_id: int, name: string, description: ?string, max_steps: ?int, effort: ?string, is_active: bool}
      */
     private static function slimTemplateRow(array $t): array
     {
@@ -126,6 +126,9 @@ final class ScheduleListPresenter
                 : null,
             'max_steps'   => isset($t['max_steps']) && is_int($t['max_steps'])
                 ? $t['max_steps']
+                : null,
+            'effort'      => isset($t['effort']) && is_string($t['effort'])
+                ? $t['effort']
                 : null,
             'is_active'   => (bool) ($t['is_active'] ?? true),
         ];
@@ -150,7 +153,7 @@ final class ScheduleListPresenter
     }
 
     /**
-     * @param  list<array{template_id: int, name: string, description: ?string, max_steps: ?int, is_active: bool}> $slim
+     * @param  list<array{template_id: int, name: string, description: ?string, max_steps: ?int, effort: ?string, is_active: bool}> $slim
      */
     private static function renderTemplateList(array $slim): string
     {
@@ -158,15 +161,17 @@ final class ScheduleListPresenter
         foreach ($slim as $row) {
             $state = $row['is_active'] ? 'active' : 'paused';
             $maxSteps = $row['max_steps'] === null ? '' : ' (max_steps: ' . $row['max_steps'] . ')';
+            $effort = $row['effort'] === null ? '' : ' (effort: ' . $row['effort'] . ')';
             $desc = $row['description'] !== null && $row['description'] !== ''
                 ? ' — ' . $row['description']
                 : '';
             $lines[] = sprintf(
-                '- #%d %s [%s]%s%s',
+                '- #%d %s [%s]%s%s%s',
                 $row['template_id'],
                 $row['name'],
                 $state,
                 $maxSteps,
+                $effort,
                 $desc,
             );
         }

@@ -24,3 +24,33 @@ test('tryFrom rejects a value that is not a level', function (): void {
         ->and(EffortLevel::tryFrom(''))->toBeNull()
         ->and(EffortLevel::tryFrom('HIGH'))->toBeNull();
 });
+
+/**
+ * The label map.
+ *
+ * The enum is the default vocabulary and the label map, not the
+ * constraint on what a level may be called: a configuration names its own
+ * levels, and one the vocabulary does not know shows as itself.
+ */
+test('the canonical names carry a pretty label', function (string $name, string $label): void {
+    expect(EffortLevel::labelFor($name))->toBe($label);
+})->with([
+    ['none', 'None'],
+    ['minimal', 'Minimal'],
+    ['low', 'Low'],
+    ['medium', 'Medium'],
+    ['high', 'High'],
+    ['xhigh', 'xHigh'],
+    ['max', 'Max'],
+]);
+
+test('a name the vocabulary does not know shows as itself', function (): void {
+    expect(EffortLevel::labelFor('default'))->toBe('default')
+        ->and(EffortLevel::labelFor('ultra'))->toBe('ultra');
+});
+
+test('a case carries the label of its own name', function (): void {
+    foreach (EffortLevel::cases() as $case) {
+        expect($case->label())->toBe(EffortLevel::labelFor($case->value));
+    }
+});

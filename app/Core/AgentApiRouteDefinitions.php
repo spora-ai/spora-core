@@ -6,6 +6,7 @@ namespace Spora\Core;
 
 use Spora\Http\AgentApi\AgentApiChatActionController;
 use Spora\Http\AgentApi\AgentApiChatController;
+use Spora\Http\AgentApi\AgentApiEffortController;
 use Spora\Http\AgentApi\AgentApiKeyController;
 use Spora\Http\AgentApi\AgentApiMediaController;
 use Spora\Http\AgentApi\AgentApiSpeechController;
@@ -59,6 +60,7 @@ use Spora\OpenApi\RouteSpecCollector;
  *   POST   /api/v1/agent-api/transcribe-and-send   — transcribe, then send it
  *   POST   /api/v1/agent-api/media                 — upload a file
  *   GET    /api/v1/agent-api/media/{mediaId}       — read a file back
+ *   GET    /api/v1/agent-api/effort                — the levels this agent offers
  *
  * Endpoints (the admin surface):
  *
@@ -96,6 +98,7 @@ final class AgentApiRouteDefinitions
         $action = AgentApiChatActionController::class;
         $media = AgentApiMediaController::class;
         $speech = AgentApiSpeechController::class;
+        $effort = AgentApiEffortController::class;
 
         $r->addRoute('GET', '/api/v1/agent-api/chats', [$chat, 'index'], $bearer);
         $r->addRoute('POST', '/api/v1/agent-api/chats', [$chat, 'store'], $bearer);
@@ -110,6 +113,7 @@ final class AgentApiRouteDefinitions
         $r->addRoute('POST', '/api/v1/agent-api/transcribe-and-send', [$speech, 'transcribeAndSend'], $bearer);
         $r->addRoute('POST', '/api/v1/agent-api/media', [$media, 'store'], $bearer);
         $r->addRoute('GET', '/api/v1/agent-api/media/{mediaId}', [$media, 'show'], $bearer);
+        $r->addRoute('GET', '/api/v1/agent-api/effort', [$effort, 'show'], $bearer);
     }
 
     private static function isEnabled(MiddlewareRouteCollector | RouteSpecCollector $r, ?Config $config): bool

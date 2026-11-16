@@ -293,7 +293,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
     {
         $settings = $this->decodeSettings($config->driver_class, $config->getRawOriginal('settings'));
         $schema = $this->schemaInspector->getSchemaForDriver($config->driver_class);
-        $masked = $this->maskForApi($settings, $schema);
+        $masked = $this->maskForApi($this->schemaInspector->applyAbsentDefaults($settings, $schema), $schema);
 
         return [
             'id' => $config->id,
@@ -301,8 +301,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
             'driver_class' => $config->driver_class,
             'driver_name' => $this->schemaInspector->getDriverName($config->driver_class),
             'driver_display_name' => $this->schemaInspector->getDriverDisplayName($config->driver_class),
-            'settings' => $masked,
-            'context_window' => $config->context_window,
+            'settings' => $masked,            'context_window' => $config->context_window,
             'max_tokens_output' => $config->max_tokens_output,
             'is_default' => $config->is_default,
             'principal_id' => $config->principal_id,

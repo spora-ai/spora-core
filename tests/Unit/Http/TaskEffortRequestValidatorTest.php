@@ -9,9 +9,14 @@ use Spora\Http\TaskEffortRequestValidator;
  * The three states of the `effort` field.
  *
  * Absent, empty and a level are three different messages to the framework:
- * the first leaves the choice to the configuration, the second asks for the
- * model default, and the third names one. Collapsing any two of them would
- * silently change what the model is asked to do.
+ * the first leaves the choice to the configuration, the second asks for
+ * the model default, and the third names one. Collapsing any two of them
+ * would silently change what the model is asked to do.
+ *
+ * The parser checks the shape only. Which levels exist is a property of
+ * the agent's LLM configuration and not a fixed vocabulary, so a name
+ * nobody in the canonical scale knows still parses here — membership is
+ * {@see \Spora\Services\EffortService::assertLevel()}'s job.
  */
 it('reads an absent key as no effort at all', function (): void {
     expect(TaskEffortRequestValidator::parse([]))->toBeNull();
@@ -29,9 +34,10 @@ it('reads a level as that level', function (): void {
     expect(TaskEffortRequestValidator::parse(['effort' => 'xhigh']))->toBe('xhigh');
 });
 
-it('refuses a level nobody knows', function (): void {
-    TaskEffortRequestValidator::parse(['effort' => 'turbo']);
-})->throws(EffortValidationException::class);
+it('reads a name the canonical vocabulary does not know', function (): void {
+    expect(TaskEffortRequestValidator::parse(['effort' => 'turbo']))->toBe('turbo')
+        ->and(TaskEffortRequestValidator::parse(['effort' => 'default']))->toBe('default');
+});
 
 it('refuses a value that is not a string', function (): void {
     TaskEffortRequestValidator::parse(['effort' => 3]);
@@ -39,7 +45,7 @@ it('refuses a value that is not a string', function (): void {
 
 it('answers an unusable effort with a 422', function (): void {
     try {
-        TaskEffortRequestValidator::parse(['effort' => 'turbo']);
+        TaskEffortRequestValidator::parse(['effort' => 3]);
     } catch (EffortValidationException $e) {
         expect($e->errorCode())->toBe('INVALID_EFFORT');
 

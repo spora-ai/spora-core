@@ -39,7 +39,9 @@ use Spora\Scheduling\DueWorkProviderRegistry;
 use Spora\Search\SearchProviderRegistry;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentStepCap;
 use Spora\Services\DbRateLimiter;
+use Spora\Services\EffortService;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\HousekeepingLock;
 use Spora\Services\LLMConfigPreferences;
@@ -56,6 +58,7 @@ use Spora\Services\NotificationSubscriptionService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
+use Spora\Services\ScheduledRunEffortResolver;
 use Spora\Services\ScheduledRunService;
 use Spora\Services\ScheduledRunServiceInterface;
 use Spora\Services\SkillListProjector;
@@ -132,6 +135,7 @@ final class OrchestratorContainerBindings
                         toolCallSerializer: $c->get(ToolCallSerializer::class),
                         agentService: $c->get(AgentServiceInterface::class),
                         principalPreferences: $c->get(LLMConfigPreferences::class),
+                        effortService: $c->get(EffortService::class),
                         usageMeter: $c->get(UsageMeterInterface::class),
                         llmCallRunner: $c->get(LlmCallRunner::class),
                     ),
@@ -155,6 +159,7 @@ final class OrchestratorContainerBindings
                 return new LlmConfigResolver(
                     $c->get(LLMConfigPreferences::class),
                     $c->get(LLMConfigService::class),
+                    $c->get(EffortService::class),
                 );
             },
 
@@ -200,6 +205,7 @@ final class OrchestratorContainerBindings
                     $c->get(LoggerInterface::class),
                     $c->get(MercurePublisherInterface::class),
                     $c->get(NotificationService::class),
+                    $c->get(ScheduledRunEffortResolver::class),
                 );
             },
 
@@ -288,7 +294,13 @@ final class OrchestratorContainerBindings
     private static function templates(): array
     {
         return [
-            AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
+            AgentTemplateValidator::class => static function (ContainerInterface $c): AgentTemplateValidator {
+                // The cap the template may carry is the instance's ceiling,
+                // so the validator needs it: without it the template path
+                // would answer with the built-in default whatever the
+                // operator set.
+                return new AgentTemplateValidator(stepCap: $c->get(AgentStepCap::class));
+            },
 
             // Resolves `resolveAs: 'skill'` settings against the same registry
             // the `skill` tool authorises against — see the note on
@@ -414,6 +426,10 @@ final class OrchestratorContainerBindings
                     $c->get(AgentTemplateAgentCreator::class),
                     $c->get(AgentTemplateAgentUpdater::class),
                     $c->get(AgentPictureService::class),
+                    // The template's `agent.default_effort` is checked
+                    // against the target configuration before it is written,
+                    // exactly as the agent service checks the same column.
+                    $c->get(EffortService::class),
                 );
             },
 
@@ -425,7 +441,9 @@ final class OrchestratorContainerBindings
                 );
             },
 
-            AgentTemplateAgentCreator::class => static fn(): AgentTemplateAgentCreator => new AgentTemplateAgentCreator(),
+            AgentTemplateAgentCreator::class => static function (ContainerInterface $c): AgentTemplateAgentCreator {
+                return new AgentTemplateAgentCreator($c->get(AgentStepCap::class));
+            },
 
             AgentTemplateSettingsApplier::class => static function (ContainerInterface $c): AgentTemplateSettingsApplier {
                 return new AgentTemplateSettingsApplier(
@@ -455,7 +473,9 @@ final class OrchestratorContainerBindings
                 );
             },
 
-            PromptTemplateServiceInterface::class => static fn(): PromptTemplateServiceInterface => new PromptTemplateService(),
+            PromptTemplateServiceInterface::class => static function (ContainerInterface $c): PromptTemplateServiceInterface {
+                return new PromptTemplateService($c->get(EffortService::class));
+            },
 
             EmailTemplateLoader::class => static function (ContainerInterface $c): EmailTemplateLoader {
                 return new EmailTemplateLoader($c->get(Paths::class));
@@ -468,8 +488,22 @@ final class OrchestratorContainerBindings
                 // The Orchestrator is only materialised the first time
                 // triggerRun() spawns a task.
                 return new ScheduledRunService(
-                    static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
-                    $c->get(MercurePublisherInterface::class),
+                    orchestrator: static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
+                    mercure: $c->get(MercurePublisherInterface::class),
+                    effortService: $c->get(EffortService::class),
+                    effortResolver: $c->get(ScheduledRunEffortResolver::class),
+                    logger: $c->get(LoggerInterface::class),
+                );
+            },
+
+            // The effort a scheduled run dispatches with. The resolver owns
+            // the rule that a level the configuration no longer offers is
+            // replaced by the agent's effective default — the worker tick
+            // and the manual trigger both dispatch through it.
+            ScheduledRunEffortResolver::class => static function (ContainerInterface $c): ScheduledRunEffortResolver {
+                return new ScheduledRunEffortResolver(
+                    $c->get(EffortService::class),
+                    $c->get(LLMConfigPreferences::class),
                 );
             },
 

@@ -7,6 +7,7 @@ namespace Spora\Http\ScopedApi;
 use OpenApi\Attributes as OA;
 use Spora\AgentTemplates\ImportResult;
 use Spora\Auth\ApiKeyScope;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Models\Agent;
 use Spora\Models\Group;
@@ -15,10 +16,13 @@ use Spora\Services\ApiKeys\ApiKeyAgentService;
 use Spora\Services\ApiKeys\ApiKeyContext;
 use Spora\Services\ApiKeys\ApiKeyReach;
 use Spora\Services\ApiKeys\MissingGroupPrincipalException;
+use Spora\Services\EffortService;
 use Spora\Services\Exceptions\InvalidTemplatePayloadException;
+use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * Agent CRUD for the scoped API surfaces, in the Agent Template format.
@@ -43,6 +47,8 @@ final class ScopedApiAgentController
     public function __construct(
         private readonly ApiKeyAgentService $agents,
         private readonly ApiKeyReach $reach,
+        private readonly ?EffortService $effortService = null,
+        private readonly ?PrincipalService $principalService = null,
     ) {}
 
     #[OA\Get(summary: 'List the agents this key may reach')]
@@ -190,9 +196,11 @@ final class ScopedApiAgentController
         unset($body['group_id']);
 
         try {
+            $this->effortService?->assertAgentDefault($this->defaultEffortFrom($body), $this->pendingAgent($groupId));
+
             return $this->agents->create($groupId, $this->createdBy($context), $body);
-        } catch (InvalidTemplatePayloadException | MissingGroupPrincipalException $e) {
-            return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
+        } catch (InvalidTemplatePayloadException | MissingGroupPrincipalException | EffortValidationException $e) {
+            return $this->unprocessable($this->errorCodeFor($e), $e->getMessage());
         }
     }
 
@@ -211,10 +219,45 @@ final class ScopedApiAgentController
         }
 
         try {
+            $this->effortService?->assertAgentDefault($this->defaultEffortFrom($body), $agent);
+
             return $this->agents->update($agent, $body);
-        } catch (InvalidTemplatePayloadException $e) {
-            return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
+        } catch (InvalidTemplatePayloadException | EffortValidationException $e) {
+            return $this->unprocessable($this->errorCodeFor($e), $e->getMessage());
         }
+    }
+
+    /**
+     * The default effort the payload names, if any.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function defaultEffortFrom(array $body): mixed
+    {
+        $agent = $body['agent'] ?? null;
+
+        return is_array($agent) ? ($agent['default_effort'] ?? null) : null;
+    }
+
+    /**
+     * The agent a create would produce, for the level set to check against.
+     *
+     * The agent does not exist yet, so the level set is the one its
+     * principal's effective configuration offers.
+     */
+    private function pendingAgent(int $groupId): ?Agent
+    {
+        $principalId = $this->principalService?->principalForGroup($groupId)?->id;
+
+        return $principalId === null ? null : new Agent(['principal_id' => $principalId]);
+    }
+
+    /**
+     * The wire code a refusal carries.
+     */
+    private function errorCodeFor(Throwable $e): string
+    {
+        return $e instanceof EffortValidationException ? $e->errorCode() : 'VALIDATION_ERROR';
     }
 
     /**

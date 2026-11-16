@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use DateInvalidTimeZoneException;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\Exceptions\PromptTemplateMissingException;
 use Spora\Services\Exceptions\ScheduledRunNotFoundException;
@@ -24,6 +26,10 @@ interface ScheduledRunServiceInterface
      * Create a new scheduled run.
      *
      * @return array{scheduled_run: array}
+     * @throws AgentNotFoundException If the agent does not exist or the caller cannot write it
+     * @throws PromptTemplateMissingException If the referenced prompt template is not the agent's
+     * @throws DateInvalidTimeZoneException If the timezone is not an IANA identifier
+     * @throws EffortValidationException When the effort override is not a level the agent's driver offers
      */
     public function createRun(int $agentId, int $userId, array $data): array;
 
@@ -38,6 +44,8 @@ interface ScheduledRunServiceInterface
      * Update a scheduled run.
      *
      * @return array{scheduled_run: array}|null Returns null if not found
+     * @throws PromptTemplateMissingException If the referenced prompt template is not the agent's
+     * @throws EffortValidationException When the effort override is not a level the agent's driver offers
      */
     public function updateRun(int $runId, int $agentId, int $userId, array $data): ?array;
 

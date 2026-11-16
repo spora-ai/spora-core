@@ -48,7 +48,7 @@ function makeScheduledRunController(): array
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
 
-    $scheduledRunService = new ScheduledRunService($orchestrator, $mercure);
+    $scheduledRunService = new ScheduledRunService($orchestrator, $mercure, makeEffortService());
 
     $controller = new ScheduledRunController($authService, $scheduledRunService);
     $authMiddleware = new AuthMiddleware($authService);
@@ -921,7 +921,7 @@ describe('ScheduledRunController', function (): void {
         /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publishForPrincipal')->andReturn(true);
-        $scheduledRunService = new ScheduledRunService($orchestrator, $mercure);
+        $scheduledRunService = new ScheduledRunService($orchestrator, $mercure, makeEffortService());
         $controller = new ScheduledRunController($authService, $scheduledRunService);
         $authMiddleware = new AuthMiddleware($authService);
 

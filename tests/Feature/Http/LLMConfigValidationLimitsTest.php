@@ -39,6 +39,17 @@ test('validateLimits accepts max boundary 1_000_000', function (): void {
     expect($validator->validateLimits(['max_tokens_output' => 1_000_000]))->toBeNull();
 });
 
+test('validateLimits accepts the window a current frontier model publishes', function (): void {
+    $validator = makeLimitsValidator();
+
+    // The GPT-6 family sits at 1,050,000 and Gemini 4 Argon at 1,048,576 —
+    // both above the bound the cap used to carry, which refused a window
+    // the model actually has.
+    foreach ([1_047_576, 1_050_000, 2_000_000] as $value) {
+        expect($validator->validateLimits(['context_window' => $value]))->toBeNull();
+    }
+});
+
 test('validateLimits accepts realistic provider ceilings', function (): void {
     $validator = makeLimitsValidator();
     foreach ([1, 4096, 16384, 64_000, 100_000, 128_000, 200_000] as $value) {
@@ -62,13 +73,41 @@ test('validateLimits rejects zero and negative values', function (): void {
     }
 });
 
-test('validateLimits rejects values above the 1_000_000 cap', function (): void {
+test('validateLimits rejects values above the cap', function (): void {
     $validator = makeLimitsValidator();
+
+    // The output budget keeps the lower bound: it is the per-request
+    // `max_output_tokens`, so a stray zero asks for a response an order
+    // of magnitude larger than any model allows.
     foreach ([1_000_001, 9_999_999, \PHP_INT_MAX] as $value) {
         $response = $validator->validateLimits(['max_tokens_output' => $value]);
         expect($response)->toBeInstanceOf(Symfony\Component\HttpFoundation\JsonResponse::class);
         expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
     }
+
+    // The context window is bounded by the largest window a hosted API
+    // publishes.
+    foreach ([2_000_001, 10_500_000, \PHP_INT_MAX] as $value) {
+        $response = $validator->validateLimits(['context_window' => $value]);
+        expect($response)->toBeInstanceOf(Symfony\Component\HttpFoundation\JsonResponse::class);
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+    }
+});
+
+test('validateLimits names the field and the bound it broke', function (): void {
+    $validator = makeLimitsValidator();
+
+    $response = $validator->validateLimits(['context_window' => 5_000_000]);
+    $body = json_decode((string) $response->getContent(), true);
+
+    // Two fields with two bounds: "Value must be a positive integer up to
+    // 1000000" said neither which field nor which bound.
+    expect($body['error']['message'])->toBe('context_window must be a positive integer up to 2000000.');
+
+    $response = $validator->validateLimits(['max_tokens_output' => 5_000_000]);
+    $body = json_decode((string) $response->getContent(), true);
+
+    expect($body['error']['message'])->toBe('max_tokens_output must be a positive integer up to 1000000.');
 });
 
 test('validateLimits rejects non-integer numerics like 1.5 and "200000abc"', function (): void {

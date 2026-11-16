@@ -11,6 +11,7 @@ use Spora\Http\Middleware\GroupApiKeyMiddleware;
 use Spora\Http\ScopedApi\ScopedApiAgentController;
 use Spora\Http\ScopedApi\ScopedApiChatActionController;
 use Spora\Http\ScopedApi\ScopedApiChatController;
+use Spora\Http\ScopedApi\ScopedApiEffortController;
 use Spora\Http\ScopedApi\ScopedApiGroupController;
 use Spora\Http\ScopedApi\ScopedApiKeyController;
 use Spora\Http\ScopedApi\ScopedApiMediaController;
@@ -61,6 +62,7 @@ use Spora\OpenApi\RouteSpecCollector;
  *   GET    /api/v1/group-api/agents/{agentId}         — read an agent
  *   PATCH  /api/v1/group-api/agents/{agentId}         — update an agent
  *   DELETE /api/v1/group-api/agents/{agentId}         — delete an agent
+ *   GET    /api/v1/group-api/agents/{agentId}/effort  — the levels it offers
  *   GET    /api/v1/group-api/chats                    — list the group's chats
  *   POST   /api/v1/group-api/chats                    — start a chat
  *   GET    /api/v1/group-api/chats/{chatId}/status    — status + answer
@@ -81,6 +83,7 @@ use Spora\OpenApi\RouteSpecCollector;
  *   GET    /api/v1/global-api/groups/{groupId}        — read a group
  *   PATCH  /api/v1/global-api/groups/{groupId}        — update a group
  *   DELETE /api/v1/global-api/groups/{groupId}        — delete a group
+ *   GET    /api/v1/global-api/agents/{agentId}/effort — the levels it offers
  *
  * No route here is a `{chatId}` catch-all: every chat path ends in a
  * distinct literal, so FastRoute — which hash-matches static routes ahead
@@ -149,12 +152,14 @@ final class ScopedApiRouteDefinitions
         $chat = ScopedApiChatController::class;
         $action = ScopedApiChatActionController::class;
         $media = ScopedApiMediaController::class;
+        $effort = ScopedApiEffortController::class;
 
         $r->addRoute('GET', $prefix . '/agents', [$agent, 'index'], $bearer);
         $r->addRoute('POST', $prefix . '/agents', [$agent, 'store'], $bearer);
         $r->addRoute('GET', $prefix . self::AGENT_PATH, [$agent, 'show'], $bearer);
         $r->addRoute('PATCH', $prefix . self::AGENT_PATH, [$agent, 'update'], $bearer);
         $r->addRoute('DELETE', $prefix . self::AGENT_PATH, [$agent, 'destroy'], $bearer);
+        $r->addRoute('GET', $prefix . self::AGENT_PATH . '/effort', [$effort, 'show'], $bearer);
 
         $r->addRoute('GET', $prefix . '/chats', [$chat, 'index'], $bearer);
         $r->addRoute('POST', $prefix . '/chats', [$chat, 'store'], $bearer);

@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use RuntimeException;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Services\PromptTemplateServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -71,6 +72,8 @@ final class PromptTemplateController
                 ['data' => $result],
                 Response::HTTP_CREATED,
             );
+        } catch (EffortValidationException $e) {
+            return $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (RuntimeException) {
             return $this->notFound();
         }
@@ -132,13 +135,24 @@ final class PromptTemplateController
         $agentId = (int) $request->attributes->get('id', 0);
         $templateId = (int) $request->attributes->get('templateId', 0);
 
+        // One try, one error variable: the decode cannot throw an effort
+        // refusal and the service cannot throw a parse error, and a second
+        // guard would put the method over the S1142 three-return ceiling.
+        $error = null;
+        $result = null;
+
         try {
             $body = $this->decodeJson($request);
+            $result = $this->promptTemplateService->updateTemplate($templateId, $agentId, $userId, $body);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            $error = $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        } catch (EffortValidationException $e) {
+            $error = $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $result = $this->promptTemplateService->updateTemplate($templateId, $agentId, $userId, $body);
+        if ($error !== null) {
+            return $error;
+        }
 
         if ($result === null) {
             return $this->notFound();

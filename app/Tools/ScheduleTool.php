@@ -66,7 +66,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolOperation(
     name: 'list_prompt_templates',
     description: 'List every prompt template attached to the calling agent as a slim payload '
-                . '(`template_id`, `name`, `description`, `max_steps`, `is_active`). '
+                . '(`template_id`, `name`, `description`, `max_steps`, `effort`, `is_active`). '
                 . 'Cross-agent reads accept an `agent_id` (numeric pk). '
                 . 'Pass the row id to `read_prompt_template`, `update_prompt_template`, '
                 . '`delete_prompt_template`, or to `create_schedule(schedule_payload: { '
@@ -100,7 +100,9 @@ use Spora\Tools\ValueObjects\ToolResult;
                 . '— sending both is rejected), and either `cron_expression` '
                 . '(5-field cron, recurring) or `run_at` (ISO 8601 one-shot, mutually '
                 . 'exclusive). Optional `timezone` (IANA, defaults "UTC"), '
-                . '`max_steps_override` (int 1..100, nullable), `is_active` (defaults true). '
+                . '`max_steps_override` (int 1..100, nullable), `effort_override` '
+                . '(reasoning-effort level, nullable — omit to inherit), '
+                . '`is_active` (defaults true). '
                 . 'Pass `agent_id` (numeric pk) to target a different agent; omit to '
                 . 'attach the schedule to the calling agent. Returns the full schedule '
                 . 'resource — call `list_schedules` afterwards only if you need to '
@@ -114,7 +116,8 @@ use Spora\Tools\ValueObjects\ToolResult;
                 . '(object) with `name` (1..100 chars, required), `prompt_template` '
                 . '(non-empty string, required), optional `description`, `variables` '
                 . '(list of `{key, default_value?}`), `max_steps` (int 1..100, nullable), '
-                . '`is_active` (defaults true). Pass `agent_id` to target a different '
+                . '`effort` (reasoning-effort level, nullable — omit to inherit the '
+                . 'agent\'s), `is_active` (defaults true). Pass `agent_id` to target a different '
                 . 'agent; omit to attach the template to the calling agent. Returns the '
                 . 'full template resource.',
     enabledByDefault: false,
@@ -125,10 +128,10 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'Patch a scheduled run identified by `schedule_id`. '
                 . '`schedule_patch` (object) with any subset of '
                 . '`template_id`, `raw_prompt`, `cron_expression`, `run_at`, `timezone`, '
-                . '`max_steps_override`, `is_active`. To clear a nullable field '
-                . '(`template_id`, `cron_expression`, `run_at`, `max_steps_override`) '
-                . 'send `null` (JSON null is canonical; the literal string "null" is '
-                . 'also accepted). '
+                . '`max_steps_override`, `effort_override`, `is_active`. To clear a nullable field '
+                . '(`template_id`, `cron_expression`, `run_at`, `max_steps_override`, '
+                . '`effort_override`) send `null` (JSON null is canonical; the literal '
+                . 'string "null" is also accepted). '
                 . 'Switching recurrence modes: setting ONE cadence field '
                 . '(`cron_expression` or `run_at`) on a schedule that currently '
                 . 'has the OTHER cadence set implicitly clears the other — so '
@@ -144,8 +147,8 @@ use Spora\Tools\ValueObjects\ToolResult;
     name: 'update_prompt_template',
     description: 'Patch a prompt template identified by `template_id`. '
                 . '`template_patch` (object) with any subset of `name`, `description`, '
-                . '`prompt_template`, `variables`, `max_steps`, `is_active`. '
-                . 'Send `null` to clear `max_steps`. '
+                . '`prompt_template`, `variables`, `max_steps`, `effort`, `is_active`. '
+                . 'Send `null` to clear `max_steps` or `effort`. '
                 . 'Cross-agent updates accept `agent_id`; omit to target the calling '
                 . 'agent. Returns the full template resource after the patch.',
     enabledByDefault: false,
@@ -218,7 +221,9 @@ use Spora\Tools\ValueObjects\ToolResult;
                 . 'OR `raw_prompt` (string, one required), `cron_expression` (5-field cron) '
                 . 'OR `run_at` (ISO 8601, one required — mutually exclusive), '
                 . 'optional `timezone` (IANA, default "UTC"), `max_steps_override` '
-                . '(int 1..100, nullable), `is_active` (bool, default true). '
+                . '(int 1..100, nullable), `effort_override` (reasoning-effort level, '
+                . 'nullable — omit to inherit), `is_active` (bool, '
+                . 'default true). '
                 . 'Pass `agent_id` separately to target a different agent. '
                 . self::IGNORED_BY_OTHER_OPERATIONS,
     required: false,
@@ -229,7 +234,8 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'ONLY for `create_prompt_template`. Slim payload: top-level `name` '
                 . '(1..100 chars, required), `prompt_template` (non-empty string, required), '
                 . 'optional `description`, `variables` (list of `{key, default_value?}`), '
-                . '`max_steps` (int 1..100, nullable), `is_active` (bool, default true). '
+                . '`max_steps` (int 1..100, nullable), `effort` (reasoning-effort level, '
+                . 'nullable — omit to inherit the agent\'s), `is_active` (bool, default true). '
                 . 'Pass `agent_id` separately to target a different agent. '
                 . self::IGNORED_BY_OTHER_OPERATIONS,
     required: false,
@@ -239,10 +245,10 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'object',
     description: 'ONLY for `update_schedule`. Partial object with any subset of '
                 . '`template_id`, `raw_prompt`, `cron_expression`, `run_at`, `timezone`, '
-                . '`max_steps_override`, `is_active`. To clear a nullable field '
-                . '(`template_id`, `cron_expression`, `run_at`, `max_steps_override`) '
-                . 'send `null` (JSON null is canonical; the literal string "null" is '
-                . 'also accepted). Setting ONE cadence field on a schedule that '
+                . '`max_steps_override`, `effort_override`, `is_active`. To clear a nullable field '
+                . '(`template_id`, `cron_expression`, `run_at`, `max_steps_override`, '
+                . '`effort_override`) send `null` (JSON null is canonical; the literal '
+                . 'string "null" is also accepted). Setting ONE cadence field on a schedule that '
                 . 'has the OTHER cadence set implicitly clears the other — '
                 . 'never populate both in the same patch. '
                 . self::IGNORED_BY_OTHER_OPERATIONS,
@@ -253,7 +259,7 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'object',
     description: 'ONLY for `update_prompt_template`. Partial object with any subset of '
                 . '`name`, `description`, `prompt_template`, `variables`, `max_steps`, '
-                . '`is_active`. Send `null` to clear `max_steps`. '
+                . '`effort`, `is_active`. Send `null` to clear `max_steps` or `effort`. '
                 . self::IGNORED_BY_OTHER_OPERATIONS,
     required: false,
 )]

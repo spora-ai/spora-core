@@ -7,6 +7,8 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
+use Spora\Http\Exceptions\AgentPatchValidationException;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\SpeechProviderConfiguration;
@@ -15,6 +17,7 @@ use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentResourceContext;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentStepCap;
 use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -54,6 +57,7 @@ final class AgentController
         private readonly ?AgentPictureService $pictureService = null,
         private readonly ?PrincipalService $principalService = null,
         private readonly ?PrincipalResolver $principalResolver = null,
+        private readonly AgentStepCap $stepCap = new AgentStepCap(),
     ) {}
 
     /**
@@ -147,13 +151,20 @@ final class AgentController
                 ? $body['notes']
                 : null,
             'llm_driver_config_id' => isset($body['llm_driver_config_id']) ? (int) $body['llm_driver_config_id'] : null,
+            // The agent's own default, like the patch path. A level the
+            // configuration does not offer is refused below, so the row
+            // never carries a default the run would ignore.
+            'default_effort'   => $body['default_effort'] ?? null,
             // Per-agent STT override (tier 1 of the cascade). FK to
             // speech_provider_configurations.id; SET NULL on delete so
             // a deleted config silently falls back to the cascade. The
             // operator's intent on POST is the same as on PATCH — accept
             // an explicit id or omit for "use cascade default".
             'speech_driver_config_id' => isset($body['speech_driver_config_id']) ? (int) $body['speech_driver_config_id'] : null,
-            'max_steps'     => (int) ($body['max_steps'] ?? 10),
+            // The cap a new agent carries. It is bounded by the ceiling,
+            // so a limit the operator set below the default cannot leave
+            // an agent with a cap it may not have.
+            'max_steps'     => (int) ($body['max_steps'] ?? $this->stepCap->defaultCap()),
             'allow_followup' => array_key_exists('allow_followup', $body) ? (bool) $body['allow_followup'] : true,
             // Mirror the schema default when the body omits the field
             // so a freshly-created agent exposes `voice_message_retention_count: 5`
@@ -161,20 +172,37 @@ final class AgentController
             'voice_message_retention_count' => (int) ($body['voice_message_retention_count'] ?? 5),
         ];
 
+        $capRefusal = null;
+        if (array_key_exists('max_steps', $body)) {
+            try {
+                AgentPatchRequestValidator::validate(['max_steps' => $body['max_steps']], $this->stepCap);
+            } catch (AgentPatchValidationException $e) {
+                $capRefusal = $this->unprocessable($e->errorCode(), $e->getMessage());
+            }
+        }
+
         $earlyExit = ($name === ''
                 ? $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY)
                 : null)
+            ?? $capRefusal
             ?? $this->validateProviderConfigReferences($principalId, $data);
         if ($earlyExit !== null) {
             return $earlyExit;
         }
 
-        $agent = $this->agentService->createAgent($userId, $data, $principalId);
+        $response = null;
 
-        return new JsonResponse(
-            ['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]],
-            Response::HTTP_CREATED,
-        );
+        try {
+            $agent = $this->agentService->createAgent($userId, $data, $principalId);
+            $response = new JsonResponse(
+                ['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]],
+                Response::HTTP_CREATED,
+            );
+        } catch (EffortValidationException $e) {
+            $response = $this->unprocessable($e->errorCode(), $e->getMessage());
+        }
+
+        return $response;
     }
 
     /**
@@ -239,12 +267,19 @@ final class AgentController
         }
         $body = $bodyOrError;
 
-        $agent = $this->applyAgentPatch($agentId, $userId, $body);
-        if ($agent instanceof JsonResponse) {
-            return $agent;
+        // One variable for the refusal and the patched agent: a second
+        // guard would put the endpoint over the S1142 three-return ceiling.
+        try {
+            $patched = $this->applyAgentPatch($agentId, $userId, $body);
+        } catch (EffortValidationException $e) {
+            $patched = $this->unprocessable($e->errorCode(), $e->getMessage());
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]]);
+        if ($patched instanceof JsonResponse) {
+            return $patched;
+        }
+
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($patched, $this->agentResourceContext($patched))]]);
     }
 
     /**
@@ -265,7 +300,7 @@ final class AgentController
         // `is_favorite` is gone from this allowlist — the column
         // no longer exists on `agents`. The toggle is per-user via
         // `POST /agents/{id}/favorite` / `DELETE /agents/{id}/favorite`.
-        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'speech_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'voice_message_retention_count', 'is_pinned', 'is_archived'];
+        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'speech_driver_config_id', 'max_steps', 'default_effort', 'allow_followup', 'retry_after_minutes', 'max_retries', 'voice_message_retention_count', 'is_pinned', 'is_archived'];
         $data = array_intersect_key($body, array_flip($allowed));
         $this->coerceBooleanFlags($data);
         $validationError = $this->validateAgentPatch($data);
@@ -363,23 +398,12 @@ final class AgentController
      */
     private function validateAgentPatch(array $data): ?JsonResponse
     {
-        if (array_key_exists('voice_message_retention_count', $data)) {
-            $value = $data['voice_message_retention_count'];
-            if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
-                return $this->unprocessable(
-                    'VALIDATION_ERROR',
-                    'voice_message_retention_count must be an integer between 0 and 100.',
-                );
-            }
-            $intValue = (int) $value;
-            if ($intValue < 0 || $intValue > 100) {
-                return $this->unprocessable(
-                    'VALIDATION_ERROR',
-                    'voice_message_retention_count must be between 0 and 100.',
-                );
-            }
-            $data['voice_message_retention_count'] = $intValue;
+        try {
+            AgentPatchRequestValidator::validate($data, $this->stepCap);
+        } catch (AgentPatchValidationException $e) {
+            return $this->unprocessable($e->errorCode(), $e->getMessage());
         }
+
         return null;
     }
 

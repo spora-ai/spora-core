@@ -19,6 +19,10 @@ use Throwable;
  * shape, returns the canonical slim record the services expect, and
  * every failure message ends with a "send X instead" hint so the LLM
  * can fix the payload without guessing.
+ *
+ * The reasoning-effort level rides through unvalidated: whether a level
+ * exists is the service's call — it knows which levels the agent's driver
+ * offers, and it refuses the rest with a message that names them.
  */
 final class SchedulePayloadValidator
 {
@@ -37,6 +41,7 @@ final class SchedulePayloadValidator
         'run_at',
         'timezone',
         'max_steps_override',
+        'effort_override',
         'is_active',
     ];
 
@@ -46,6 +51,7 @@ final class SchedulePayloadValidator
         'prompt_template',
         'variables',
         'max_steps',
+        'effort',
         'is_active',
     ];
 
@@ -279,6 +285,7 @@ final class SchedulePayloadValidator
             'run_at'             => !empty($raw['run_at']) ? (string) $raw['run_at'] : null,
             'timezone'           => $this->resolveTimezone($raw),
             'max_steps_override' => isset($raw['max_steps_override']) ? (int) $raw['max_steps_override'] : null,
+            'effort_override'    => $raw['effort_override'] ?? null,
             'is_active'          => (bool) ($raw['is_active'] ?? true),
         ];
     }
@@ -347,6 +354,7 @@ final class SchedulePayloadValidator
                 ? $raw['variables']
                 : [],
             'max_steps'       => isset($raw['max_steps']) ? (int) $raw['max_steps'] : null,
+            'effort'          => $raw['effort'] ?? null,
             'is_active'       => (bool) ($raw['is_active'] ?? true),
         ];
     }

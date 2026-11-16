@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Tools\AgentTool;
 
+use Spora\Services\AgentStepCap;
 use Spora\Tools\LlmScalarCoercion;
 use Spora\Tools\ValueObjects\ToolResult;
 
@@ -21,16 +22,20 @@ final class SlimPayloadValidator
 {
     use LlmScalarCoercion;
 
+    public function __construct(
+        private readonly ?AgentStepCap $stepCap = null,
+    ) {}
+
     private const DESCRIPTION_MAX_LENGTH   = 2000;
     private const NAME_MAX_LENGTH          = 200;
     private const MAX_STEPS_MIN            = 1;
-    private const MAX_STEPS_MAX            = 100;
 
     private const KNOWN_SLIM_KEYS = [
         'name',
         'description',
         'system_prompt',
         'max_steps',
+        'default_effort',
         'allow_followup',
         'retry_after_minutes',
         'max_retries',
@@ -86,7 +91,13 @@ final class SlimPayloadValidator
             // the validators just accepted. The `?? default` arms are
             // unreachable once validate* has run — they only keep this
             // method total if it is ever called without them.
-            'max_steps'            => $this->coercePositiveInt($raw['max_steps'] ?? 10) ?? 10,
+            // The cap a new agent carries, bounded by the ceiling.
+            'max_steps'            => $this->coercePositiveInt($raw['max_steps'] ?? $this->defaultStepCap()) ?? $this->defaultStepCap(),
+            // Kept as it was sent: the validator has already refused
+            // anything that is not a level name or null, and a value
+            // turned into null here would be an inheritance the caller
+            // never asked for.
+            'default_effort'       => $raw['default_effort'] ?? null,
             'allow_followup'       => $this->coerceBool($raw['allow_followup'] ?? true) ?? true,
             'retry_after_minutes'  => $this->coerceNonNegativeInt($raw['retry_after_minutes'] ?? 0) ?? 0,
             'max_retries'          => $this->coerceNonNegativeInt($raw['max_retries'] ?? 0) ?? 0,
@@ -110,6 +121,7 @@ final class SlimPayloadValidator
             $this->validateAllowFollowup($raw),
             $this->validateRetryAfterMinutes($raw),
             $this->validateMaxRetries($raw),
+            $this->validateDefaultEffort($raw),
             $this->validateRequiredPlugins($raw),
             $this->validateAdditionalProperties($raw),
         ];
@@ -143,16 +155,32 @@ final class SlimPayloadValidator
         $value = $this->coercePositiveInt($raw['max_steps']);
         if ($value === null
             || $value < self::MAX_STEPS_MIN
-            || $value > self::MAX_STEPS_MAX
+            || $value > $this->stepCapLimit()
         ) {
             return ToolResult::fail(
                 'create_agent: `max_steps` must be a whole number in '
-                . self::MAX_STEPS_MIN . '..' . self::MAX_STEPS_MAX . '. '
+                . self::MAX_STEPS_MIN . '..' . $this->stepCapLimit() . '. '
                 . 'A quoted number is read as the number, then range-checked — '
                 . 'so "10" is accepted and "999" is not.',
             );
         }
         return null;
+    }
+
+    /**
+     * The largest cap this installation allows.
+     */
+    private function stepCapLimit(): int
+    {
+        return $this->stepCap?->limit() ?? AgentStepCap::DEFAULT_LIMIT;
+    }
+
+    /**
+     * The cap a new agent carries when the payload names none.
+     */
+    private function defaultStepCap(): int
+    {
+        return $this->stepCap?->defaultCap() ?? AgentStepCap::DEFAULT_CAP;
     }
 
     private function validateAllowFollowup(array $raw): ?ToolResult
@@ -194,6 +222,32 @@ final class SlimPayloadValidator
             );
         }
         return null;
+    }
+
+    /**
+     * The default is a level name or nothing at all.
+     *
+     * A number is refused rather than read as a level: the level set is
+     * the operator's, so the value cannot be cast into one, and a value
+     * that was quietly dropped would leave the agent inheriting a default
+     * nobody asked for.
+     */
+    private function validateDefaultEffort(array $raw): ?ToolResult
+    {
+        if (!array_key_exists('default_effort', $raw)) {
+            return null;
+        }
+
+        $value = $raw['default_effort'];
+
+        if ($value === null || is_string($value)) {
+            return null;
+        }
+
+        return ToolResult::fail(
+            'create_agent: `default_effort` must be a reasoning-effort level name, or null to inherit. '
+            . 'Send `default_effort: "high"` — the level name as a string — or `default_effort: null`.',
+        );
     }
 
     private function validateRequiredPlugins(array $raw): ?ToolResult

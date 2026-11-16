@@ -9,6 +9,7 @@ use Spora\Metering\LlmCallRunner;
 use Spora\Metering\UsageMeterInterface;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\EffortService;
 use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
@@ -58,6 +59,13 @@ final class OrchestratorConfig
         public readonly ?AgentServiceInterface $agentService = null,
         public readonly ?SubAgentServiceInterface $subAgent = null,
         public readonly ?LLMConfigPreferences $principalPreferences = null,
+        /**
+         * The reasoning-effort service the resolver delegates the default
+         * chain to. Null means the orchestrator builds its own from the
+         * preferences, the LLM config service and the driver factory it
+         * already holds.
+         */
+        public readonly ?EffortService $effortService = null,
         public ?string $leaseOwner = null,
         public int $tickLeaseSeconds = 600,
         public bool $singleStep = false,

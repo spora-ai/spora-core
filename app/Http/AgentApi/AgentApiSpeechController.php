@@ -6,13 +6,17 @@ namespace Spora\Http\AgentApi;
 
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
+use Spora\Http\EffortOpenApi;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Http\Exceptions\SpeechTranscribeException;
 use Spora\Http\JsonControllerHelpers;
+use Spora\Http\TaskEffortRequestValidator;
 use Spora\Services\ApiKeys\ApiKeyCallbackRecorder;
 use Spora\Services\ApiKeys\ApiKeyChatAccess;
 use Spora\Services\ApiKeys\ApiKeyChatProjection;
 use Spora\Services\ApiKeys\ApiKeyContext;
 use Spora\Services\ApiKeys\ApiKeyMediaAccess;
+use Spora\Services\EffortService;
 use Spora\Services\SsrfGuard;
 use Spora\Speech\SpeechTranscriber;
 use Spora\Speech\TranscriptionResult;
@@ -55,6 +59,7 @@ final class AgentApiSpeechController
         private readonly ApiKeyCallbackRecorder $callbacks,
         private readonly SpeechTranscriber $transcriber,
         private readonly SsrfGuard $ssrf,
+        private readonly EffortService $effortService,
     ) {}
 
     #[OA\Post(
@@ -147,6 +152,12 @@ final class AgentApiSpeechController
                     ),
                     new OA\Property(property: 'max_steps', type: 'integer', nullable: true, description: 'New chat only.'),
                     new OA\Property(property: 'additional_steps', type: 'integer', nullable: true, description: 'Existing chat only.'),
+                    new OA\Property(
+                        property: 'effort',
+                        type: 'string',
+                        nullable: true,
+                        description: EffortOpenApi::FIELD_DESCRIPTION,
+                    ),
                 ],
             ),
         ),
@@ -168,7 +179,15 @@ final class AgentApiSpeechController
             return $body;
         }
 
-        $prepared = $this->prepareSend($body);
+        // The refusal from the catch is a JsonResponse like the ones
+        // prepareSend returns, so one variable and one guard answer both —
+        // a second guard would put the endpoint over the S1142 three-return
+        // ceiling.
+        try {
+            $prepared = $this->prepareSend($body, $context);
+        } catch (EffortValidationException $e) {
+            $prepared = TaskEffortRequestValidator::errorResponse($e);
+        }
 
         if ($prepared instanceof JsonResponse) {
             return $prepared;
@@ -187,7 +206,8 @@ final class AgentApiSpeechController
      *     chatId: ?int,
      *     callbackUrl: ?string,
      *     maxSteps: ?int,
-     *     additionalSteps: ?int
+     *     additionalSteps: ?int,
+     *     effort: ?string
      * } $prepared
      */
     private function send(ApiKeyContext $context, array $prepared): JsonResponse
@@ -246,10 +266,13 @@ final class AgentApiSpeechController
      *     chatId: ?int,
      *     callbackUrl: ?string,
      *     maxSteps: ?int,
-     *     additionalSteps: ?int
+     *     additionalSteps: ?int,
+     *     effort: ?string
      * }
+     * @throws EffortValidationException When the body names an effort the
+     *     agent's LLM configuration does not offer
      */
-    private function prepareSend(array $body): JsonResponse|array
+    private function prepareSend(array $body, ApiKeyContext $context): JsonResponse|array
     {
         $mediaId = $this->mediaId($body);
 
@@ -269,6 +292,14 @@ final class AgentApiSpeechController
             return $this->unprocessable('VALIDATION_ERROR', $problem);
         }
 
+        $effort = TaskEffortRequestValidator::parse($body);
+
+        // The effort belongs to the chat this transcript starts, so it is
+        // checked against the key's own agent before the recording is even
+        // transcribed — a refusal that arrives after the transcription has
+        // already cost the caller.
+        $this->effortService->assertLevel($effort, $context->requireAgent());
+
         return [
             'mediaId'         => $mediaId,
             'language'        => $this->optionalString($body, 'language'),
@@ -277,6 +308,7 @@ final class AgentApiSpeechController
             'callbackUrl'     => $this->stringField($body, 'callback_url'),
             'maxSteps'        => $this->boundedInt($this->intField($body, 'max_steps'), 1, 100),
             'additionalSteps' => $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
+            'effort'          => $effort,
         ];
     }
 
@@ -331,7 +363,8 @@ final class AgentApiSpeechController
      *     chatId: ?int,
      *     callbackUrl: ?string,
      *     maxSteps: ?int,
-     *     additionalSteps: ?int
+     *     additionalSteps: ?int,
+     *     effort: ?string
      * } $prepared
      */
     private function startChat(
@@ -346,6 +379,7 @@ final class AgentApiSpeechController
             $message,
             $prepared['maxSteps'],
             [],
+            $prepared['effort'],
         );
 
         // Recorded after the chat exists: a failed insert leaves a queued
@@ -374,7 +408,8 @@ final class AgentApiSpeechController
      *     chatId: ?int,
      *     callbackUrl: ?string,
      *     maxSteps: ?int,
-     *     additionalSteps: ?int
+     *     additionalSteps: ?int,
+     *     effort: ?string
      * } $prepared
      */
     private function continueChat(
@@ -390,6 +425,7 @@ final class AgentApiSpeechController
                 $message,
                 $prepared['additionalSteps'],
                 [],
+                $prepared['effort'],
             );
         } catch (InvalidArgumentException $e) {
             $missing = $this->scope->chatMissing($context, (int) $prepared['chatId']);

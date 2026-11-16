@@ -48,6 +48,7 @@ use Spora\Events\EventDispatcherFactory;
 use Spora\Extensions\AppLoader;
 use Spora\Http\AgentApi\AgentApiChatActionController;
 use Spora\Http\AgentApi\AgentApiChatController;
+use Spora\Http\AgentApi\AgentApiEffortController;
 use Spora\Http\AgentApi\AgentApiKeyController;
 use Spora\Http\AgentApi\AgentApiMediaController;
 use Spora\Http\AgentApi\AgentApiSpeechController;
@@ -64,6 +65,7 @@ use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
+use Spora\Http\EffortProjection;
 use Spora\Http\GlobalSettingsController;
 use Spora\Http\GroupController;
 use Spora\Http\GroupLlmConfigsController;
@@ -120,6 +122,7 @@ use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentPrincipalService;
 use Spora\Services\AgentService;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentStepCap;
 use Spora\Services\AgentToolSettingsService;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\ApiKeys\ApiKeyCallbackDispatcher;
@@ -765,6 +768,12 @@ final class ContainerDefinitions
                 );
             },
 
+            // The one payload every effort endpoint answers with, so the
+            // admin, agent and scoped surfaces report the same thing.
+            EffortProjection::class => static function (ContainerInterface $c): EffortProjection {
+                return new EffortProjection($c->get(EffortService::class));
+            },
+
             // Speech-to-text providers — core ships its own
             // `OpenAiCompatibleTranscriber` for the OpenAI-multipart
             // family (Mistral Voxtral, OpenAI Whisper, Groq Whisper,
@@ -852,12 +861,18 @@ final class ContainerDefinitions
                 return new LLMConfigPreferences($c->get(PrincipalService::class));
             },
 
+            AgentStepCap::class => static function (ContainerInterface $c): AgentStepCap {
+                return new AgentStepCap($c->get(Config::class));
+            },
+
             AgentServiceInterface::class => static function (ContainerInterface $c): AgentServiceInterface {
                 return new AgentService(
                     $c->get(ToolIconResolver::class),
                     $c->get(AgentPictureService::class),
                     $c->get(PrincipalResolver::class),
                     $c->get(AgentPrincipalService::class),
+                    $c->get(EffortService::class),
+                    $c->get(AgentStepCap::class),
                 );
             },
 
@@ -970,7 +985,7 @@ final class ContainerDefinitions
             },
 
             LlmConfigSchemaValidator::class => static fn(ContainerInterface $c): LlmConfigSchemaValidator
-                => new LlmConfigSchemaValidator(),
+                => new LlmConfigSchemaValidator($c->get(DriverFactory::class)),
 
             UserPreferenceController::class => static function (ContainerInterface $c): UserPreferenceController {
                 return new UserPreferenceController(
@@ -988,6 +1003,7 @@ final class ContainerDefinitions
                     $config,
                     $c->get(WorkerRuntimeMode::class),
                     $config->getInt('SPORA_TICK_LEASE_SECONDS') ?? 600,
+                    $c->get(AgentStepCap::class),
                 );
             },
 
@@ -1139,6 +1155,7 @@ final class ContainerDefinitions
                     $c->get(AgentPictureService::class),
                     $c->get(PrincipalService::class),
                     $c->get(PrincipalResolver::class),
+                    $c->get(AgentStepCap::class),
                 );
             },
 
@@ -1146,7 +1163,7 @@ final class ContainerDefinitions
                 return new AgentEffortController(
                     $c->get(AuthService::class),
                     $c->get(AgentServiceInterface::class),
-                    $c->get(EffortService::class),
+                    $c->get(EffortProjection::class),
                 );
             },
 
@@ -1317,6 +1334,7 @@ final class ContainerDefinitions
                     $c->get(AnswerQuestionRequestValidator::class),
                     $c->get(AgentServiceInterface::class),
                     $c->get(EffortService::class),
+                    $c->get(AgentStepCap::class),
                 );
             },
 
@@ -1608,6 +1626,13 @@ final class ContainerDefinitions
                     $c->get(ApiKeyCallbackRecorder::class),
                     $c->get(SpeechTranscriber::class),
                     $c->get(SsrfGuard::class),
+                    $c->get(EffortService::class),
+                );
+            },
+
+            AgentApiEffortController::class => static function (ContainerInterface $c): AgentApiEffortController {
+                return new AgentApiEffortController(
+                    $c->get(EffortProjection::class),
                 );
             },
 
@@ -1667,6 +1692,7 @@ final class ContainerDefinitions
                     $c->get(AgentToolSettingsServiceInterface::class),
                     $c->get(AgentManifest::class),
                     new AgentTool\AgentToolCollaborators(
+                        stepCap: $c->get(AgentStepCap::class),
                         pluginLoader: $c->has(PluginLoader::class) ? $c->get(PluginLoader::class) : null,
                         iconResolver: $c->has(ToolIconResolver::class) ? $c->get(ToolIconResolver::class) : null,
                         principalResolver: $c->get(PrincipalResolver::class),

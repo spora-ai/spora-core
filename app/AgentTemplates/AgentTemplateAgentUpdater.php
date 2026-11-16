@@ -66,6 +66,10 @@ final class AgentTemplateAgentUpdater
             $updates['max_steps'] = (int) $agent['max_steps'];
         }
 
+        if (array_key_exists('default_effort', $agent)) {
+            $updates['default_effort'] = $this->nullIfEmpty($agent['default_effort']);
+        }
+
         if (array_key_exists('allow_followup', $agent)) {
             $updates['allow_followup'] = (bool) $agent['allow_followup'] ? 1 : 0;
         }

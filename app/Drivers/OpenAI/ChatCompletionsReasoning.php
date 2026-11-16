@@ -76,8 +76,14 @@ final class ChatCompletionsReasoning
         // 400 too. GPT-5.4 and GPT-5.2 default to `none`, and the escape
         // hatch is a no-op there. A model whose tools need the Responses
         // API is refused either way.
+        //
+        // The escape hatch is what the API requires, not a depth the
+        // operator chose, so it is not subject to their level list: a
+        // configuration naming `low, medium, high` without `none` would
+        // otherwise leave no value the request could carry, and the
+        // provider would refuse it.
         if ($request->tools !== [] && ModelFamily::openAIRequiresNoneEffortForTools($this->model)) {
-            return $levels[EffortLevel::None->value] ?? null;
+            return EffortLevel::None->value;
         }
 
         return null;

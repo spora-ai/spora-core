@@ -13,6 +13,7 @@ use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Http\AgentEffortController;
+use Spora\Http\EffortProjection;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\OpenApi\RouteSpecCollector;
@@ -157,7 +158,7 @@ function effortEndpointController(?string $configuredEffort, string $driverClass
         new AgentEffortController(
             $authService,
             new AgentService(null, null, new PrincipalResolver()),
-            $effortService,
+            new EffortProjection($effortService),
         ),
         (int) $agent->id,
     ];

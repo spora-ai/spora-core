@@ -343,3 +343,15 @@ test('makeFromAgent throws DriverClassNotFoundException when the driver class is
 
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
+
+test('a class that exists but is not a registered driver is not built', function (): void {
+    $service = makeSecureLLMConfigService();
+    $factory = new DriverFactory(new NullLogger(), $service, 300);
+
+    // The class exists — it is a real, loadable class — but it is not one
+    // of the drivers this installation ships. A save request names a
+    // driver, and a name nobody registered is not one, however it is
+    // spelled.
+    expect(fn() => $factory->makeDriverFromSettings(stdClass::class, []))
+        ->toThrow(DriverClassNotFoundException::class);
+});

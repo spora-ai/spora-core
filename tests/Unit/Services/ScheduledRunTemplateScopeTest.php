@@ -46,6 +46,7 @@ function scheduleScopeService(): ScheduledRunService
     return new ScheduledRunService(
         Mockery::mock(Spora\Agents\OrchestratorInterface::class),
         $mercure,
+        makeEffortService(),
     );
 }
 
@@ -217,7 +218,7 @@ it('records the authenticated caller as the trigger user of a manually triggered
 
     /** @var Mockery\MockInterface&Spora\Services\MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(Spora\Services\MercurePublisherInterface::class)->shouldIgnoreMissing();
-    $triggeringService = new ScheduledRunService($orchestrator, $mercure);
+    $triggeringService = new ScheduledRunService($orchestrator, $mercure, makeEffortService());
     $triggeringService->triggerRun($runId, $agentId, $userId);
 
     expect($started['user_id'])->toBe($userId);

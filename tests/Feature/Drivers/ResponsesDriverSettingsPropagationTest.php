@@ -4,8 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Drivers;
 
+use Psr\Log\NullLogger;
+use RuntimeException;
+use Spora\Core\SecurityManager;
+use Spora\Drivers\DriverFactory;
+use Spora\Drivers\EffortAwareDriverInterface;
 use Spora\Drivers\Responses\OpenAIResponsesDriver;
 use Spora\Drivers\ValueObjects\LLMRequest;
+use Spora\Services\LLMConfigService;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
@@ -166,7 +172,7 @@ test('the pricing tag is the one the operator\'s existing price rows use', funct
     expect($driver->getProviderName())->toBe('openai_compatible');
 });
 
-test('the effort levels the driver declares are the options its effort setting offers', function (): void {
+test('the effort setting is free text, because a static option list cannot describe a per-row level set', function (): void {
     $effortSetting = null;
     foreach (\Spora\Tools\ToolSettingSchema::collect(OpenAIResponsesDriver::class) as $setting) {
         if ($setting->key === 'effort') {
@@ -174,15 +180,86 @@ test('the effort levels the driver declares are the options its effort setting o
         }
     }
 
-    expect($effortSetting)->not->toBeNull();
+    expect($effortSetting)->not->toBeNull()
+        ->and($effortSetting->type)->toBe('text')
+        ->and($effortSetting->options)->toBe([]);
+});
 
-    $optionKeys = array_values(array_filter(
-        array_keys($effortSetting->options),
-        static fn(string $key): bool => $key !== '',
-    ));
+/**
+ * The driver the settings blob describes.
+ *
+ * @param array<string, mixed> $args
+ * @param array<string, mixed> $settings
+ */
+function responsesEffortDriver(array $args, array $settings): EffortAwareDriverInterface
+{
+    $driver = OpenAIResponsesDriver::makeFromSettings($args, $settings);
 
-    $captured = [];
-    $driver = responsesDriverWithBody($captured);
+    if (!$driver instanceof EffortAwareDriverInterface) {
+        throw new RuntimeException('The Responses driver declares no reasoning-effort levels.');
+    }
 
-    expect(array_keys($driver->effortLevels()))->toBe($optionKeys);
+    return $driver;
+}
+
+test('the configured level list reaches the driver', function (): void {
+    $driver = responsesEffortDriver([
+        'apiKey' => 'test',
+        'model' => 'gpt-5.5',
+        'baseUrl' => 'https://api.openai.com/v1',
+        'httpClient' => new MockHttpClient(),
+        'effortLevels' => ['low', 'high'],
+    ], []);
+
+    expect($driver->effortLevels())->toBe(['low' => 'low', 'high' => 'high']);
+});
+
+test('the effort toggle off leaves the driver with no levels', function (): void {
+    $driver = responsesEffortDriver([
+        'apiKey' => 'test',
+        'model' => 'gpt-5.5',
+        'baseUrl' => 'https://api.openai.com/v1',
+        'httpClient' => new MockHttpClient(),
+        'effortLevels' => ['low', 'high'],
+        'supportsEffort' => false,
+    ], []);
+
+    expect($driver->effortLevels())->toBe([]);
+});
+
+test('the effort toggle absent leaves the driver with the model\'s own set', function (): void {
+    $driver = responsesEffortDriver([
+        'apiKey' => 'test',
+        'model' => 'gpt-5.5',
+        'baseUrl' => 'https://api.openai.com/v1',
+        'httpClient' => new MockHttpClient(),
+    ], []);
+
+    expect(array_keys($driver->effortLevels()))
+        ->toBe(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+});
+
+test('the settings blob carries the level list and the toggle to the driver', function (): void {
+    $factory = new DriverFactory(
+        new NullLogger(),
+        new LLMConfigService(
+            new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+            [OpenAIResponsesDriver::class],
+        ),
+        60,
+    );
+
+    $driver = $factory->makeDriverFromSettings(OpenAIResponsesDriver::class, [
+        'api_key' => 'test',
+        'model' => 'gpt-5.5',
+        'base_url' => 'https://api.openai.com/v1',
+        'effort_levels' => 'low, high',
+        'supports_effort' => 'true',
+    ]);
+
+    if (!$driver instanceof EffortAwareDriverInterface) {
+        throw new RuntimeException('The Responses driver declares no reasoning-effort levels.');
+    }
+
+    expect($driver->effortLevels())->toBe(['low' => 'low', 'high' => 'high']);
 });

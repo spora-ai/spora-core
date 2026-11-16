@@ -52,6 +52,10 @@ final class AgentResource
                 ? (int) $agent->speech_driver_config_id
                 : null,
             'max_steps'            => (int) $agent->max_steps,
+            // The reasoning effort the agent runs with when nobody names
+            // one. Null means "inherit": the effective LLM configuration's
+            // own default applies.
+            'default_effort'       => $agent->default_effort,
             'is_active'            => (bool) $agent->is_active,
             'allow_followup'       => (bool) $agent->allow_followup,
             'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),

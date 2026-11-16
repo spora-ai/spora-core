@@ -60,5 +60,9 @@ function makeImporter(): AgentTemplateImporter
         $agentCreator,
         new AgentTemplateAgentUpdater(),
         null,
+        // The container wires the same service: the template's
+        // `agent.default_effort` is checked against the target
+        // configuration before it is written.
+        makeEffortService(),
     );
 }

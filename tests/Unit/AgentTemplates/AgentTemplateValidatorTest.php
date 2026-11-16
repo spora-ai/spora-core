@@ -174,6 +174,31 @@ test('valid minimal payload passes validation with no warnings', function (): vo
     expect($result->warnings())->toBe([]);
 });
 
+test('a default effort of the column\'s length is accepted', function (): void {
+    // The column is a `string(16)`, so a name of exactly that length is
+    // the longest one that can be stored.
+    $raw = [
+        'id' => 'effort', 'name' => 'Effort', 'version' => '1.0.0',
+        'agent' => ['default_effort' => str_repeat('a', 16)],
+        'tools' => [],
+    ];
+
+    expect(validatePayload($raw)->isValid())->toBeTrue();
+});
+
+test('a default effort longer than the column is refused', function (): void {
+    $raw = [
+        'id' => 'effort', 'name' => 'Effort', 'version' => '1.0.0',
+        'agent' => ['default_effort' => str_repeat('a', 17)],
+        'tools' => [],
+    ];
+
+    $result = validatePayload($raw);
+
+    expect($result->isValid())->toBeFalse()
+        ->and(array_column($result->errors(), 'code'))->toContain('DEFAULT_EFFORT_TOO_LONG');
+});
+
 test('validate accepts a payload without a tools block', function (): void {
     // The LLM-facing create_agent flow runs with no `tools` block —
     // the agent row is created and configure_tools applies the toolset

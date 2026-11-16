@@ -12,6 +12,7 @@ use Spora\Models\Agent;
 use Spora\Plugins\PluginLoader;
 use Spora\Plugins\PluginMetadata;
 use Spora\Services\AgentPictures\AgentPictureService;
+use Spora\Services\EffortService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ToolConfigService;
@@ -24,6 +25,10 @@ use Spora\Services\ToolConfigService;
  * Non-password settings may be written from an operator-exported template
  * through ToolConfigService's agent-override path. Missing required settings
  * still produce TOOL_NEEDS_CONFIGURATION warnings.
+ *
+ * The `agent.default_effort` a template carries is checked against the
+ * configuration the target agent resolves to before it is written — the
+ * same check the agent service applies to the same column.
  *
  * Plugins are NEVER auto-installed. Each entry of `required_plugins` is
  * a Composer `vendor/name` package string (e.g. `spora-ai/spora-plugin-minimax`);
@@ -47,6 +52,7 @@ final class AgentTemplateImporter
         private readonly AgentTemplateAgentCreator $agentCreator,
         private readonly AgentTemplateAgentUpdater $agentUpdater,
         private readonly ?AgentPictureService $pictureService = null,
+        private readonly ?EffortService $effortService = null,
     ) {}
 
     /**
@@ -96,6 +102,10 @@ final class AgentTemplateImporter
 
         $this->collectPluginWarnings($template, $warnings);
 
+        // The agent the default is judged against is the one the update
+        // leaves in place: the template names no configuration of its own.
+        $this->assertTemplateEffort($template, Agent::find($agentId));
+
         [$toolsEnabled] = Capsule::connection()->transaction(
             function () use ($agentId, $template, $registeredTools, &$warnings): array {
                 $this->agentUpdater->update($agentId, $template);
@@ -138,6 +148,11 @@ final class AgentTemplateImporter
 
         $resolvedPrincipalId = $this->resolvePrincipalId($userId, $principalId);
 
+        // The agent the default is judged against is the one the import
+        // would produce: it has no configuration of its own, so the level
+        // set is the one its principal's effective configuration offers.
+        $this->assertTemplateEffort($template, new Agent(['principal_id' => $resolvedPrincipalId]));
+
         // The closure returns a tuple so the outer scope can unpack both
         // without a by-ref parameter on applyTools. `tools` is optional in the
         // schema, so a payload without it still creates the agent row.
@@ -162,6 +177,24 @@ final class AgentTemplateImporter
             agent: $agent,
             toolsEnabled: $toolsEnabled,
             warnings: $warnings,
+        );
+    }
+
+    /**
+     * Refuse a default the agent's configuration does not offer.
+     *
+     * The template's `agent.default_effort` lands on the same column the
+     * agent service writes, so it gets the same check: a level the
+     * configuration cannot express would be stored, ignored at runtime,
+     * and the run would happen at a depth nobody asked for.
+     *
+     * @throws \Spora\Http\Exceptions\EffortValidationException
+     */
+    private function assertTemplateEffort(AgentTemplate $template, ?Agent $agent): void
+    {
+        $this->effortService?->assertAgentDefault(
+            $template->agent()['default_effort'] ?? null,
+            $agent,
         );
     }
 

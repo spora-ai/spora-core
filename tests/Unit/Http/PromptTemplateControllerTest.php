@@ -20,7 +20,7 @@ use Spora\Services\PromptTemplateService;
 function makePromptTemplateController(): array
 {
     $authService = bootAuthLayer();
-    $promptTemplateService = new PromptTemplateService();
+    $promptTemplateService = new PromptTemplateService(makeEffortService());
     $controller = new PromptTemplateController($authService, $promptTemplateService);
     $authMiddleware = new AuthMiddleware($authService);
     $csrfService = new CsrfTokenService();

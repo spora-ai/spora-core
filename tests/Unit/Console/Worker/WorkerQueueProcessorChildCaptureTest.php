@@ -229,6 +229,34 @@ describe('WorkerQueueProcessor — child stdio capture + reap log', function ():
             ->and($record->context['task_id'])->toBe($task->id);
     });
 
+    it('reports the exit code of a child that closes its stdout before it exits', function (): void {
+        // A child that closes its stdout and then keeps running leaves the
+        // parent looking at a pipe that is at EOF while the child has not
+        // been reaped yet. A status read in that window reports -1, which
+        // the log level would read as a failure for a child that succeeded.
+        [$logger, $handler] = makeCapturingLogger();
+        $cmdFactory = static fn(int $taskId): array => [
+            PHP_BINARY,
+            '-r',
+            'fwrite(STDOUT, "OUT_OK\n"); fclose(STDOUT); usleep(300000); exit(3);',
+        ];
+
+        $processor = makeChildCaptureProcessor($logger, $cmdFactory);
+        $processor->spawnChild(11);
+
+        $output = new BufferedOutput();
+        $deadline = microtime(true) + 3.0;
+        while (microtime(true) < $deadline && findRecord($handler, 'child_exit') === null) {
+            $processor->reapChildren($output);
+            usleep(20_000);
+        }
+
+        $record = findRecord($handler, 'child_exit');
+        expect($record)->not->toBeNull();
+        expect($record->context['exit_code'])->toBe(3)
+            ->and($record->context['stdout_excerpt'])->toContain('OUT_OK');
+    });
+
     it('aborts gracefully when proc_open fails and the worker does not crash', function (): void {
         // A path that doesn't exist (and isn't executable) is the most
         // portable way to make proc_open return false on Linux/macOS.

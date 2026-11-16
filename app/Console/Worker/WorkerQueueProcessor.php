@@ -293,24 +293,50 @@ final class WorkerQueueProcessor
         $this->childStreams[$pid]['stdout'] = $this->capAccumulator($this->childStreams[$pid]['stdout']);
         $this->childStreams[$pid]['stderr'] = $this->capAccumulator($this->childStreams[$pid]['stderr']);
 
+        // The status has to describe how the child ended, and it only
+        // does once the child has been reaped: `proc_get_status()` reaps
+        // it, and until then it reports `running === true`, an exit code
+        // of -1 and no signal at all.
+        $status = proc_get_status($proc);
+
         // Done gate: feof() on stdout is the reliable signal that
         // (a) the child has closed its write end (i.e. exited) AND
         // (b) we've consumed everything it wrote. PHP's
         // `proc_get_status` reports `running === true` until the parent
         // fully drains the pipes AND calls proc_close, so it isn't
         // sufficient on its own.
-        if (!is_resource($stdoutPipe) || !feof($stdoutPipe)) {
+        //
+        // A child that closed its stdout and is still running is not
+        // done: it gets another sweep. Waiting for it here would block
+        // the whole worker on one child, and the sweep would then read a
+        // status that describes the moment before the child ended.
+        if (!is_resource($stdoutPipe) || !feof($stdoutPipe) || $status['running']) {
             return;
         }
 
         $stdout   = $this->childStreams[$pid]['stdout'];
         $stderr   = $this->childStreams[$pid]['stderr'];
-        $status   = proc_get_status($proc);
-        $exitCode = $status['exitcode'];
+        $exitCode = (int) $status['exitcode'];
         $signal   = (int) $status['termsig'];
 
         $stdoutExcerpt = $this->sanitizeExcerpt($this->truncateExcerpt($stdout));
         $stderrExcerpt = $this->sanitizeExcerpt($this->truncateExcerpt($stderr));
+
+        // The exit code and the signal come from the status above, which
+        // was read once the child had been reaped: a child that ended
+        // normally carries its code, and one that was killed carries the
+        // signal and no code.
+        //
+        // `proc_close()` cannot answer that on its own. Read before the
+        // child is reaped it returns the raw wait status, which is the
+        // signal number for a killed child — indistinguishable from a
+        // child that called `exit(9)`.
+        foreach ($pipes as $pipe) {
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
+        }
+        proc_close($proc);
 
         // The status decides the level, not the exit code: a child that
         // exits non-zero because the task is waiting for a human is not an
@@ -329,13 +355,6 @@ final class WorkerQueueProcessor
             'stdout_excerpt' => $stdoutExcerpt,
             'stderr_excerpt' => $stderrExcerpt,
         ]);
-
-        foreach ($pipes as $pipe) {
-            if (is_resource($pipe)) {
-                fclose($pipe);
-            }
-        }
-        proc_close($proc);
 
         // Surface one coherent status line per child to the operator's
         // terminal — replaces the "Task X finished with status: Y" line
