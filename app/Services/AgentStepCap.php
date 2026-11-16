@@ -31,16 +31,15 @@ final class AgentStepCap
     public const DEFAULT_CAP = 100;
 
     /**
-     * The largest cap a column can hold.
+     * The largest ceiling an operator may set.
      *
-     * The cap is stored in `agents.max_steps`, copied into
-     * `tasks.max_steps`, and carried by the template and schedule columns
-     * — all `SMALLINT UNSIGNED` on MySQL, so 65535 is where the storage
-     * ends. A ceiling above it would accept a cap the database refuses to
-     * store: the write fails on MySQL and succeeds on SQLite, which stores
-     * every integer it is given.
+     * The ceiling is a bound, not a storage limit: a cap of a hundred
+     * thousand steps is a task that runs for days and costs more than the
+     * agent is worth, so an operator who selects one has almost certainly
+     * typed it by accident. The bound is a policy decision, and it is
+     * declared here rather than left to the column's type.
      */
-    public const COLUMN_MAX = 65535;
+    public const MAX_LIMIT = 100000;
 
     public function __construct(private readonly ?Config $config = null) {}
 
@@ -55,7 +54,7 @@ final class AgentStepCap
             return self::DEFAULT_LIMIT;
         }
 
-        return min($limit, self::COLUMN_MAX);
+        return min($limit, self::MAX_LIMIT);
     }
 
     /**

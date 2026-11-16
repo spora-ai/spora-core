@@ -43,6 +43,7 @@ final readonly class SettingDefinition
      * @param string     $validation   Regex the raw string must match, or '' for none.
      * @param string     $transform    Named coercion for a value the raw-string form cannot express.
      * @param int|null   $min          Lowest value the setting accepts. Every layer is held to it.
+     * @param int|null   $max          Highest value the setting accepts. Every layer is held to it.
      */
     public function __construct(
         public string $key,
@@ -58,5 +59,6 @@ final readonly class SettingDefinition
         public string $validation = '',
         public string $transform = '',
         public ?int $min = null,
+        public ?int $max = null,
     ) {}
 }

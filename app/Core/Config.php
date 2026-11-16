@@ -108,7 +108,10 @@ final class Config
                     $this->undecryptable[] = $definition->key;
                     continue;
                 }
-                $this->values[$definition->key] = $row->value;
+                // The bounds are applied here as well as to the file
+                // layers: a value stored before a bound existed must not
+                // slip past it.
+                $this->values[$definition->key] = $registry->clamp($definition, $row->value);
                 $this->sources[$definition->key] = self::SOURCE_DATABASE;
             }
         }

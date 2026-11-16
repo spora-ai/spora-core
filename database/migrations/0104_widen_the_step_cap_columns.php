@@ -21,16 +21,17 @@ use Illuminate\Database\Schema\Blueprint;
  * is given — took it. The same divergence would have appeared on the agent
  * and task columns the moment an operator raised the ceiling past 255.
  *
- * `SMALLINT UNSIGNED` holds 65535, which is the ceiling
- * `Spora\Services\AgentStepCap` clamps to.
+ * The columns become `INT UNSIGNED`, so the storage is not what decides the
+ * ceiling: `Spora\Services\AgentStepCap` owns the bound, and every cap the
+ * operator may select fits in the column whatever it is.
  *
- * The nullability and the default of each column are kept as they were,
- * except that the agent and task columns' default follows the application
- * default: a cap of ten was the old application default, and a row
- * inserted without the column would still have carried it.
+ * The nullability of each column is kept as it was, and the agent and task
+ * columns' default follows the application default — a cap of ten was the
+ * old application default, and a row inserted without the column would
+ * still have carried it.
  *
- * Idempotency: gated on the column's reported type, so a re-run after a
- * partial failure is a no-op.
+ * Idempotency: the change declares the column's type and its default, so
+ * applying it again leaves the same schema.
  */
 return new class extends Migration {
     /**
@@ -64,14 +65,10 @@ return new class extends Migration {
                 continue;
             }
 
-            if ($this->isWidened($schema, $table, $column)) {
-                continue;
-            }
-
             $default = self::WITH_DEFAULT[$table . '.' . $column] ?? null;
 
             $schema->table($table, static function (Blueprint $blueprint) use ($column, $default): void {
-                $definition = $blueprint->unsignedSmallInteger($column);
+                $definition = $blueprint->unsignedInteger($column);
 
                 if ($default === null) {
                     $definition->nullable();
@@ -89,19 +86,5 @@ return new class extends Migration {
         // The widened columns are not narrowed back: a cap above the
         // narrow range cannot be stored, and the ceiling it came from is
         // the operator's to lower first.
-    }
-
-    /**
-     * Whether the column already holds a `SMALLINT`.
-     */
-    private function isWidened(\Illuminate\Database\Schema\Builder $schema, string $table, string $column): bool
-    {
-        foreach ($schema->getColumns($table) as $reported) {
-            if ($reported['name'] === $column) {
-                return str_contains(strtolower((string) $reported['type']), 'smallint');
-            }
-        }
-
-        return false;
     }
 };
