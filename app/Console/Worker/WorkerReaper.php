@@ -43,10 +43,9 @@ final class WorkerReaper
         // Lease-aware + retry-chain-aware. The reaper is shared between server-mode
         // daemon (`WorkerRunCommand --once`) and client-mode HTTP housekeeping, so the
         // SQL must work for either runtime. `retry_of_task_id IS NULL` excludes the
-        // retry chain — orphaned retries are reported up to the root via
-        // `RetryScheduler::scheduleRootRetry` and are never flipped directly by the
-        // reaper (otherwise a reaper pass would race a pending retry and erase the
-        // root's failure context).
+        // retry chain: a task carrying the marker is a task with a retry pending or
+        // in flight, and flipping it would race that retry and erase the root's
+        // failure context.
         //
         // AWAITING_SUB_AGENTS is swept alongside RUNNING because a sub-agent
         // multi-child stall (race between a concurrent child worker and the

@@ -12,6 +12,7 @@ use Spora\Metering\Exceptions\UsageLimitExceededException;
 use Spora\Models\Task;
 use Spora\Services\ContextWindowErrorParser;
 use Symfony\Contracts\HttpClient\Exception\TimeoutExceptionInterface;
+use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Throwable;
 
 /**
@@ -73,6 +74,19 @@ final class ErrorClassifier
 
         if ($e instanceof TimeoutExceptionInterface) {
             return 'LLM_TIMEOUT';
+        }
+
+        // A provider that cannot be reached at all — DNS failure, connection
+        // reset, refused TLS handshake. As transient as a 5xx, and the most
+        // common failure there is. `TransportExceptionInterface` is the
+        // parent of the timeout interface, so this branch has to come after
+        // it: a timeout is a transport failure too, but it has its own code.
+        //
+        // Without this branch the failure lands on UNKNOWN, which the
+        // auto-retry policy does not accept, so an agent's configured retry
+        // never arms for the one failure a retry policy exists for.
+        if ($e instanceof TransportExceptionInterface) {
+            return 'GATEWAY_ERROR';
         }
 
         return 'UNKNOWN';

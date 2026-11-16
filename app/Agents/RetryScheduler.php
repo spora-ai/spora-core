@@ -88,7 +88,13 @@ final class RetryScheduler
             // predicate. WorkerQueueProcessor::processRetryQueue() picks the
             // task up once `retry_after` elapses and calls Orchestrator::retry()
             // to reset error fields and start the loop again.
-            $retryAfter = date(Orchestrator::DB_TIMESTAMP_FORMAT, time() + $retryAfterMinutes * 60);
+            // `retry_after` is a UTC column: the worker's claim query reads
+            // it as UTC, so the stamp has to be UTC too. The process that
+            // schedules the retry is not the worker daemon and does not pin
+            // the timezone, so `date()` would write the host's local wall
+            // clock here — and the worker would compare it against UTC,
+            // firing the retry an hour off on every host that is not UTC.
+            $retryAfter = gmdate(Orchestrator::DB_TIMESTAMP_FORMAT, time() + $retryAfterMinutes * 60);
 
             $failedTask->update([
                 'retry_count'      => $retryCount,
