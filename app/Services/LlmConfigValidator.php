@@ -135,12 +135,29 @@ final class LlmConfigValidator
         $settings = is_array($rawSettings) ? $rawSettings : [];
         $driverClass = trim((string) ($body['driver_class'] ?? ''));
 
+        return $this->settingsError(
+            $driverClass,
+            $settings,
+            $this->schemaValidator->getSchemaForDriver($driverClass),
+        );
+    }
+
+    /**
+     * The refusal the settings carry, as an error envelope.
+     *
+     * The effort refusals are thrown rather than returned by the schema
+     * validator, so they are caught here and answered the same way the
+     * returned refusals are — with the code that says which refusal it
+     * was, so the client knows whether to correct the body or to refetch
+     * the capability it was working from.
+     *
+     * @param array<string, mixed> $settings
+     * @param list<array> $schema
+     */
+    private function settingsError(string $driverClass, array $settings, array $schema): ?JsonResponse
+    {
         try {
-            $validationError = $this->schemaValidator->validateSettings(
-                $driverClass,
-                $settings,
-                $this->schemaValidator->getSchemaForDriver($driverClass),
-            );
+            $validationError = $this->schemaValidator->validateSettings($driverClass, $settings, $schema);
         } catch (EffortValidationException $e) {
             return $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
@@ -294,17 +311,7 @@ final class LlmConfigValidator
         $existing = $this->service->decodeSettings($config->driver_class, $config->getRawOriginal('settings') ?? '');
         $merged = array_merge($existing, $body['settings']);
 
-        try {
-            $validationError = $this->schemaValidator->validateSettings($config->driver_class, $merged, $schema);
-        } catch (EffortValidationException $e) {
-            return $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        if ($validationError === null) {
-            return null;
-        }
-
-        return $this->error('VALIDATION_ERROR', $validationError, Response::HTTP_UNPROCESSABLE_ENTITY);
+        return $this->settingsError($config->driver_class, $merged, $schema);
     }
 
     /**

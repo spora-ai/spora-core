@@ -98,4 +98,22 @@ final class AgentStepCap
             );
         }
     }
+
+    /**
+     * Refuse a cap this installation does not allow, unless there is none.
+     *
+     * A null cap is the column's own null: the row carries no cap of its
+     * own, and there is nothing to refuse.
+     *
+     * @param mixed $value
+     * @throws AgentPatchValidationException when the value is not a cap this installation allows
+     */
+    public function assertValidWhenPresent(mixed $value): void
+    {
+        if ($value === null) {
+            return;
+        }
+
+        $this->assertValid($value);
+    }
 }

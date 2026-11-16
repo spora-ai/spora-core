@@ -67,7 +67,7 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
             throw new AgentNotFoundException('Agent not found');
         }
 
-        $this->assertMaxSteps($data['max_steps'] ?? null);
+        $this->stepCap->assertValidWhenPresent($data['max_steps'] ?? null);
 
         $id = Capsule::table('agent_prompt_templates')->insertGetId([
             'agent_id'         => $agentId,
@@ -124,7 +124,13 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
 
         if ($updateData !== []) {
             if (array_key_exists('max_steps', $updateData)) {
-                $this->assertMaxSteps($updateData['max_steps']);
+                // The column is `INT UNSIGNED`, so the storage no longer
+                // bounds the cap — the ceiling does, here, before the row
+                // is written. A template's cap reaches a task's step
+                // budget untouched, so a value above the ceiling would
+                // run the task past the bound the ceiling exists to
+                // enforce.
+                $this->stepCap->assertValidWhenPresent($updateData['max_steps']);
             }
             if (array_key_exists('effort', $updateData)) {
                 $updateData['effort'] = $this->resolveEffort($updateData['effort'], $agent);
@@ -221,28 +227,6 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
         $this->effortService->assertLevel($effort, $agent);
 
         return $effort;
-    }
-
-    /**
-     * The cap a template stores, judged by the instance's ceiling.
-     *
-     * The column is `INT UNSIGNED`, so the storage no longer bounds it —
-     * the ceiling does, here, before the row is written. A template's cap
-     * reaches a task's step budget untouched, so a value above the ceiling
-     * would run the task past the bound the ceiling exists to enforce.
-     *
-     * A null cap is the column's own null: it means the template defers to
-     * the agent, and there is nothing to refuse.
-     *
-     * @throws AgentPatchValidationException when the value is not a cap this installation allows
-     */
-    private function assertMaxSteps(mixed $value): void
-    {
-        if ($value === null) {
-            return;
-        }
-
-        $this->stepCap->assertValid($value);
     }
 
     private function findTemplate(int $id, int $agentId): ?AgentPromptTemplate

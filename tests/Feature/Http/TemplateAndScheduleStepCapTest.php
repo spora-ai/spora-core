@@ -176,16 +176,18 @@ it('creating a schedule with a cap above the ceiling is a 422', function (): voi
 });
 
 it('updating a schedule with a cap above the ceiling is a 422', function (): void {
-    [, $agentId, $authMiddleware] = stepCapHttpOwner();
+    [$userId, $agentId, $authMiddleware] = stepCapHttpOwner();
     [, $runController] = stepCapHttpControllers();
 
     $run = ScheduledRun::create([
-        'agent_id'       => $agentId,
-        'raw_prompt'     => 'Summarize the inbox',
+        'agent_id'        => $agentId,
+        'raw_prompt'      => 'Summarize the inbox',
         'cron_expression' => '0 7 * * *',
-        'timezone'       => 'UTC',
-        'is_active'      => true,
-        'user_id'        => 1,
+        'timezone'        => 'UTC',
+        'is_active'       => true,
+        // The real owner: the column carries a foreign key, and SQLite
+        // does not enforce it while MySQL and MariaDB do.
+        'user_id'         => $userId,
     ]);
 
     $request = jsonRequest('PUT', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}", [

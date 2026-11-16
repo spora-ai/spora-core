@@ -105,7 +105,16 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             throw new AgentNotFoundException('Agent not found');
         }
 
-        $this->assertMaxSteps($data['max_steps_override'] ?? null);
+        // The column is `INT UNSIGNED`, so the storage no longer bounds the
+        // override — the ceiling does, here, before the row is written. A
+        // run's override reaches a task's step budget untouched, so a
+        // value above the ceiling would run the task past the bound the
+        // ceiling exists to enforce.
+        //
+        // The value is checked as it was sent: the cast that follows would
+        // turn "100garbage" into 100, and a cap that was never a cap would
+        // be stored as one.
+        $this->stepCap->assertValidWhenPresent($data['max_steps_override'] ?? null);
 
         $isRecurring = !empty($data['cron_expression']);
         $timezone   = $data['timezone'] ?? 'UTC';
@@ -198,7 +207,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
         if ($updateData !== []) {
             if (array_key_exists('max_steps_override', $updateData)) {
-                $this->assertMaxSteps($updateData['max_steps_override']);
+                $this->stepCap->assertValidWhenPresent($updateData['max_steps_override']);
             }
 
             $this->normalizeUpdateFields($updateData);
@@ -224,32 +233,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         }
 
         return ['scheduled_run' => $this->resource($run)];
-    }
-
-    /**
-     * The cap a run stores, judged by the instance's ceiling.
-     *
-     * The column is `INT UNSIGNED`, so the storage no longer bounds it —
-     * the ceiling does, here, before the row is written. A run's override
-     * reaches a task's step budget untouched, so a value above the ceiling
-     * would run the task past the bound the ceiling exists to enforce.
-     *
-     * The value is checked as it was sent: the cast that follows would
-     * turn "100garbage" into 100, and a cap that was never a cap would be
-     * stored as one.
-     *
-     * A null override is the column's own null: it means the run defers to
-     * the template, and there is nothing to refuse.
-     *
-     * @throws AgentPatchValidationException when the value is not a cap this installation allows
-     */
-    private function assertMaxSteps(mixed $value): void
-    {
-        if ($value === null) {
-            return;
-        }
-
-        $this->stepCap->assertValid($value);
     }
 
     /**
