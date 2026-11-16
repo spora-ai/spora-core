@@ -113,6 +113,10 @@ test('a child that failed is logged with the code it returned', function (): voi
 });
 
 test('a child that was killed is logged with the signal, not an exit code', function (): void {
+    if (!function_exists('posix_kill')) {
+        $this->markTestSkipped('posix_kill() requires ext-posix.');
+    }
+
     // The child closes its stdout and then kills itself. The status read
     // before the kill says nothing; read once the child is reaped, it
     // carries the signal and no exit code — which is what tells a killed
