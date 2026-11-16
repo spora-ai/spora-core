@@ -182,7 +182,9 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver implements D
             $body['tool_choice'] = 'auto';
         }
 
-        $effort = $this->reasoning->effort($request, $this->effortLevels());
+        $effort = $this->effortSupported()
+            ? $this->reasoning->effort($request, $this->effortLevels())
+            : null;
         if ($effort !== null) {
             $body['reasoning_effort'] = $effort;
         }

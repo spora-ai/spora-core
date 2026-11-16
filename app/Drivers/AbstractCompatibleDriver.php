@@ -132,6 +132,19 @@ abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriver
         return $this->effortLevels()[$effort] ?? null;
     }
 
+    /**
+     * Whether the endpoint takes a reasoning effort at all.
+     *
+     * The operator's toggle says the endpoint has no effort parameter, so
+     * nothing is sent — not even a driver's own escape hatch. A parameter
+     * the endpoint does not accept is refused by the provider, so sending
+     * one would break the request rather than save it.
+     */
+    protected function effortSupported(): bool
+    {
+        return $this->supportsEffort !== false;
+    }
+
     /** @return list<class-string> */
     public static function getDefaultTools(): array
     {

@@ -66,7 +66,7 @@ function openAITestTools(): array
  *
  * @return array<string, mixed>
  */
-function captureOpenAIBody(string $model, LLMRequest $request, array $effortLevels = []): array
+function captureOpenAIBody(string $model, LLMRequest $request, array $effortLevels = [], ?bool $supportsEffort = null): array
 {
     $captured = [];
 
@@ -85,7 +85,10 @@ function captureOpenAIBody(string $model, LLMRequest $request, array $effortLeve
         model: $model,
         baseUrl: 'https://api.openai.com/v1',
         httpClient: $client,
-        options: new OpenAIDriverOptions(configuredEffortLevels: $effortLevels),
+        options: new OpenAIDriverOptions(
+            configuredEffortLevels: $effortLevels,
+            supportsEffort: $supportsEffort,
+        ),
     ))->complete($request);
 
     return $captured;
@@ -426,6 +429,16 @@ test('the none escape hatch survives a level list that does not name none', func
     $body = captureOpenAIBody('gpt-5.5', makeToolRequest(openAITestTools()), ['low', 'medium', 'high']);
 
     expect($body['reasoning_effort'])->toBe('none');
+});
+
+test('the capability off sends no reasoning_effort, not even the escape hatch', function (): void {
+    // The operator's toggle says the endpoint has no effort parameter at
+    // all, so nothing is sent. A parameter the endpoint does not accept is
+    // refused by the provider — sending one would break the request rather
+    // than save it.
+    $body = captureOpenAIBody('gpt-5.5', makeToolRequest(openAITestTools()), [], false);
+
+    expect($body)->not->toHaveKey('reasoning_effort');
 });
 
 test('no tools and no effort send no reasoning_effort', function (): void {
