@@ -213,12 +213,12 @@ final class AuthWorkflow
 
         return new JsonResponse(
             ['data' => ['user' => [
-                'id'         => $user['id'],
-                'email'      => $user['email'],
-                'name'       => $user['name'],
-                'roles'      => $user['roles'] ?? [],
-                'registered' => $registered,
-                'is_admin'   => in_array('ADMIN', $user['roles'] ?? [], true),
+                'id'              => $user['id'],
+                'email'           => $user['email'],
+                'name'            => $user['name'],
+                'roles'           => $user['roles'] ?? [],
+                'registered'      => $registered,
+                'is_admin'        => in_array('ADMIN', $user['roles'] ?? [], true),
                 // The SPA restores its session from this payload, so a picture
                 // left out here is one the user believes they uploaded.
                 'profile_picture' => $user['profile_picture'] ?? null,

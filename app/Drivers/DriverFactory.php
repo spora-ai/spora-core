@@ -66,6 +66,12 @@ class DriverFactory
 
     /**
      * The driver a configuration names, from its stored settings.
+     *
+     * The stored path is deliberately not registry-gated: a configuration
+     * saved while its driver was registered keeps working after the
+     * registry moves on, and a row written before the gate existed still
+     * names the class it was saved with. The gate guards the save path,
+     * where the class comes from a request.
      */
     public function makeDriverFromConfig(LLMDriverConfiguration $config): LLMDriverInterface
     {

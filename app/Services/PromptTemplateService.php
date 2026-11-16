@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Http\Exceptions\AgentPatchValidationException;
 use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
@@ -25,11 +26,17 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
         private readonly EffortService $effortService,
         ?PrincipalService $principalService = null,
         ?PrincipalResolver $principalResolver = null,
+        ?AgentStepCap $stepCap = null,
     ) {
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+        // A cap this installation does not allow is refused whatever the
+        // caller's wiring: the fallback answers with the default ceiling
+        // rather than with no ceiling at all.
+        $this->stepCap = $stepCap ?? new AgentStepCap();
     }
     private readonly PrincipalResolver $principalResolver;
+    private readonly AgentStepCap $stepCap;
     private const DATE_FORMAT = 'Y-m-d H:i:s';
 
     public function getTemplatesForAgent(int $agentId, int $userId): ?array
@@ -47,12 +54,20 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
         return $templates->all();
     }
 
+    /**
+     * @param array<string, mixed> $data
+     * @throws AgentNotFoundException when the agent does not exist or the caller cannot write it
+     * @throws AgentPatchValidationException when the template names a cap this installation does not allow
+     * @throws EffortValidationException when the effort is not a level the agent's driver offers
+     */
     public function createTemplate(int $agentId, int $userId, array $data): array
     {
         $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_WRITE);
         if ($agent === null) {
             throw new AgentNotFoundException('Agent not found');
         }
+
+        $this->assertMaxSteps($data['max_steps'] ?? null);
 
         $id = Capsule::table('agent_prompt_templates')->insertGetId([
             'agent_id'         => $agentId,
@@ -87,6 +102,11 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
         return ['template' => $this->resource($template)];
     }
 
+    /**
+     * @param array<string, mixed> $data
+     * @throws AgentPatchValidationException when the template names a cap this installation does not allow
+     * @throws EffortValidationException when the effort is not a level the agent's driver offers
+     */
     public function updateTemplate(int $templateId, int $agentId, int $userId, array $data): ?array
     {
         $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_WRITE);
@@ -103,6 +123,9 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
         $updateData = array_intersect_key($data, array_flip($allowed));
 
         if ($updateData !== []) {
+            if (array_key_exists('max_steps', $updateData)) {
+                $this->assertMaxSteps($updateData['max_steps']);
+            }
             if (array_key_exists('effort', $updateData)) {
                 $updateData['effort'] = $this->resolveEffort($updateData['effort'], $agent);
             }
@@ -198,6 +221,28 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
         $this->effortService->assertLevel($effort, $agent);
 
         return $effort;
+    }
+
+    /**
+     * The cap a template stores, judged by the instance's ceiling.
+     *
+     * The column is `INT UNSIGNED`, so the storage no longer bounds it —
+     * the ceiling does, here, before the row is written. A template's cap
+     * reaches a task's step budget untouched, so a value above the ceiling
+     * would run the task past the bound the ceiling exists to enforce.
+     *
+     * A null cap is the column's own null: it means the template defers to
+     * the agent, and there is nothing to refuse.
+     *
+     * @throws AgentPatchValidationException when the value is not a cap this installation allows
+     */
+    private function assertMaxSteps(mixed $value): void
+    {
+        if ($value === null) {
+            return;
+        }
+
+        $this->stepCap->assertValid($value);
     }
 
     private function findTemplate(int $id, int $agentId): ?AgentPromptTemplate

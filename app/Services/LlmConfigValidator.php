@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Drivers\DriverFactory;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\LLMDriverConfiguration;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -133,11 +134,16 @@ final class LlmConfigValidator
         $rawSettings = $body['settings'] ?? null;
         $settings = is_array($rawSettings) ? $rawSettings : [];
         $driverClass = trim((string) ($body['driver_class'] ?? ''));
-        $validationError = $this->schemaValidator->validateSettings(
-            $driverClass,
-            $settings,
-            $this->schemaValidator->getSchemaForDriver($driverClass),
-        );
+
+        try {
+            $validationError = $this->schemaValidator->validateSettings(
+                $driverClass,
+                $settings,
+                $this->schemaValidator->getSchemaForDriver($driverClass),
+            );
+        } catch (EffortValidationException $e) {
+            return $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         if ($validationError === null) {
             return null;
@@ -287,7 +293,13 @@ final class LlmConfigValidator
         $schema = $this->schemaValidator->getSchemaForDriver($config->driver_class);
         $existing = $this->service->decodeSettings($config->driver_class, $config->getRawOriginal('settings') ?? '');
         $merged = array_merge($existing, $body['settings']);
-        $validationError = $this->schemaValidator->validateSettings($config->driver_class, $merged, $schema);
+
+        try {
+            $validationError = $this->schemaValidator->validateSettings($config->driver_class, $merged, $schema);
+        } catch (EffortValidationException $e) {
+            return $this->error($e->errorCode(), $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
         if ($validationError === null) {
             return null;
         }

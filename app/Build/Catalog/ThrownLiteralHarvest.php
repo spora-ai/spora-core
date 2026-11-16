@@ -33,6 +33,23 @@ final class ThrownLiteralHarvest implements Harvest
     ];
 
     /**
+     * Files outside those directories whose thrown messages reach an
+     * operator.
+     *
+     * The effort level set refuses a level name the operator typed, so its
+     * refusals are operator-facing. It sits beside the provider drivers,
+     * whose diagnostics are not: a rate limit and a provider's error body
+     * are not catalogue copy, so `app/Drivers` is not a harvested
+     * directory — and the level set is the one file in it that answers an
+     * operator rather than a provider.
+     *
+     * @var list<string>
+     */
+    private const THROWN_MESSAGE_FILES = [
+        'Drivers/EffortLevelSet.php',
+    ];
+
+    /**
      * Messages that are not operator-facing even though they are thrown.
      *
      * A hand-kept list is what this design refuses elsewhere, and rightly —
@@ -70,6 +87,18 @@ final class ThrownLiteralHarvest implements Harvest
                     }
                     $found[] = ['message' => $message, 'locator' => $this->source->relative($file) . ':' . $line];
                 }
+            }
+        }
+
+        foreach (self::THROWN_MESSAGE_FILES as $file) {
+            $path = $this->source->appDir() . '/' . $file;
+
+            if (!is_file($path)) {
+                continue;
+            }
+
+            foreach ($this->thrownMessageLiteralsIn((string) file_get_contents($path)) as $line => $message) {
+                $found[] = ['message' => $message, 'locator' => $this->source->relative($path) . ':' . $line];
             }
         }
 

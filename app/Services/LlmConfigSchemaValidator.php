@@ -11,6 +11,7 @@ use Spora\Drivers\EffortAwareDriverInterface;
 use Spora\Drivers\EffortLevelSet;
 use Spora\Drivers\Exceptions\DriverClassNotFoundException;
 use Spora\Drivers\LLMDriverInterface;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -111,8 +112,14 @@ final class LlmConfigSchemaValidator
     /**
      * The reason the settings cannot be accepted, or null.
      *
+     * The effort refusals are thrown rather than returned: the message
+     * reaches the operator through the error envelope, and a message that
+     * only ever existed as a return value is never harvested into the
+     * catalogue — so it would stay English on every German install.
+     *
      * @param array<string, mixed> $settings
      * @param list<array> $schema
+     * @throws EffortValidationException when the effort the configuration names cannot be accepted
      */
     public function validateSettings(string $driverClass, array $settings, array $schema): ?string
     {
@@ -124,13 +131,11 @@ final class LlmConfigSchemaValidator
             }
         }
 
-        $levelsError = $this->validateEffortLevels($settings);
+        $this->validateEffortLevels($settings);
 
-        if ($levelsError !== null) {
-            return $levelsError;
-        }
+        $this->assertEffortIsOffered($this->driverFor($driverClass, $settings), $settings);
 
-        return $this->effortMembershipError($this->driverFor($driverClass, $settings), $settings);
+        return null;
     }
 
     /**
@@ -183,7 +188,7 @@ final class LlmConfigSchemaValidator
     }
 
     /**
-     * The reason the reasoning-effort default cannot be accepted, or null.
+     * The reasoning-effort default the configuration cannot carry.
      *
      * The value is checked as it was given, not trimmed: a level name
      * cannot carry whitespace, and the value that is checked is the value
@@ -191,22 +196,40 @@ final class LlmConfigSchemaValidator
      * not, and the saved default would silently lose to the model's own.
      *
      * @param array<string, mixed> $settings
+     * @throws EffortValidationException when the level is not one the configuration offers
      */
-    private function effortMembershipError(?LLMDriverInterface $driver, array $settings): ?string
+    private function assertEffortIsOffered(?LLMDriverInterface $driver, array $settings): void
     {
         $effort = (string) ($settings['effort'] ?? '');
 
         if ($effort === '') {
-            return null;
+            return;
         }
 
         $levels = $this->levelNames($driver, $settings);
 
         if ($levels === null || in_array($effort, $levels, true)) {
-            return null;
+            return;
         }
 
-        return $this->unsupportedEffortMessage($effort, $levels);
+        if ($levels === []) {
+            throw new EffortValidationException(
+                sprintf(
+                    'effort "%s" is not offered by this LLM configuration: it accepts no reasoning-effort level.',
+                    $effort,
+                ),
+                EffortValidationException::CODE_UNSUPPORTED,
+            );
+        }
+
+        throw new EffortValidationException(
+            sprintf(
+                'effort "%s" is not offered by this LLM configuration. Supported levels: %s.',
+                $effort,
+                implode(', ', $levels),
+            ),
+            EffortValidationException::CODE_UNSUPPORTED,
+        );
     }
 
     /**
@@ -233,44 +256,30 @@ final class LlmConfigSchemaValidator
     }
 
     /**
-     * The reason the level list cannot be accepted, or null.
+     * The level list the configuration cannot carry.
      *
      * @param array<string, mixed> $settings
+     * @throws EffortValidationException when the level list is malformed
      */
-    private function validateEffortLevels(array $settings): ?string
+    private function validateEffortLevels(array $settings): void
     {
         $raw = $settings['effort_levels'] ?? '';
 
         if (!is_string($raw)) {
-            return "Field 'Effort levels' has an invalid value.";
+            throw new EffortValidationException(
+                'Field \'Effort levels\' has an invalid value.',
+                EffortValidationException::CODE_MALFORMED,
+            );
         }
 
         try {
             EffortLevelSet::fromSetting($raw);
         } catch (InvalidArgumentException $e) {
-            return $e->getMessage();
-        }
-
-        return null;
-    }
-
-    /**
-     * @param list<string> $levels
-     */
-    private function unsupportedEffortMessage(string $effort, array $levels): string
-    {
-        if ($levels === []) {
-            return sprintf(
-                'effort "%s" is not offered by this LLM configuration: it accepts no reasoning-effort level.',
-                $effort,
+            throw new EffortValidationException(
+                $e->getMessage(),
+                EffortValidationException::CODE_MALFORMED,
             );
         }
-
-        return sprintf(
-            'effort "%s" is not offered by this LLM configuration. Supported levels: %s.',
-            $effort,
-            implode(', ', $levels),
-        );
     }
 
     /**

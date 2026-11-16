@@ -7,6 +7,7 @@ use Spora\Core\SecurityManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\LlmConfigSchemaValidator;
 use Spora\Services\LLMConfigService;
@@ -40,17 +41,27 @@ function effortValidator(): LlmConfigSchemaValidator
 }
 
 /**
+ * The refusal the validator answers with, or null when it accepts.
+ *
+ * The effort refusals are thrown, not returned — the message reaches the
+ * operator through the error envelope, and a message that only ever
+ * existed as a return value would never reach the catalogue.
+ *
  * @param array<string, mixed> $settings
  */
 function effortValidatorError(array $settings): ?string
 {
     $validator = effortValidator();
 
-    return $validator->validateSettings(
-        OpenAICompatibleDriver::class,
-        $settings,
-        $validator->getSchemaForDriver(OpenAICompatibleDriver::class),
-    );
+    try {
+        return $validator->validateSettings(
+            OpenAICompatibleDriver::class,
+            $settings,
+            $validator->getSchemaForDriver(OpenAICompatibleDriver::class),
+        );
+    } catch (EffortValidationException $e) {
+        return $e->getMessage();
+    }
 }
 
 test('an effort the level set does not offer is refused, naming the levels it does offer', function (): void {
@@ -80,14 +91,21 @@ test('an effort outside the model\'s own set is refused when no list is configur
     // The Anthropic driver takes no `none` and no `minimal`.
     $validator = effortValidator();
 
-    $error = $validator->validateSettings(
-        AnthropicCompatibleDriver::class,
-        ['effort' => 'none'],
-        $validator->getSchemaForDriver(AnthropicCompatibleDriver::class),
-    );
+    try {
+        $validator->validateSettings(
+            AnthropicCompatibleDriver::class,
+            ['effort' => 'none'],
+            $validator->getSchemaForDriver(AnthropicCompatibleDriver::class),
+        );
+    } catch (EffortValidationException $e) {
+        expect($e->getMessage())
+            ->toContain('effort "none" is not offered by this LLM configuration.')
+            ->and($e->getMessage())->toContain('Supported levels: low, medium, high, xhigh, max');
 
-    expect($error)->toContain('effort "none" is not offered by this LLM configuration.')
-        ->and($error)->toContain('Supported levels: low, medium, high, xhigh, max');
+        return;
+    }
+
+    $this->fail('Expected an EffortValidationException.');
 });
 
 test('a malformed level list is refused with the reason', function (): void {
