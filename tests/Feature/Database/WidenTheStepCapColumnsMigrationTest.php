@@ -58,16 +58,21 @@ function stepCapColumns(): array
     ];
 }
 
-test('0104 widens every column that holds a cap', function (): void {
+test('0104 widens every column that holds a cap to a normal integer', function (): void {
     if (TestDatabaseFactory::driver() === 'sqlite') {
         $this->markTestSkipped('SQLite stores every integer as an INTEGER.');
     }
 
     foreach (stepCapColumns() as [$table, $column]) {
         $reported = stepCapColumn($table, $column);
+        $type = strtolower((string) $reported['type']);
 
+        // Not a TINYINT and not a SMALLINT: the storage is not what
+        // decides the ceiling.
         expect($reported)->not->toBeNull()
-            ->and(strtolower((string) $reported['type']))->toContain('smallint');
+            ->and($type)->toContain('int')
+            ->and($type)->not->toContain('tiny')
+            ->and($type)->not->toContain('small');
     }
 });
 
@@ -110,5 +115,7 @@ test('the ceiling the application allows fits the column', function (): void {
     // The ceiling is what an operator may raise the cap to, and the column
     // is what holds the cap: a ceiling above the column's range would
     // accept a cap the database refuses to store.
-    expect(AgentStepCap::COLUMN_MAX)->toBe(65535);
+    $stepCap = new AgentStepCap();
+
+    expect($stepCap->limit())->toBeLessThanOrEqual(4294967295);
 });

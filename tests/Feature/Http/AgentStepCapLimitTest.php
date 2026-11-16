@@ -118,18 +118,16 @@ test('the ceiling follows the setting when it is set', function (): void {
     expect($stepCap->limit())->toBe(50);
 });
 
-test('the ceiling never exceeds what the column can hold', function (): void {
-    // The cap is stored in `agents.max_steps`, copied into
-    // `tasks.max_steps` and carried by the template and schedule columns.
-    // A ceiling above the column's range would accept a cap the database
-    // refuses to store: the write fails on MySQL and succeeds on SQLite,
-    // which stores every integer it is given.
+test('the ceiling never exceeds the bound an operator may set', function (): void {
+    // The bound is a policy decision, not the column's type: a cap of a
+    // hundred thousand steps is a task that runs for days. A ceiling above
+    // the bound would accept caps no operator means.
     $stepCap = new AgentStepCap(new Config(['SPORA_MAX_STEPS' => 1000000]));
 
-    expect($stepCap->limit())->toBe(AgentStepCap::COLUMN_MAX);
+    expect($stepCap->limit())->toBe(AgentStepCap::MAX_LIMIT);
 });
 
-test('a cap the column can hold is accepted', function (): void {
+test('a cap the bound allows is accepted', function (): void {
     $stepCap = new AgentStepCap(new Config(['SPORA_MAX_STEPS' => 1000000]));
 
     $stepCap->assertValid(400);
@@ -137,11 +135,11 @@ test('a cap the column can hold is accepted', function (): void {
     expect(true)->toBeTrue();
 });
 
-test('a cap above the column is refused, and the message names the bound', function (): void {
+test('a cap above the bound is refused, and the message names it', function (): void {
     $stepCap = new AgentStepCap(new Config(['SPORA_MAX_STEPS' => 1000000]));
 
-    expect(fn() => $stepCap->assertValid(AgentStepCap::COLUMN_MAX + 1))
-        ->toThrow(AgentPatchValidationException::class, 'between 1 and 65535');
+    expect(fn() => $stepCap->assertValid(AgentStepCap::MAX_LIMIT + 1))
+        ->toThrow(AgentPatchValidationException::class, 'between 1 and 100000');
 });
 
 test('a new agent carries a hundred steps', function (): void {

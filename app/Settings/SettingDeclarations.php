@@ -6,6 +6,7 @@ namespace Spora\Settings;
 
 use Spora\Core\Paths;
 use Spora\Core\RequestOrigin;
+use Spora\Services\AgentStepCap;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\PluginCatalogService;
 
@@ -86,10 +87,10 @@ final class SettingDeclarations
                 description: 'The largest step cap an agent may carry. The cap is what bounds the agent loop: a tick that '
                     . 'finishes a tool batch hands the task straight back to the loop, so an agent whose model keeps calling '
                     . 'tools would otherwise recurse until the worker exhausted its memory. Raise it for long-running agentic '
-                    . 'workflows; the default is 100 steps per agent. The cap is stored in a SMALLINT, so the ceiling cannot '
-                    . 'go above 65535.',
+                    . 'workflows; the default is 100 steps per agent.',
                 validation: self::VALIDATION_UINT,
                 min: 1,
+                max: AgentStepCap::MAX_LIMIT,
             ),
             new SettingDefinition(
                 key: 'SPORA_APP_NAME',

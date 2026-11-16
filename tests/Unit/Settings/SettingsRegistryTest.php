@@ -210,3 +210,55 @@ it('lists every secret-marked setting as a secret', function (): void {
             static fn(SettingDefinition $d): bool => $d->secret,
         )));
 });
+
+/**
+ * A bound a definition declares holds every layer the value can come from.
+ *
+ * The environment, `config.php` and the stored row are three ways to say
+ * the same thing, and a value written before a bound existed must not slip
+ * past it — the ceiling is only a bound if it holds everywhere.
+ */
+it('holds a value to the ceiling its definition declares', function (): void {
+    $registry = settingsRegistryFixture();
+
+    $bounded = new SettingDefinition(
+        key: 'SPORA_TEST_BOUNDED',
+        label: 'Bounded',
+        type: SettingDefinition::TYPE_NUMBER,
+        default: 10,
+        min: 1,
+        max: 100,
+    );
+
+    expect($registry->clamp($bounded, 50))->toBe(50)
+        ->and($registry->clamp($bounded, 1000))->toBe(100)
+        ->and($registry->clamp($bounded, 0))->toBe(1);
+});
+
+it('holds a value to the floor its definition declares', function (): void {
+    $registry = settingsRegistryFixture();
+
+    $bounded = new SettingDefinition(
+        key: 'SPORA_TEST_FLOORED',
+        label: 'Floored',
+        type: SettingDefinition::TYPE_NUMBER,
+        default: 10,
+        min: 1,
+    );
+
+    expect($registry->clamp($bounded, 50))->toBe(50)
+        ->and($registry->clamp($bounded, 0))->toBe(1);
+});
+
+it('leaves a value alone when its definition declares no bounds', function (): void {
+    $registry = settingsRegistryFixture();
+
+    $unbounded = new SettingDefinition(
+        key: 'SPORA_TEST_UNBOUNDED',
+        label: 'Unbounded',
+        type: SettingDefinition::TYPE_TEXT,
+        default: '',
+    );
+
+    expect($registry->clamp($unbounded, 'a lot'))->toBe('a lot');
+});

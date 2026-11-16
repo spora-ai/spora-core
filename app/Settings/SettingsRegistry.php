@@ -259,17 +259,31 @@ final class SettingsRegistry
     /**
      * Hold a value to the bounds its definition declares.
      *
-     * The floor is applied to every layer — the environment, `config.php` and
-     * the stored row — so a value written before the floor existed cannot
+     * The bounds are applied to every layer — the environment, `config.php`
+     * and the stored row — so a value written before a bound existed cannot
      * slip past it.
      */
     public function clamp(SettingDefinition $d, mixed $value): mixed
     {
-        if ($d->min === null || !is_numeric($value)) {
+        if (!is_numeric($value)) {
             return $value;
         }
 
-        return max($d->min, (int) $value);
+        if ($d->min === null && $d->max === null) {
+            return $value;
+        }
+
+        $bounded = (int) $value;
+
+        if ($d->min !== null) {
+            $bounded = max($d->min, $bounded);
+        }
+
+        if ($d->max !== null) {
+            $bounded = min($d->max, $bounded);
+        }
+
+        return $bounded;
     }
 
     /**
