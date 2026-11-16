@@ -12,6 +12,7 @@ use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Http\TaskEffortRequestValidator;
 use Spora\Models\Task;
+use Spora\Services\AgentStepCap;
 use Spora\Services\ApiKeys\ApiKeyCallbackRecorder;
 use Spora\Services\ApiKeys\ApiKeyChatAccess;
 use Spora\Services\ApiKeys\ApiKeyChatProjection;
@@ -52,6 +53,7 @@ final class AgentApiChatController
         private readonly SsrfGuard $ssrf,
         private readonly Config $config,
         private readonly EffortService $effortService,
+        private readonly AgentStepCap $stepCap = new AgentStepCap(),
     ) {}
 
     #[OA\Get(path: '/api/v1/agent-api/chats', summary: "List this agent's chats", tags: ['Agent-api'])]
@@ -132,7 +134,7 @@ final class AgentApiChatController
             $context,
             $context->requireAgentId(),
             $prepared['text'],
-            $this->boundedInt($this->intField($body, 'max_steps'), 1, 100),
+            $this->boundedInt($this->intField($body, 'max_steps'), 1, $this->stepCap->limit()),
             $prepared['mediaIds'],
             $prepared['effort'],
         );

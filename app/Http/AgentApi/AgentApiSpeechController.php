@@ -312,7 +312,12 @@ final class AgentApiSpeechController
             // raises the ceiling for long-running workflows expects the
             // agent API to hand out the same cap the agent carries.
             'maxSteps'        => $this->boundedInt($this->intField($body, 'max_steps'), 1, $this->stepCap->limit()),
-            'additionalSteps' => $this->boundedInt($this->intField($body, 'additional_steps'), 1, $this->stepCap->limit()),
+            // The additional steps a continue may add are not the agent's
+            // cap: they are bounded by their own policy, and the service
+            // refuses anything above it. A bound the service does not
+            // share would turn a request that used to succeed into one
+            // that fails downstream.
+            'additionalSteps' => $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
             'effort'          => $effort,
         ];
     }
