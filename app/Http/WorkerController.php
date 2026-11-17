@@ -117,7 +117,7 @@ final class WorkerController
 
         try {
             // Reap orphans regardless of who's calling — the reaper only
-            // flips RUNNING tasks with expired leases, not caller-scoped state.
+            // touches tasks whose worker vanished, not caller-scoped state.
             $this->workerReaper->reapStaleTasks($buffer, $this->staleMinutes);
             $reaped = $this->extractReapedCount($buffer->fetch());
 

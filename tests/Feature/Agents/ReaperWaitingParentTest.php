@@ -26,9 +26,9 @@ use Symfony\Component\Console\Output\BufferedOutput;
  * answer the child is about to produce, and blame the parent for the
  * child's failure.
  *
- * The exclusion has to hold for the write as well as for the selection:
- * a child can arm its retry between the two, and the write is the one
- * that decides whether the parent is failed.
+ * The exclusion has to hold for the write: a child can arm its retry
+ * between the selection and the write, and the write is the one that
+ * decides whether the parent is failed.
  *
  * The sweep runs in two phases, and the order matters: the children are
  * reaped and their retries are armed before the parents are judged, so a
@@ -178,8 +178,8 @@ it('still reaps a parent whose child has no retry pending', function (): void {
 });
 
 it('does not reap a parent whose child arms its retry after the selection', function (): void {
-    // The exclusion has to hold for the write, not only for the selection:
-    // the child can arm its retry between the two, and a write that does
+    // The exclusion has to hold for the write: the child can arm its
+    // retry between the selection and the write, and a write that does
     // not carry the condition would fail the parent anyway.
     [$agentId, $userId] = waitingParentSeedAgent();
     $parent = waitingParentStaleParent($agentId, $userId);
