@@ -550,14 +550,10 @@ final class TickPhaseRunner
             ]);
         }
 
-        try {
-            $this->orchestrator->retryScheduler->scheduleAutoRetry($failedTask, $errorCode);
-        } catch (Throwable $e) {
-            $this->logger?->warning('Auto-retry scheduling failed', [
-                'task_id'   => $failedTask->id,
-                'exception' => $e->getMessage(),
-            ]);
-        }
+        // The scheduler swallows its own failures and logs them — a retry
+        // that could not be armed must not fail the tick that reported
+        // the failure.
+        $this->orchestrator->retryScheduler->scheduleAutoRetry($failedTask, $errorCode);
     }
 
     private function handleToolCalls(Task $task, Agent $agent, array $toolCalls): void

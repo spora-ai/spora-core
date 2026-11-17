@@ -386,9 +386,13 @@ final class TaskTickController
      * Mirror TickPhaseRunner::notifyFailedAndScheduleRetry() so the
      * client-mode /tick path triggers the same downstream side-effects
      * (notification + auto-retry scheduling) as the server-mode daemon.
-     * Both `notifyTaskFailed` and `scheduleAutoRetry` swallow their own
-     * exceptions — the operator-facing `Task failed during /tick` log
-     * line above is the source of truth for the failure itself.
+     *
+     * The notification is isolated — a failed one must not stop the retry
+     * from being armed. The scheduler swallows its own failures and logs
+     * them, so a retry that could not be armed does not fail the tick
+     * that reported the failure; the operator-facing `Task failed during
+     * /tick` log line above is the source of truth for the failure
+     * itself.
      */
     private function notifyFailedAndScheduleRetry(Task $failedTask, string $errorCode): void
     {
@@ -401,14 +405,7 @@ final class TaskTickController
             ]);
         }
 
-        try {
-            $this->retryScheduler->scheduleAutoRetry($failedTask, $errorCode);
-        } catch (Throwable $e) {
-            $this->logger->warning('Auto-retry scheduling failed', [
-                'task_id'   => $failedTask->id,
-                'exception' => $e->getMessage(),
-            ]);
-        }
+        $this->retryScheduler->scheduleAutoRetry($failedTask, $errorCode);
     }
 
     private function notFoundResponse(): JsonResponse
