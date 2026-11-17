@@ -150,7 +150,10 @@ final class Task extends Model
         $raw = $this->getRawOriginal('retry_after');
 
         if ($raw instanceof DateTimeInterface) {
-            return Carbon::instance($raw)->utc();
+            // A model set in memory holds the instant; the column holds
+            // its UTC spelling. Normalising to that spelling here lets
+            // both go through the one parse below.
+            $raw = Carbon::instance($raw)->utc()->format('Y-m-d H:i:s');
         }
 
         if (!is_string($raw) || $raw === '') {

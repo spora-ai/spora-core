@@ -286,7 +286,7 @@ final class SubAgentService implements SubAgentServiceInterface
 
         return $expectedCount > 0
             && count($siblingIds) === $expectedCount
-            && $this->isSettled($child)
+            && ChildSettlement::isSettled($child)
             && $this->allSiblingsTerminal($siblingIds);
     }
 
@@ -297,40 +297,12 @@ final class SubAgentService implements SubAgentServiceInterface
     {
         foreach ($siblingIds as $siblingId) {
             $sibling = Task::find($siblingId);
-            if ($sibling === null || !$this->isSettled($sibling)) {
+            if ($sibling === null || !ChildSettlement::isSettled($sibling)) {
                 return false;
             }
         }
 
         return true;
-    }
-
-    /**
-     * Whether a child has settled for good.
-     *
-     * A child whose retry is pending has NOT settled. The retry runs the
-     * child again, and the parent's answer has to wait for that outcome —
-     * settling on the failure that armed the retry would import a failure
-     * the system is already about to retry, and the retry's result would
-     * then land on a parent that is no longer waiting.
-     */
-    private function isSettled(Task $child): bool
-    {
-        return in_array($child->status, ['COMPLETED', 'FAILED'], true)
-            && !$this->hasPendingRetry($child);
-    }
-
-    /**
-     * Whether the child carries a retry that has not run yet.
-     *
-     * The scheduler arms the retry on the failed row itself, so
-     * `retry_after` is the marker. It is cleared when the retry is claimed
-     * and when the operator cancels the chain — both of which settle the
-     * child again.
-     */
-    private function hasPendingRetry(Task $child): bool
-    {
-        return $child->retry_after !== null;
     }
 
     private function recordSpawnedChild(Task $parent, int $childId): void
