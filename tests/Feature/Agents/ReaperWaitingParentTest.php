@@ -141,9 +141,9 @@ it('still reaps a parent whose child has no retry pending', function (): void {
 });
 
 it('does not reap a parent whose child arms its retry after the selection', function (): void {
-    // The exclusion has to be on the write, not only on the selection: the
-    // child can arm its retry between the two, and a write that does not
-    // carry the condition would fail the parent anyway.
+    // The exclusion has to hold for the write, not only for the selection:
+    // the child can arm its retry between the two, and a write that does
+    // not carry the condition would fail the parent anyway.
     [$agentId, $userId] = waitingParentSeedAgent();
     $parent = waitingParentStaleParent($agentId, $userId);
     $child  = waitingParentChild($agentId, $userId, (int) $parent->id, null);
@@ -181,4 +181,40 @@ it('does not reap a parent whose child arms its retry after the selection', func
     }
 
     expect($parent->refresh()->status)->toBe('AWAITING_SUB_AGENTS');
+});
+
+it('never reads the tasks table from inside the write that flips it', function (): void {
+    // MySQL refuses an UPDATE whose predicate selects from the table the
+    // UPDATE writes ("You can't specify target table 'tasks' for update in
+    // FROM clause"), and the way around it — a derived table the optimizer
+    // is free to merge back into that self-reference — is a promise no
+    // engine keeps. The guard is a separate read, so the write itself
+    // names the row and nothing else.
+    [$agentId, $userId] = waitingParentSeedAgent();
+    $parent = waitingParentStaleParent($agentId, $userId);
+    waitingParentChild($agentId, $userId, (int) $parent->id, null);
+
+    $writes = [];
+    $connection = Capsule::connection();
+    $previousDispatcher = $connection->getEventDispatcher();
+    $dispatcher = new Dispatcher();
+    $connection->setEventDispatcher($dispatcher);
+    $dispatcher->listen(QueryExecuted::class, function (QueryExecuted $event) use (&$writes): void {
+        if (str_starts_with(strtolower(trim($event->sql)), 'update')) {
+            $writes[] = $event->sql;
+        }
+    });
+
+    try {
+        waitingParentReaper()->reapStaleTasks(new BufferedOutput(), 60);
+    } finally {
+        if ($previousDispatcher === null) {
+            $connection->unsetEventDispatcher();
+        } else {
+            $connection->setEventDispatcher($previousDispatcher);
+        }
+    }
+
+    expect($writes)->not->toBeEmpty()
+        ->and(strtolower(implode(' ', $writes)))->not->toContain('select');
 });

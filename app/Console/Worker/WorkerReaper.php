@@ -6,7 +6,6 @@ namespace Spora\Console\Worker;
 
 use DateTimeImmutable;
 use DateTimeZone;
-use Illuminate\Database\Eloquent\Builder;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\RetryScheduler;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
@@ -62,9 +61,10 @@ final class WorkerReaper
             return;
         }
 
-        // The flip is guarded by the same predicates the selection used.
-        // Two reapers may sweep at once — `--reap-only` deliberately skips
-        // the single-instance lock — and the loser of that race must not
+        // The flip carries the predicates that decide a row's fate: the
+        // status it was selected in and the chain marker. Two reapers may
+        // sweep at once — `--reap-only` deliberately skips the
+        // single-instance lock — and the loser of that race must not
         // flip a row the winner already flipped: that would burn an
         // attempt of the retry budget and send a second notification. The
         // rows this write actually matched are the ones that were reaped;
@@ -101,54 +101,15 @@ final class WorkerReaper
      */
     private function selectStaleCandidates(DateTimeImmutable $now, DateTimeImmutable $threshold): array
     {
-        return $this->excludeWaitingParent(
-            Task::whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
-                ->where(function ($q) use ($now): void {
-                    $q->whereNull('lease_expires_at')
-                        ->orWhere('lease_expires_at', '<=', $now);
-                })
-                ->where('updated_at', '<=', $threshold)
-                ->whereNull('retry_of_task_id'),
-        )
+        return Task::whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
+            ->where(function ($q) use ($now): void {
+                $q->whereNull('lease_expires_at')
+                    ->orWhere('lease_expires_at', '<=', $now);
+            })
+            ->where('updated_at', '<=', $threshold)
+            ->whereNull('retry_of_task_id')
             ->pluck('id')
             ->all();
-    }
-
-    /**
-     * Keep a parent that waits on a child's pending retry out of the sweep.
-     *
-     * A parent in AWAITING_SUB_AGENTS holds no live lease while its child
-     * waits: the lease is only renewed inside a tick, and the parent is not
-     * ticking. So the sweep reaches a parent whose child is waiting for a
-     * retry — and failing that parent would take away the answer the retry
-     * is going to produce, and would blame the parent for a failure that is
-     * not its own.
-     *
-     * The child lookup is a derived table rather than a plain subquery:
-     * MySQL refuses a subquery on the table an UPDATE writes to ("You can't
-     * specify target table 'tasks' for update in FROM clause"), and a
-     * correlated derived table is materialised instead of merged, which is
-     * what makes the guarded write legal there. SQLite and MariaDB accept
-     * the same statement.
-     *
-     * @param int|null $parentId the row the guarded write names; the
-     *                           selection has no single row to name
-     */
-    private function excludeWaitingParent(Builder $query, ?int $parentId = null): Builder
-    {
-        $pendingChildren = Task::query()
-            ->select('parent_task_id')
-            ->whereNotNull('retry_after');
-
-        if ($parentId !== null) {
-            $pendingChildren->where('parent_task_id', $parentId);
-        }
-
-        return $query->whereNotExists(function ($sub) use ($pendingChildren): void {
-            $sub->selectRaw('1')
-                ->fromSub($pendingChildren, 'pending_child')
-                ->whereColumn('pending_child.parent_task_id', 'tasks.id');
-        });
     }
 
     /**
@@ -169,24 +130,11 @@ final class WorkerReaper
         $reaped = [];
 
         foreach ($candidateIds as $candidateId) {
-            // WORKER_DISCONNECTED is the reaper's marker for "the lease holder
-            // vanished" — browser tab closed, housekeeping request dropped,
-            // server worker SIGKILL'd. The legacy `ORPHANED` code is reserved in
-            // {@see ErrorClassifier::RETRYABLE_ERROR_CODES} for compatibility with
-            // any historical row that still carries it, but no code path emits
-            // it anymore.
-            $affected = $this->excludeWaitingParent(
-                Task::where('id', $candidateId)
-                    ->whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
-                    ->whereNull('retry_of_task_id'),
-                $candidateId,
-            )
-                ->update([
-                    'status'         => 'FAILED',
-                    'failure_reason' => "Task orphaned: lease expired and no progress for {$staleMinutes} minutes.",
-                    'error_code'     => 'WORKER_DISCONNECTED',
-                    'error_message'  => $this->disconnectMessage(),
-                ]);
+            if ($this->childWaitsOnPendingRetry($candidateId)) {
+                continue;
+            }
+
+            $affected = $this->flipToFailed($candidateId, ['RUNNING', 'AWAITING_SUB_AGENTS'], $staleMinutes);
 
             if ($affected > 0) {
                 $reaped[] = $candidateId;
@@ -194,6 +142,52 @@ final class WorkerReaper
         }
 
         return $reaped;
+    }
+
+    /**
+     * Keep a parent that waits on a child's pending retry out of the sweep.
+     *
+     * A parent in AWAITING_SUB_AGENTS holds no live lease while its child
+     * waits: the lease is only renewed inside a tick, and the parent is not
+     * ticking. So the sweep reaches a parent whose child is waiting for a
+     * retry — and failing that parent would take away the answer the retry
+     * is going to produce, and would blame the parent for a failure that is
+     * not its own.
+     *
+     * The child lookup is a read of its own: the flip's predicate must not
+     * read the table it writes, because MySQL refuses an UPDATE that
+     * selects from its own target table ("You can't specify target table
+     * 'tasks' for update in FROM clause"), and the way around it — a
+     * derived table the optimizer is free to merge back into that
+     * self-reference — is a promise no engine keeps.
+     */
+    private function childWaitsOnPendingRetry(int $parentId): bool
+    {
+        return Task::where('parent_task_id', $parentId)
+            ->whereNotNull('retry_after')
+            ->exists();
+    }
+
+    /**
+     * The one write the sweep makes.
+     *
+     * It names the row, the statuses the row may be in and the chain
+     * marker, and nothing else: it never selects from the table it
+     * writes.
+     *
+     * @param list<string> $statuses
+     */
+    private function flipToFailed(int $candidateId, array $statuses, int $staleMinutes): int
+    {
+        return Task::where('id', $candidateId)
+            ->whereIn('status', $statuses)
+            ->whereNull('retry_of_task_id')
+            ->update([
+                'status'         => 'FAILED',
+                'failure_reason' => "Task orphaned: lease expired and no progress for {$staleMinutes} minutes.",
+                'error_code'     => 'WORKER_DISCONNECTED',
+                'error_message'  => $this->disconnectMessage(),
+            ]);
     }
 
     /**
@@ -231,6 +225,10 @@ final class WorkerReaper
      */
     private function armRetries(array $orphanedIds): void
     {
+        if ($orphanedIds === []) {
+            return;
+        }
+
         if ($this->retryScheduler === null || $this->workerRuntimeMode === WorkerRuntimeMode::Client) {
             return;
         }
@@ -246,12 +244,12 @@ final class WorkerReaper
 
     private function reportReaped(int $updated, int $staleMinutes, OutputInterface $output): void
     {
-        $this->logger->warning('Reaped orphaned RUNNING tasks', [
+        $this->logger->warning('Reaped orphaned tasks', [
             'count' => $updated,
             'stale_minutes' => $staleMinutes,
         ]);
         $output->writeln(sprintf(
-            '<comment>Reaped %d orphaned RUNNING task(s) (idle > %d min).</comment>',
+            '<comment>Reaped %d orphaned task(s) (idle > %d min).</comment>',
             $updated,
             $staleMinutes,
         ));
