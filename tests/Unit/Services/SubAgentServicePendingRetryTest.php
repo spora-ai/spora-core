@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Mockery;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
 use Spora\Models\Task;

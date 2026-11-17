@@ -22,7 +22,7 @@ class StubTaskService implements TaskServiceInterface
     {
         return [
             'tasks' => [
-                ['id' => 1, 'agent_id' => 10, 'status' => 'COMPLETED', 'user_prompt' => 'P', 'final_response' => 'R', 'step_count' => 1, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null],
+                ['id' => 1, 'agent_id' => 10, 'status' => 'COMPLETED', 'user_prompt' => 'P', 'final_response' => 'R', 'step_count' => 1, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null, 'retry_after' => null],
             ],
             'meta' => ['current_page' => 1, 'last_page' => 1, 'per_page' => 20, 'total' => 1],
         ];
@@ -45,6 +45,7 @@ class StubTaskService implements TaskServiceInterface
             'max_steps' => $maxSteps ?? 10,
             'created_at' => null,
             'updated_at' => null,
+            'retry_after' => null,
         ];
     }
 
@@ -63,6 +64,7 @@ class StubTaskService implements TaskServiceInterface
             'max_steps' => 10,
             'created_at' => null,
             'updated_at' => null,
+            'retry_after' => null,
         ];
     }
 
@@ -81,6 +83,7 @@ class StubTaskService implements TaskServiceInterface
             'max_steps' => 10,
             'created_at' => null,
             'updated_at' => null,
+            'retry_after' => null,
             'tool_calls' => array_map(
                 static fn(string $providerCallId): array => [
                     'provider_call_id' => $providerCallId,
@@ -109,6 +112,7 @@ class StubTaskService implements TaskServiceInterface
             'max_steps' => 10,
             'created_at' => null,
             'updated_at' => null,
+            'retry_after' => null,
         ];
     }
 
@@ -127,6 +131,7 @@ class StubTaskService implements TaskServiceInterface
             'max_steps' => 10,
             'created_at' => null,
             'updated_at' => null,
+            'retry_after' => null,
         ];
     }
 
@@ -145,6 +150,7 @@ class StubTaskService implements TaskServiceInterface
             'max_steps' => 10,
             'created_at' => null,
             'updated_at' => null,
+            'retry_after' => null,
         ];
     }
 
@@ -164,6 +170,7 @@ class StubTaskService implements TaskServiceInterface
             'max_steps' => 10,
             'created_at' => null,
             'updated_at' => null,
+            'retry_after' => null,
         ];
     }
 
@@ -183,6 +190,7 @@ class StubTaskService implements TaskServiceInterface
                 'max_steps' => 10,
                 'created_at' => null,
                 'updated_at' => null,
+                'retry_after' => null,
                 'history' => [],
                 'totals' => [],
             ],
@@ -205,6 +213,7 @@ class StubTaskService implements TaskServiceInterface
             'max_steps' => 10,
             'created_at' => null,
             'updated_at' => null,
+            'retry_after' => null,
             'aborted_at' => '2026-08-08T12:00:00+00:00',
         ];
     }
@@ -224,6 +233,7 @@ class StubTaskService implements TaskServiceInterface
             'max_steps' => 10,
             'created_at' => null,
             'updated_at' => null,
+            'retry_after' => null,
             'aborted_at' => '2026-08-08T12:00:00+00:00',
         ];
     }
@@ -243,6 +253,7 @@ class StubTaskService implements TaskServiceInterface
             'max_steps' => 10,
             'created_at' => null,
             'updated_at' => null,
+            'retry_after' => null,
         ];
     }
 

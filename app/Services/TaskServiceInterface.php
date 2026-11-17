@@ -40,7 +40,7 @@ interface TaskServiceInterface
      *         retry_count?: int,
      *         max_retries?: int,
      *         retry_after_minutes?: int,
-     *         retry_after?: string
+     *         retry_after: string|null
      *     }>,
      *     meta: array{current_page: int, last_page: int, per_page: int, total: int}
      * }|array<array{
@@ -60,7 +60,7 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string
+     *     retry_after: string|null
      * }>
      */
     public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null, ?int $page = null, ?int $perPage = null, ?string $status = null): array;
@@ -83,7 +83,7 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string
+     *     retry_after: string|null
      * }
      */
     /**
@@ -113,7 +113,7 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string
+     *     retry_after: string|null
      * }|null
      */
     public function getTask(int $taskId, int $userId): ?array;
@@ -136,7 +136,7 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string,
+     *     retry_after: string|null,
      *     tool_calls: list<array<string, mixed>>,
      *     history: list<array{
      *         sequence: int,
@@ -171,7 +171,7 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string
+     *     retry_after: string|null
      * }
      */
     public function approveTask(int $taskId, int $userId, array $decisions): array;
@@ -216,7 +216,7 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string
+     *     retry_after: string|null
      * }
      */
     public function rejectTask(int $taskId, int $userId, string $reason): array;
@@ -239,7 +239,7 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string
+     *     retry_after: string|null
      * }
      */
     public function retryTask(int $taskId, int $userId): array;
@@ -262,7 +262,7 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string,
+     *     retry_after: string|null,
      *     aborted_at?: string|null
      * }
      */
@@ -298,7 +298,7 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string,
+     *     retry_after: string|null,
      *     aborted_at?: string|null
      * }
      */
@@ -326,7 +326,7 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string,
+     *     retry_after: string|null,
      *     aborted_at?: string|null
      * }
      */
@@ -363,7 +363,7 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string,
+     *     retry_after: string|null,
      *     aborted_at?: string|null
      * }
      */
