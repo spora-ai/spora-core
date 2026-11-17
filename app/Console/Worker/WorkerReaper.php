@@ -6,6 +6,7 @@ namespace Spora\Console\Worker;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use Illuminate\Database\Eloquent\Builder;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\RetryScheduler;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
@@ -23,6 +24,11 @@ use Throwable;
  * without this it would wait forever. In server-worker mode the reaper
  * also arms the retry the agent's policy asks for, because a task whose
  * worker vanished is exactly the case an auto-retry policy exists for.
+ *
+ * A parent that waits on a child's pending retry is not swept: the
+ * parent's lease is not renewed while it waits, so the sweep would reach
+ * it, and failing it would take away the answer the retry is about to
+ * produce.
  *
  * These orphans are produced when a worker process is killed ungracefully (OOM, server
  * reboot, SIGKILL) before it can clean up. The reaper runs once at startup and
@@ -95,15 +101,54 @@ final class WorkerReaper
      */
     private function selectStaleCandidates(DateTimeImmutable $now, DateTimeImmutable $threshold): array
     {
-        return Task::whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
-            ->where(function ($q) use ($now): void {
-                $q->whereNull('lease_expires_at')
-                    ->orWhere('lease_expires_at', '<=', $now);
-            })
-            ->where('updated_at', '<=', $threshold)
-            ->whereNull('retry_of_task_id')
+        return $this->excludeWaitingParent(
+            Task::whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
+                ->where(function ($q) use ($now): void {
+                    $q->whereNull('lease_expires_at')
+                        ->orWhere('lease_expires_at', '<=', $now);
+                })
+                ->where('updated_at', '<=', $threshold)
+                ->whereNull('retry_of_task_id'),
+        )
             ->pluck('id')
             ->all();
+    }
+
+    /**
+     * Keep a parent that waits on a child's pending retry out of the sweep.
+     *
+     * A parent in AWAITING_SUB_AGENTS holds no live lease while its child
+     * waits: the lease is only renewed inside a tick, and the parent is not
+     * ticking. So the sweep reaches a parent whose child is waiting for a
+     * retry — and failing that parent would take away the answer the retry
+     * is going to produce, and would blame the parent for a failure that is
+     * not its own.
+     *
+     * The child lookup is a derived table rather than a plain subquery:
+     * MySQL refuses a subquery on the table an UPDATE writes to ("You can't
+     * specify target table 'tasks' for update in FROM clause"), and a
+     * correlated derived table is materialised instead of merged, which is
+     * what makes the guarded write legal there. SQLite and MariaDB accept
+     * the same statement.
+     *
+     * @param int|null $parentId the row the guarded write names; the
+     *                           selection has no single row to name
+     */
+    private function excludeWaitingParent(Builder $query, ?int $parentId = null): Builder
+    {
+        $pendingChildren = Task::query()
+            ->select('parent_task_id')
+            ->whereNotNull('retry_after');
+
+        if ($parentId !== null) {
+            $pendingChildren->where('parent_task_id', $parentId);
+        }
+
+        return $query->whereNotExists(function ($sub) use ($pendingChildren): void {
+            $sub->selectRaw('1')
+                ->fromSub($pendingChildren, 'pending_child')
+                ->whereColumn('pending_child.parent_task_id', 'tasks.id');
+        });
     }
 
     /**
@@ -130,9 +175,12 @@ final class WorkerReaper
             // {@see ErrorClassifier::RETRYABLE_ERROR_CODES} for compatibility with
             // any historical row that still carries it, but no code path emits
             // it anymore.
-            $affected = Task::where('id', $candidateId)
-                ->whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
-                ->whereNull('retry_of_task_id')
+            $affected = $this->excludeWaitingParent(
+                Task::where('id', $candidateId)
+                    ->whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
+                    ->whereNull('retry_of_task_id'),
+                $candidateId,
+            )
                 ->update([
                     'status'         => 'FAILED',
                     'failure_reason' => "Task orphaned: lease expired and no progress for {$staleMinutes} minutes.",
