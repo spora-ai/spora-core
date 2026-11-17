@@ -447,3 +447,55 @@ it('does not reap an ancestor whose descendant still holds a lease', function ()
         ->and($parent->refresh()->status)->toBe('AWAITING_SUB_AGENTS')
         ->and($child->refresh()->status)->toBe('RUNNING');
 });
+
+it('does not reap an ancestor however deep the chain below it is', function (): void {
+    // Ten waiting levels and a pending retry at the bottom of them. The
+    // walk has to reach the bottom however deep the chain runs: a cap on
+    // how deep it looks would fail the top of the chain while the retry
+    // is still on its way.
+    [$agentId, $userId] = waitingParentSeedAgent();
+
+    $chain = [];
+    $childId = null;
+
+    for ($level = 0; $level < 10; $level++) {
+        $task = waitingParentStaleParent($agentId, $userId);
+        if ($childId !== null) {
+            Capsule::table('tasks')->where('id', $task->id)->update([
+                'parent_task_id' => $childId,
+            ]);
+        }
+        $chain[] = $task;
+        $childId = (int) $task->id;
+    }
+
+    // The bottom of the chain: a failed child with a retry on its way.
+    waitingParentChild($agentId, $userId, $childId, gmdate(WAITING_PARENT_DT, time() + 3600));
+
+    waitingParentReaper()->reapStaleTasks(new BufferedOutput(), 60);
+
+    foreach ($chain as $task) {
+        expect($task->refresh()->status)->toBe('AWAITING_SUB_AGENTS');
+    }
+});
+
+it('finishes the sweep on a row that is its own ancestor', function (): void {
+    // A broken tree: the row is its own child. The walk has to step over
+    // the row it has read already instead of following it around
+    // forever, and the sweep has to finish and recover the row.
+    [$agentId, $userId] = waitingParentSeedAgent();
+    $parent = waitingParentStaleParent($agentId, $userId);
+    Capsule::table('tasks')->where('id', $parent->id)->update([
+        'parent_task_id' => $parent->id,
+    ]);
+
+    $output = new BufferedOutput();
+
+    expect(fn() => waitingParentReaper()->reapStaleTasks($output, 60))
+        ->not()->toThrow(Throwable::class);
+
+    $fresh = $parent->refresh();
+
+    expect($fresh->status)->toBe('FAILED')
+        ->and((string) $fresh->error_code)->toBe('WORKER_DISCONNECTED');
+});

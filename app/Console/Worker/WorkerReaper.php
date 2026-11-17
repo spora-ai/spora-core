@@ -49,18 +49,6 @@ use Throwable;
  */
 final class WorkerReaper
 {
-    /**
-     * How deep the walk that asks "does this task still owe an answer?"
-     * descends.
-     *
-     * A sub-agent chain is a handful of levels deep — a conversation
-     * spawns a sub-agent, which spawns a sub-agent — and eight is far
-     * past what a run produces. The bound is also what keeps a malformed
-     * `parent_task_id` (a row that is its own ancestor) from turning the
-     * walk into an endless one.
-     */
-    private const MAX_OWES_DEPTH = 8;
-
     public function __construct(
         private readonly LoggerInterface $logger,
         private readonly NotificationService $notificationService,
@@ -245,6 +233,17 @@ final class WorkerReaper
      * out of the single period a parent's clock buys — so the walk asks
      * each descendant in turn.
      *
+     * The walk has no depth cap. It reads the subtree and steps over the
+     * task ids it has already seen, so a malformed `parent_task_id` (a
+     * row that is its own ancestor) cannot make it endless, and the walk
+     * always reaches the leaves: "the chain below this node has
+     * finished" is a fact and not an assumption. A node that owes
+     * nothing because the walk stopped looking would fail an ancestor
+     * whose descendant still has a retry on its way.
+     *
+     * The cost is the rows of the subtree, each read once: a sub-agent
+     * subtree is a handful of rows.
+     *
      * The guard is read, not written into the flip: the flip's own
      * predicate must not read the table it writes. The read sits
      * immediately before the write, so the window in which a child arms
@@ -259,8 +258,10 @@ final class WorkerReaper
         DateTimeImmutable $now,
         DateTimeImmutable $threshold,
     ): bool {
+        $visited = [$parentId => true];
+
         foreach ($this->childrenOf($parentId) as $child) {
-            if ($this->taskOwesAnAnswer($child, $now, $threshold, self::MAX_OWES_DEPTH)) {
+            if ($this->taskOwesAnAnswer($child, $now, $threshold, $visited)) {
                 return true;
             }
         }
@@ -283,27 +284,33 @@ final class WorkerReaper
      * A parent must not wait forever on a child that will never run
      * again — the sweep does not touch QUEUED rows, so nothing else
      * would ever free that parent.
+     *
+     * @param array<int, true> $visited the task ids the walk has read
      */
     private function taskOwesAnAnswer(
         Task $task,
         DateTimeImmutable $now,
         DateTimeImmutable $threshold,
-        int $depth,
+        array &$visited,
     ): bool {
         $owes = false;
-        $settled = ChildSettlement::isSettled($task);
 
-        if (!$settled) {
+        if (!ChildSettlement::isSettled($task)) {
             if ($task->retry_after !== null) {
                 // The retry is still on its way.
                 $owes = true;
             } elseif ($this->isStillAlive($task, $now, $threshold)) {
                 $owes = true;
-            } elseif ($depth > 0) {
+            } elseif (!isset($visited[$task->id])) {
+                $visited[$task->id] = true;
+
                 // Not alive itself: the answer is still on its way if one
-                // of its own children owes one.
+                // of its own children owes one. A task the walk has read
+                // already is not descended into again — that is what
+                // keeps a row that is its own ancestor from turning the
+                // walk into an endless one.
                 foreach ($this->childrenOf((int) $task->id) as $child) {
-                    if ($this->taskOwesAnAnswer($child, $now, $threshold, $depth - 1)) {
+                    if ($this->taskOwesAnAnswer($child, $now, $threshold, $visited)) {
                         $owes = true;
                         break;
                     }
