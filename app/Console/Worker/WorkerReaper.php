@@ -16,7 +16,13 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 
 /**
- * Sweeps tasks stuck in RUNNING for longer than $staleMinutes and marks them FAILED.
+ * Sweeps tasks whose worker vanished and marks them FAILED.
+ *
+ * Two statuses are swept: RUNNING, and AWAITING_SUB_AGENTS — a sub-agent
+ * multi-child stall leaves the parent parked with no live lease, and
+ * without this it would wait forever. In server-worker mode the reaper
+ * also arms the retry the agent's policy asks for, because a task whose
+ * worker vanished is exactly the case an auto-retry policy exists for.
  *
  * These orphans are produced when a worker process is killed ungracefully (OOM, server
  * reboot, SIGKILL) before it can clean up. The reaper runs once at startup and
@@ -44,19 +50,52 @@ final class WorkerReaper
         $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
         $threshold = $now->modify(sprintf('-%d seconds', $staleMinutes * 60));
 
-        // Lease-aware + retry-chain-aware. The reaper is shared between server-mode
-        // daemon (`WorkerRunCommand --once`) and client-mode HTTP housekeeping, so the
-        // SQL must work for either runtime. `retry_of_task_id IS NULL` excludes the
-        // retry chain: a task carrying the marker is a task with a retry pending or
-        // in flight, and flipping it would race that retry and erase the root's
-        // failure context.
-        //
-        // AWAITING_SUB_AGENTS is swept alongside RUNNING because a sub-agent
-        // multi-child stall (race between a concurrent child worker and the
-        // parent's spawn sequence) leaves the parent parked indefinitely with
-        // no live lease. Without this, the parent waits forever — see
-        // dashboard-and-subagent-fixes.md Plan D.
-        $orphanedIds = Task::whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
+        $orphanedIds = $this->selectStaleCandidates($now, $threshold);
+
+        if ($orphanedIds === []) {
+            return;
+        }
+
+        // The flip is guarded by the same predicates the selection used.
+        // Two reapers may sweep at once — `--reap-only` deliberately skips
+        // the single-instance lock — and the loser of that race must not
+        // flip a row the winner already flipped: that would burn an
+        // attempt of the retry budget and send a second notification. The
+        // rows this write actually matched are the ones that were reaped;
+        // the rest belong to the sweep that won.
+        $reapedIds = $this->markReaped($orphanedIds, $staleMinutes);
+
+        if ($reapedIds === []) {
+            return;
+        }
+
+        $this->armRetries($reapedIds);
+        $this->reportReaped(count($reapedIds), $staleMinutes, $output);
+        $this->notifyOrphans($reapedIds);
+        $this->fireSubAgentResumeHooks($reapedIds);
+    }
+
+    /**
+     * The tasks this sweep considers orphaned.
+     *
+     * Lease-aware + retry-chain-aware. The reaper is shared between server-mode
+     * daemon (`WorkerRunCommand --once`) and client-mode HTTP housekeeping, so the
+     * SQL must work for either runtime. `retry_of_task_id IS NULL` excludes the
+     * retry chain: a task carrying the marker is a task with a retry pending or
+     * in flight, and flipping it would race that retry and erase the root's
+     * failure context.
+     *
+     * AWAITING_SUB_AGENTS is swept alongside RUNNING because a sub-agent
+     * multi-child stall (race between a concurrent child worker and the
+     * parent's spawn sequence) leaves the parent parked indefinitely with
+     * no live lease. Without this, the parent waits forever — see
+     * dashboard-and-subagent-fixes.md Plan D.
+     *
+     * @return list<int>
+     */
+    private function selectStaleCandidates(DateTimeImmutable $now, DateTimeImmutable $threshold): array
+    {
+        return Task::whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
             ->where(function ($q) use ($now): void {
                 $q->whereNull('lease_expires_at')
                     ->orWhere('lease_expires_at', '<=', $now);
@@ -65,31 +104,48 @@ final class WorkerReaper
             ->whereNull('retry_of_task_id')
             ->pluck('id')
             ->all();
+    }
 
-        if ($orphanedIds === []) {
-            return;
+    /**
+     * Flip the candidates to FAILED and keep the rows the write matched.
+     *
+     * One guarded write per row: the predicate is what the database
+     * evaluates at write time, so a row another sweep has already flipped
+     * matches nothing and drops out of the result. A single bulk write
+     * would report only how many rows it changed, not which ones — and
+     * the difference is the whole point: the reaped set decides which
+     * tasks get a retry, a notification and a resume hook.
+     *
+     * @param list<int> $candidateIds
+     * @return list<int>
+     */
+    private function markReaped(array $candidateIds, int $staleMinutes): array
+    {
+        $reaped = [];
+
+        foreach ($candidateIds as $candidateId) {
+            // WORKER_DISCONNECTED is the reaper's marker for "the lease holder
+            // vanished" — browser tab closed, housekeeping request dropped,
+            // server worker SIGKILL'd. The legacy `ORPHANED` code is reserved in
+            // {@see ErrorClassifier::RETRYABLE_ERROR_CODES} for compatibility with
+            // any historical row that still carries it, but no code path emits
+            // it anymore.
+            $affected = Task::where('id', $candidateId)
+                ->whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
+                ->whereNull('retry_of_task_id')
+                ->update([
+                    'status'         => 'FAILED',
+                    'failure_reason' => "Task orphaned: lease expired and no progress for {$staleMinutes} minutes.",
+                    'error_code'     => 'WORKER_DISCONNECTED',
+                    'error_message'  => $this->disconnectMessage(),
+                ]);
+
+            if ($affected > 0) {
+                $reaped[] = $candidateId;
+            }
         }
 
-        // WORKER_DISCONNECTED is the reaper's marker for "the lease holder
-        // vanished" — browser tab closed, housekeeping request dropped,
-        // server worker SIGKILL'd. The legacy `ORPHANED` code is reserved in
-        // {@see ErrorClassifier::RETRYABLE_ERROR_CODES} for compatibility with
-        // any historical row that still carries it, but no code path emits
-        // it anymore.
-        $updated = Task::whereIn('id', $orphanedIds)->update([
-            'status'         => 'FAILED',
-            'failure_reason' => "Task orphaned: lease expired and no progress for {$staleMinutes} minutes.",
-            'error_code'     => 'WORKER_DISCONNECTED',
-            'error_message'  => $this->disconnectMessage(),
-        ]);
-        if ($updated <= 0) {
-            return;
-        }
-
-        $this->armRetries($orphanedIds);
-        $this->reportReaped($updated, $staleMinutes, $output);
-        $this->notifyOrphans($orphanedIds);
-        $this->fireSubAgentResumeHooks($orphanedIds);
+        return $reaped;
     }
 
     /**
@@ -119,6 +175,10 @@ final class WorkerReaper
      * nothing would ever pick the row up, so arming it there would promise a
      * retry that never comes.
      *
+     * Idempotent: a task that already carries a pending retry has been armed
+     * already, and arming it a second time would burn an attempt of the
+     * budget and send a second notification for the same retry.
+     *
      * @param list<int> $orphanedIds
      */
     private function armRetries(array $orphanedIds): void
@@ -128,6 +188,10 @@ final class WorkerReaper
         }
 
         foreach (Task::findMany($orphanedIds) as $task) {
+            if ($task->retry_after !== null) {
+                continue;
+            }
+
             $this->retryScheduler->scheduleAutoRetry($task, 'WORKER_DISCONNECTED');
         }
     }
@@ -159,8 +223,11 @@ final class WorkerReaper
     /**
      * Resumes parents parked in AWAITING_SUB_AGENTS after the reaper flips
      * their child to FAILED. Without this hook, a child killed by an
-     * OOM/SIGKILL race leaves the parent waiting forever — no terminal
-     * transition runs through SubAgentService's resume gate.
+     * OOM/SIGKILL race leaves the parent waiting forever — the reaper's
+     * flip is not a transition the parent's own hook sees.
+     *
+     * A child whose retry the reaper armed is not settled yet, so the
+     * resume gate refuses it and the parent waits for the retry instead.
      *
      * Handoff happens AFTER the SQL flip commits so SubAgentService sees a
      * consistent view.

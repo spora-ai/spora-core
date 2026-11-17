@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Events\Dispatcher;
 use Monolog\Handler\TestHandler;
 use Monolog\Logger as MonologLogger;
 use Psr\Log\NullLogger;
@@ -255,4 +257,112 @@ it('never lets a failed arming stop the reaper', function (): void {
         // … and the scheduler reported why it could not arm the retry.
         ->and($handler->getRecords())->not->toBeEmpty()
         ->and($handler->getRecords()[0]->message)->toBe('Failed to schedule auto-retry');
+});
+
+it('does not spend a second retry when a second sweep overlaps the first', function (): void {
+    // `worker:run --reap-only` skips the single-instance lock, so two
+    // sweeps can run at once. The loser of that race must not spend an
+    // attempt of the retry budget, and must not announce the same retry
+    // twice.
+    [$agentId, $userId] = orphanSeedAgent();
+    $task = orphanStaleTask($agentId, $userId);
+
+    $notification = Mockery::mock(NotificationService::class);
+    $notification->shouldReceive('notifyRetryQueued')->once();
+    $notification->shouldIgnoreMissing();
+
+    $reaper = new WorkerReaper(
+        new NullLogger(),
+        $notification,
+        null,
+        new RetryScheduler(null, $notification),
+        WorkerRuntimeMode::Server,
+    );
+
+    $reaper->reapStaleTasks(new BufferedOutput(), 60);
+
+    $task->refresh();
+    expect((int) $task->retry_count)->toBe(1);
+
+    // The overlap: this sweep had selected the row while it was still
+    // RUNNING — before the first sweep's flip landed. Its own write finds
+    // the row FAILED, so the arming must not run again.
+    Capsule::table('tasks')->where('id', $task->id)->update([
+        'status'           => 'RUNNING',
+        'retry_of_task_id' => null,
+        'updated_at'       => gmdate(ORPHAN_DT, time() - 61 * 60),
+    ]);
+
+    $reaper->reapStaleTasks(new BufferedOutput(), 60);
+
+    $task->refresh();
+
+    expect((int) $task->retry_count)->toBe(1)
+        ->and($task->retry_after)->not->toBeNull();
+});
+
+it('reaps nothing when another sweep flipped the row first', function (): void {
+    // The same overlap, seen from the other side: the write is guarded by
+    // the same predicates the selection used, so a row another sweep has
+    // already flipped matches nothing — and a row that matches nothing is
+    // not reaped, not armed and not announced.
+    [$agentId, $userId] = orphanSeedAgent();
+    $task = orphanStaleTask($agentId, $userId);
+
+    $notification = Mockery::mock(NotificationService::class);
+    $notification->shouldReceive('notifyRetryQueued')->never();
+    $notification->shouldReceive('notifyTaskOrphaned')->never();
+    $notification->shouldIgnoreMissing();
+
+    $reaper = new WorkerReaper(
+        new NullLogger(),
+        $notification,
+        null,
+        new RetryScheduler(null, $notification),
+        WorkerRuntimeMode::Server,
+    );
+
+    // The other sweep's flip lands between this sweep's selection and its
+    // write. A query listener is the only seam that reaches between the
+    // two statements.
+    $connection = Capsule::connection();
+    $previousDispatcher = $connection->getEventDispatcher();
+    $dispatcher = new Dispatcher();
+    $connection->setEventDispatcher($dispatcher);
+
+    $flipped = false;
+    $dispatcher->listen(QueryExecuted::class, function (QueryExecuted $event) use (&$flipped, $task): void {
+        if ($flipped) {
+            return;
+        }
+
+        $sql = strtolower($event->sql);
+        if (!str_contains($sql, 'select') || !str_contains($sql, 'retry_of_task_id')) {
+            return;
+        }
+
+        $flipped = true;
+        Capsule::table('tasks')->where('id', $task->id)->update([
+            'status'     => 'FAILED',
+            'error_code' => 'WORKER_DISCONNECTED',
+        ]);
+    });
+
+    $output = new BufferedOutput();
+
+    try {
+        $reaper->reapStaleTasks($output, 60);
+    } finally {
+        if ($previousDispatcher === null) {
+            $connection->unsetEventDispatcher();
+        } else {
+            $connection->setEventDispatcher($previousDispatcher);
+        }
+    }
+
+    $task->refresh();
+
+    expect((int) $task->retry_count)->toBe(0)
+        ->and($task->retry_after)->toBeNull()
+        ->and($output->fetch())->toBe('');
 });
