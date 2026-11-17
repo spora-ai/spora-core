@@ -24,6 +24,11 @@ use Throwable;
  * also arms the retry the agent's policy asks for, because a task whose
  * worker vanished is exactly the case an auto-retry policy exists for.
  *
+ * The sweep runs in two phases. The RUNNING rows are reaped and their
+ * retries are armed before the AWAITING_SUB_AGENTS rows are judged: a
+ * parent whose child was reaped in this very sweep waits for that
+ * child's retry, and the guard can only see that retry once it is armed.
+ *
  * A parent that waits on a child's pending retry is not swept: the
  * parent's lease is not renewed while it waits, so the sweep would reach
  * it, and failing it would take away the answer the retry is about to
@@ -55,12 +60,19 @@ final class WorkerReaper
         $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
         $threshold = $now->modify(sprintf('-%d seconds', $staleMinutes * 60));
 
-        $orphanedIds = $this->selectStaleCandidates($now, $threshold);
+        $children = $this->selectStaleCandidates('RUNNING', $now, $threshold);
+        $parents = $this->selectStaleCandidates('AWAITING_SUB_AGENTS', $now, $threshold);
 
-        if ($orphanedIds === []) {
+        if ($children === [] && $parents === []) {
             return;
         }
 
+        // The children are reaped and their retries are armed before the
+        // parents are judged: a parent whose child was reaped in this very
+        // sweep waits for that child's retry, and the guard that keeps such
+        // a parent out of the sweep can only see the retry once it is
+        // armed.
+        //
         // The flip carries the predicates that decide a row's fate: the
         // status it was selected in and the chain marker. Two reapers may
         // sweep at once — `--reap-only` deliberately skips the
@@ -69,16 +81,21 @@ final class WorkerReaper
         // attempt of the retry budget and send a second notification. The
         // rows this write actually matched are the ones that were reaped;
         // the rest belong to the sweep that won.
-        $reapedIds = $this->markReaped($orphanedIds, $staleMinutes);
+        $reapedChildren = $this->markReaped($children, $staleMinutes);
+        $this->armRetries($reapedChildren);
 
-        if ($reapedIds === []) {
+        $reapedParents = $this->markReaped($parents, $staleMinutes);
+        $this->armRetries($reapedParents);
+
+        $reaped = array_merge($reapedChildren, $reapedParents);
+
+        if ($reaped === []) {
             return;
         }
 
-        $this->armRetries($reapedIds);
-        $this->reportReaped(count($reapedIds), $staleMinutes, $output);
-        $this->notifyOrphans($reapedIds);
-        $this->fireSubAgentResumeHooks($reapedIds);
+        $this->reportReaped(count($reaped), $staleMinutes, $output);
+        $this->notifyOrphans($reaped);
+        $this->fireSubAgentResumeHooks($reaped);
     }
 
     /**
@@ -91,6 +108,10 @@ final class WorkerReaper
      * in flight, and flipping it would race that retry and erase the root's
      * failure context.
      *
+     * One status per call: the sweep judges the RUNNING rows and the
+     * AWAITING_SUB_AGENTS rows separately, because a parent is only judged
+     * once its children's retries are armed.
+     *
      * AWAITING_SUB_AGENTS is swept alongside RUNNING because a sub-agent
      * multi-child stall (race between a concurrent child worker and the
      * parent's spawn sequence) leaves the parent parked indefinitely with
@@ -99,9 +120,9 @@ final class WorkerReaper
      *
      * @return list<int>
      */
-    private function selectStaleCandidates(DateTimeImmutable $now, DateTimeImmutable $threshold): array
+    private function selectStaleCandidates(string $status, DateTimeImmutable $now, DateTimeImmutable $threshold): array
     {
-        return Task::whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
+        return Task::where('status', $status)
             ->where(function ($q) use ($now): void {
                 $q->whereNull('lease_expires_at')
                     ->orWhere('lease_expires_at', '<=', $now);

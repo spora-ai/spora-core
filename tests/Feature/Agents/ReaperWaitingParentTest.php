@@ -6,6 +6,8 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Events\Dispatcher;
 use Psr\Log\NullLogger;
+use Spora\Agents\RetryScheduler;
+use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Console\Worker\WorkerReaper;
 use Spora\Models\Agent;
 use Spora\Models\Task;
@@ -25,6 +27,11 @@ use Symfony\Component\Console\Output\BufferedOutput;
  * The exclusion has to hold for the write as well as for the selection:
  * a child can arm its retry between the two, and the write is the one
  * that decides whether the parent is failed.
+ *
+ * The sweep runs in two phases, and the order matters: the children are
+ * reaped and their retries are armed before the parents are judged, so a
+ * parent whose child the sweep reaped in this very pass waits for that
+ * child's retry instead of being failed for it.
  */
 
 defined('WAITING_PARENT_TEST_PASSWORD') || define('WAITING_PARENT_TEST_PASSWORD', 'Password1!');
@@ -43,18 +50,32 @@ function waitingParentReaper(): WorkerReaper
 }
 
 /**
+ * A reaper that arms the retry an agent's policy asks for, the way the
+ * server worker wires it.
+ */
+function waitingParentReaperWithRetries(WorkerRuntimeMode $mode = WorkerRuntimeMode::Server): WorkerReaper
+{
+    $notification = Mockery::mock(NotificationService::class);
+    $notification->shouldIgnoreMissing();
+
+    return new WorkerReaper(new NullLogger(), $notification, null, new RetryScheduler(), $mode);
+}
+
+/**
  * @return array{0: int, 1: int} the agent id and the owning user id
  */
-function waitingParentSeedAgent(): array
+function waitingParentSeedAgent(int $maxRetries = 0, int $retryAfterMinutes = 0): array
 {
     $authService = bootAuthLayer();
     $userId      = $authService->register('waiting-parent@example.com', WAITING_PARENT_TEST_PASSWORD, 'Waiting Parent');
 
     $agent = Agent::create([
-        'principal_id' => createUserPrincipalPublic($userId),
-        'name'         => 'Waiting Parent Agent',
-        'max_steps'    => 10,
-        'is_active'    => true,
+        'principal_id'        => createUserPrincipalPublic($userId),
+        'name'                => 'Waiting Parent Agent',
+        'max_steps'           => 10,
+        'is_active'           => true,
+        'max_retries'         => $maxRetries,
+        'retry_after_minutes' => $retryAfterMinutes,
     ]);
 
     return [(int) $agent->id, $userId];
@@ -76,13 +97,7 @@ function waitingParentStaleParent(int $agentId, int $userId): Task
         'step_count'      => 0,
     ]);
 
-    // `updated_at` and `lease_expires_at` are written directly: Eloquent
-    // refreshes them on save(). Both columns are UTC — the reaper compares
-    // them against `gmdate()`.
-    Capsule::table('tasks')->where('id', $parent->id)->update([
-        'lease_expires_at' => gmdate(WAITING_PARENT_DT, time() - 60),
-        'updated_at'       => gmdate(WAITING_PARENT_DT, time() - 61 * 60),
-    ]);
+    waitingParentMakeStale($parent);
 
     return $parent;
 }
@@ -91,13 +106,13 @@ function waitingParentStaleParent(int $agentId, int $userId): Task
  * A child of the parent, failed and — when `$retryAfter` is given —
  * waiting for a retry that is due in an hour.
  */
-function waitingParentChild(int $agentId, int $userId, int $parentId, ?string $retryAfter): Task
+function waitingParentChild(int $agentId, int $userId, int $parentId, ?string $retryAfter, string $status = 'FAILED'): Task
 {
     $child = Task::create([
         'agent_id'        => $agentId,
         'principal_id'    => createUserPrincipalPublic($userId),
         'trigger_user_id' => $userId,
-        'status'          => 'FAILED',
+        'status'          => $status,
         'user_prompt'     => 'do that',
         'max_steps'       => 10,
         'step_count'      => 0,
@@ -109,6 +124,22 @@ function waitingParentChild(int $agentId, int $userId, int $parentId, ?string $r
     }
 
     return $child;
+}
+
+/**
+ * Age the row past the sweep's threshold: no live lease, and quiet for
+ * longer than the threshold.
+ *
+ * `updated_at` and `lease_expires_at` are written directly: Eloquent
+ * refreshes them on save(). Both columns are UTC — the reaper compares
+ * them against `gmdate()`.
+ */
+function waitingParentMakeStale(Task $task): void
+{
+    Capsule::table('tasks')->where('id', $task->id)->update([
+        'lease_expires_at' => gmdate(WAITING_PARENT_DT, time() - 60),
+        'updated_at'       => gmdate(WAITING_PARENT_DT, time() - 61 * 60),
+    ]);
 }
 
 it('does not reap a parent whose child is waiting for a retry', function (): void {
@@ -217,4 +248,37 @@ it('never reads the tasks table from inside the write that flips it', function (
 
     expect($writes)->not->toBeEmpty()
         ->and(strtolower(implode(' ', $writes)))->not->toContain('select');
+});
+
+it('does not reap a parent whose child was reaped in the same sweep', function (): void {
+    // The child is stale and running; the parent is stale and waiting for
+    // it. The sweep reaps the child first and arms its retry — the
+    // parent's answer is still on its way, so the parent must not be
+    // failed for a failure that is not its own.
+    [$agentId, $userId] = waitingParentSeedAgent(maxRetries: 3, retryAfterMinutes: 5);
+    $parent = waitingParentStaleParent($agentId, $userId);
+    $child  = waitingParentChild($agentId, $userId, (int) $parent->id, null, 'RUNNING');
+    waitingParentMakeStale($child);
+
+    waitingParentReaperWithRetries()->reapStaleTasks(new BufferedOutput(), 60);
+
+    expect($child->refresh()->status)->toBe('FAILED')
+        ->and($child->retry_after)->not->toBeNull()
+        ->and($parent->refresh()->status)->toBe('AWAITING_SUB_AGENTS');
+});
+
+it('reaps a parent whose child has no retry coming', function (): void {
+    // The counterpart: in client-worker mode nothing claims a scheduled
+    // retry, so the child's failure is final and the parent has to settle
+    // rather than wait for a retry that will never run.
+    [$agentId, $userId] = waitingParentSeedAgent(maxRetries: 3, retryAfterMinutes: 5);
+    $parent = waitingParentStaleParent($agentId, $userId);
+    $child  = waitingParentChild($agentId, $userId, (int) $parent->id, null, 'RUNNING');
+    waitingParentMakeStale($child);
+
+    waitingParentReaperWithRetries(WorkerRuntimeMode::Client)->reapStaleTasks(new BufferedOutput(), 60);
+
+    expect($child->refresh()->status)->toBe('FAILED')
+        ->and($child->retry_after)->toBeNull()
+        ->and($parent->refresh()->status)->toBe('FAILED');
 });
