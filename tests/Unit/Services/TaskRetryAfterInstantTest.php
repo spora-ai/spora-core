@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Support\Carbon;
 use Spora\Core\Config;
 use Spora\Models\Agent;
 use Spora\Models\Notification;
@@ -121,4 +122,28 @@ it('the retry notification carries the instant the retry_after column names', fu
 
     expect($notification)->not->toBeNull()
         ->and($notification->data['retry_after'])->toBe(RETRY_AFTER_INSTANT_UTC);
+});
+
+it('reads a stamp that was set on the model rather than stored', function (): void {
+    // A model built from an array holds the Carbon itself, not the string
+    // the column stores.
+    $inMemory = new Task();
+    $inMemory->setRawAttributes([
+        'id'          => 1,
+        'retry_after' => Carbon::parse(RETRY_AFTER_INSTANT_COLUMN, 'UTC'),
+    ], true);
+
+    expect($inMemory->retryAfterUtc()?->toIso8601String())->toBe(RETRY_AFTER_INSTANT_UTC);
+});
+
+it('treats an unreadable stamp as no retry pending', function (): void {
+    // A hand-edited row must not break the payload: the answer is "no
+    // retry is scheduled", which is what the browser reads it as.
+    $corrupt = new Task();
+    $corrupt->setRawAttributes([
+        'id'          => 1,
+        'retry_after' => 'not-a-timestamp',
+    ], true);
+
+    expect($corrupt->retryAfterUtc())->toBeNull();
 });
