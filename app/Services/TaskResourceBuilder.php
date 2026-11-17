@@ -109,7 +109,10 @@ final class TaskResourceBuilder
         // payload omits arrives there as `undefined` — which is not `null`,
         // so an omitted key reads as "a retry is scheduled" and the
         // dashboard promises one for every failed task.
-        $resource['retry_after'] = $task->retry_after?->toIso8601String();
+        //
+        // Read as UTC: the column stores UTC, and the countdown the browser
+        // renders is a difference between two instants.
+        $resource['retry_after'] = $task->retryAfterUtc()?->toIso8601String();
 
         $abortedAt = is_array($task->data) ? ($task->data['aborted_at'] ?? null) : null;
         if ($abortedAt !== null) {

@@ -287,7 +287,9 @@ describe('NotificationService::notifyRetryQueued', function (): void {
     it('creates a task_retry_queued notification with attempt/max/retry_after and publishes to the user channel', function (): void {
         [$service, $mercure, $userId] = makeNotificationServiceWithUser();
         $task = makeTaskForUser($userId);
-        $retryAt = Carbon::now()->addMinutes(5);
+        // UTC: `tasks.retry_after` is a UTC column, so the stamp has to be
+        // one — a local stamp would name a different instant.
+        $retryAt = Carbon::now('UTC')->addMinutes(5);
         $task->retry_after = $retryAt;
         $task->save();
 

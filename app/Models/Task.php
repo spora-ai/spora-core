@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Spora\Models;
 
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 use Spora\Models\Concerns\HasStringColumnLengthValidation;
+use Throwable;
 
 /**
  * @property int         $id
@@ -125,6 +127,41 @@ final class Task extends Model
     public function triggerUserId(): ?int
     {
         return $this->trigger_user_id !== null ? (int) $this->trigger_user_id : null;
+    }
+
+    /**
+     * The moment a pending retry becomes due, read as the instant it names.
+     *
+     * `retry_after` is a UTC column: the worker daemon's claim query
+     * compares it against `gmdate()`, so the stored string is UTC.
+     * Eloquent's `datetime` cast parses it in the process default timezone
+     * instead — and `Kernel` never calls `date_default_timezone_set()` — so
+     * on a host whose php.ini names a local zone the stamp comes back an
+     * hour (or more) off, and the countdown the browser shows is wrong by
+     * that much. Parsed as UTC here, the way
+     * {@see \Spora\Http\Middleware\ApiKeyAuthenticator} reads `last_used_at`.
+     *
+     * The raw value is read rather than the cast: a row loaded from the
+     * database holds the stored string, while a model whose attribute was
+     * set in memory holds the Carbon itself.
+     */
+    public function retryAfterUtc(): ?Carbon
+    {
+        $raw = $this->getRawOriginal('retry_after');
+
+        if ($raw instanceof DateTimeInterface) {
+            return Carbon::instance($raw)->utc();
+        }
+
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::createFromFormat('Y-m-d H:i:s', $raw, 'UTC');
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

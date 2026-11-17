@@ -165,7 +165,7 @@ class NotificationService implements NotificationServiceInterface
                 'agent_id'    => $retryTask->agent_id,
                 'attempt'     => $attempt,
                 'max'         => $max,
-                'retry_after' => $retryTask->retry_after->toIso8601String(),
+                'retry_after' => $retryTask->retryAfterUtc()?->toIso8601String(),
             ],
         ]);
 
