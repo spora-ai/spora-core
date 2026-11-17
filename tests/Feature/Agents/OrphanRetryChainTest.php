@@ -86,10 +86,13 @@ function orphanStaleTask(int $agentId, int $userId): Task
     ]);
 
     // `updated_at` and `lease_expires_at` are written directly: Eloquent
-    // refreshes them on save().
+    // refreshes them on save(). Both columns are UTC — the reaper
+    // compares them against `gmdate()` — so the fixture has to write UTC
+    // too. A local stamp is an hour ahead of the threshold on a host that
+    // is not UTC, and the task is then never selected.
     Capsule::table('tasks')->where('id', $task->id)->update([
-        'lease_expires_at' => date(ORPHAN_DT, time() - 60),
-        'updated_at'       => date(ORPHAN_DT, time() - 61 * 60),
+        'lease_expires_at' => gmdate(ORPHAN_DT, time() - 60),
+        'updated_at'       => gmdate(ORPHAN_DT, time() - 61 * 60),
     ]);
 
     return $task;
