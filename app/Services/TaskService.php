@@ -611,7 +611,16 @@ final class TaskService implements TaskServiceInterface
                 continue;
             }
 
-            $parentId = Task::where('id', $chainId)->value('parent_task_id');
+            // The parent is only named for the log entry, so a lookup that
+            // fails must not fail the request: the cancel has already
+            // happened, and the entry records the parent as unknown.
+            $parentId = null;
+
+            try {
+                $parentId = Task::where('id', $chainId)->value('parent_task_id');
+            } catch (Throwable) {
+                // The wake-up failure below is the one worth reporting.
+            }
 
             $this->logger?->error('Parent wake-up after a cancelled retry failed', [
                 'task_id'        => $chainId,
