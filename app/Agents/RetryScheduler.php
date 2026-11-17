@@ -116,11 +116,25 @@ final class RetryScheduler
         // firing the retry an hour off on every host that is not UTC.
         $retryAfter = gmdate(Orchestrator::DB_TIMESTAMP_FORMAT, time() + $retryAfterMinutes * 60);
 
-        $failedTask->update([
-            'retry_count'      => $retryCount,
-            'retry_of_task_id' => $rootTaskId,
-            'retry_after'      => $retryAfter,
-        ]);
+        // The condition rides on the write, not on a read before it: the
+        // row has to still be FAILED and still carry no pending retry at
+        // the moment the markers land. A manual `Orchestrator::retry()`
+        // can run between the two — it flips the row to QUEUED and clears
+        // the markers — and a QUEUED row that carries the chain marker is
+        // claimed by nobody: the main queue skips rows with a marker and
+        // the retry queue only looks at FAILED rows.
+        $affected = Task::where('id', $failedTask->id)
+            ->where('status', 'FAILED')
+            ->whereNull('retry_after')
+            ->update([
+                'retry_count'      => $retryCount,
+                'retry_of_task_id' => $rootTaskId,
+                'retry_after'      => $retryAfter,
+            ]);
+
+        if ($affected === 0) {
+            return;
+        }
 
         $failedTask->refresh();
 

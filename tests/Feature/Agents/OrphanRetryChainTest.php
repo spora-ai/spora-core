@@ -209,10 +209,18 @@ it('publishes a task with a retry armed as one with a retry pending', function (
 it('leaves an already-armed retry chain alone', function (): void {
     // A row in a retry chain carries the chain marker, and the reaper
     // skips it: flipping it would race the pending retry.
+    //
+    // The markers are written straight to the column: the scheduler arms
+    // a retry on a FAILED row, and this fixture needs a RUNNING row that
+    // already carries a chain.
     [$agentId, $userId] = orphanSeedAgent();
     $task = orphanStaleTask($agentId, $userId);
 
-    (new RetryScheduler())->scheduleAutoRetry($task, 'RATE_LIMIT');
+    Capsule::table('tasks')->where('id', $task->id)->update([
+        'retry_count'      => 1,
+        'retry_of_task_id' => $task->id,
+        'retry_after'      => gmdate(ORPHAN_DT, time() + 300),
+    ]);
 
     orphanReaper(new RetryScheduler())->reapStaleTasks(new BufferedOutput(), 60);
 
@@ -299,6 +307,92 @@ it('does not spend a second retry when a second sweep overlaps the first', funct
 
     expect((int) $task->retry_count)->toBe(1)
         ->and($task->retry_after)->not->toBeNull();
+});
+
+it('does not arm a retry on a task that is no longer failed', function (): void {
+    // A manual retry can land between the reaper's flip and its arming:
+    // `Orchestrator::retry()` flips the row to QUEUED and clears the
+    // markers. Arming on top of that leaves a QUEUED row carrying the
+    // chain marker, and nobody claims it — the main queue skips rows with
+    // a marker and the retry queue only looks at FAILED rows.
+    [$agentId, $userId] = orphanSeedAgent();
+    $task = orphanStaleTask($agentId, $userId);
+
+    $notification = Mockery::mock(NotificationService::class);
+    $notification->shouldReceive('notifyRetryQueued')->never();
+    $notification->shouldIgnoreMissing();
+
+    $task->status = 'QUEUED';
+    $task->save();
+
+    (new RetryScheduler(null, $notification))->scheduleAutoRetry($task, 'WORKER_DISCONNECTED');
+
+    $task->refresh();
+
+    expect((int) $task->retry_count)->toBe(0)
+        ->and($task->retry_after)->toBeNull()
+        ->and($task->retry_of_task_id)->toBeNull();
+});
+
+it('does not spend a retry on a task an operator retried while the sweep was running', function (): void {
+    // The same race, seen from the reaper: the flip lands, the operator's
+    // manual retry lands on top of it, and the arming that follows must
+    // find nothing to arm.
+    [$agentId, $userId] = orphanSeedAgent();
+    $task = orphanStaleTask($agentId, $userId);
+
+    $notification = Mockery::mock(NotificationService::class);
+    $notification->shouldReceive('notifyRetryQueued')->never();
+    $notification->shouldIgnoreMissing();
+
+    $reaper = new WorkerReaper(
+        new NullLogger(),
+        $notification,
+        null,
+        new RetryScheduler(null, $notification),
+        WorkerRuntimeMode::Server,
+    );
+
+    $connection = Capsule::connection();
+    $previousDispatcher = $connection->getEventDispatcher();
+    $dispatcher = new Dispatcher();
+    $connection->setEventDispatcher($dispatcher);
+
+    $retried = false;
+    $dispatcher->listen(QueryExecuted::class, function (QueryExecuted $event) use (&$retried, $task): void {
+        if ($retried) {
+            return;
+        }
+
+        $sql = strtolower($event->sql);
+        // The reaper's flip is the write that sets the failure reason.
+        if (!str_contains($sql, 'update') || !str_contains($sql, 'failure_reason')) {
+            return;
+        }
+
+        $retried = true;
+        Capsule::table('tasks')->where('id', $task->id)->update([
+            'status'           => 'QUEUED',
+            'retry_after'      => null,
+            'retry_of_task_id' => null,
+        ]);
+    });
+
+    try {
+        $reaper->reapStaleTasks(new BufferedOutput(), 60);
+    } finally {
+        if ($previousDispatcher === null) {
+            $connection->unsetEventDispatcher();
+        } else {
+            $connection->setEventDispatcher($previousDispatcher);
+        }
+    }
+
+    $task->refresh();
+
+    expect((string) $task->status)->toBe('QUEUED')
+        ->and((int) $task->retry_count)->toBe(0)
+        ->and($task->retry_after)->toBeNull();
 });
 
 it('reaps nothing when another sweep flipped the row first', function (): void {
