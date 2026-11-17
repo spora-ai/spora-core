@@ -1396,6 +1396,7 @@ final class ContainerDefinitions
                     $c->get(TaskCompactionServiceInterface::class),
                     $c->get(ToolCallSerializer::class),
                     $c->get(PrincipalResolver::class),
+                    $c->get(SubAgentServiceInterface::class),
                 );
             },
 

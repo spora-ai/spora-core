@@ -1322,6 +1322,65 @@ describe('TaskService — cancelRetryChain', function (): void {
             ->and($failed->retry_of_task_id)->toBeNull()
             ->and((int) $failed->retry_count)->toBe(0);
     });
+
+    it('resumes the parent of a child whose retry was cancelled', function (): void {
+        // A child whose retry is pending keeps its parent waiting — the
+        // resume gate does not settle a parent on a failure that is about
+        // to be retried. Cancelling that retry settles the child for good,
+        // so the parent has to wake up: the retry it was waiting for is
+        // not coming.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('cancel-parent@example.com', 'Password1!', 'CancelParent');
+        simulateLoggedInSession($userId, 'cancel-parent@example.com');
+
+        $principalId = createUserPrincipalPublic($userId);
+        $agent = Agent::create([
+            'principal_id' => $principalId, 'name' => 'CancelParentAgent', 'max_steps' => 5, 'is_active' => true,
+        ]);
+
+        $parent = Task::create([
+            'principal_id' => $principalId, 'trigger_user_id' => $userId, 'agent_id' => $agent->id,
+            'status' => 'AWAITING_SUB_AGENTS', 'user_prompt' => 'delegate this', 'max_steps' => 5,
+        ]);
+
+        $child = Task::create([
+            'principal_id' => $principalId, 'trigger_user_id' => $userId, 'agent_id' => $agent->id,
+            'status' => 'FAILED', 'user_prompt' => 'do that', 'max_steps' => 5,
+            'parent_task_id' => $parent->id, 'retry_count' => 1,
+        ]);
+        $child->retry_of_task_id = $child->id;
+        $child->save();
+        Capsule::table('tasks')
+            ->where('id', $child->id)
+            ->update(['retry_after' => '2026-11-16 21:02:15']);
+
+        $parent->update([
+            'data' => [
+                'spawned_sub_task_ids'     => [$child->id],
+                'sub_agent_expected_count' => 1,
+            ],
+        ]);
+
+        $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
+        $orchestrator->shouldReceive('appendHistory')->once();
+
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+        $service = new TaskService(
+            $orchestrator,
+            $mercure,
+            Mockery::mock(TaskCompactionServiceInterface::class),
+            null,
+            new PrincipalResolver(),
+            new Spora\Services\SubAgentService(
+                static fn(): Spora\Agents\OrchestratorInterface => $orchestrator,
+            ),
+        );
+
+        expect($service->cancelRetryChain($child->id, $userId))->toBeTrue();
+
+        expect($parent->refresh()->status)->toBe('QUEUED');
+    });
 });
 
 /**

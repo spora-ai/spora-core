@@ -33,6 +33,7 @@ final class TaskService implements TaskServiceInterface
         private readonly TaskCompactionServiceInterface $compactionService,
         ?ToolCallSerializer $toolCallSerializer = null,
         private readonly ?PrincipalResolver $principalResolver = null,
+        private readonly ?SubAgentServiceInterface $subAgent = null,
     ) {
         $this->answerRecorder = new AnswerTaskRecorder($this->orchestrator, $this->principalResolver);
         $this->resources = new TaskResourceBuilder($toolCallSerializer);
@@ -535,6 +536,18 @@ final class TaskService implements TaskServiceInterface
         // group member triggered the cancel. Filter on the user's
         // own user-principal would silently no-op for group-shared
         // chains (their principal_id is the group, not the caller).
+        //
+        // The rows are listed before the write: afterwards they no longer
+        // carry the chain marker, so the query would find nothing.
+        $chainIds = Capsule::table('tasks')
+            ->where('principal_id', (int) $task->principal_id)
+            ->where('retry_of_task_id', $task->retry_of_task_id)
+            ->where('retry_count', '>=', $task->retry_count)
+            ->where('status', 'FAILED')
+            ->pluck('id')
+            ->map(static fn(mixed $id): int => (int) $id)
+            ->all();
+
         Capsule::table('tasks')
             ->where('principal_id', (int) $task->principal_id)
             ->where('retry_of_task_id', $task->retry_of_task_id)
@@ -546,6 +559,34 @@ final class TaskService implements TaskServiceInterface
                 'retry_count'      => 0,
             ]);
 
+        $this->resumeParentsOfCancelledRetries($chainIds);
+
         return true;
+    }
+
+    /**
+     * Wake the parents of the rows the cancel settled.
+     *
+     * A cancelled retry settles the child for good, so a parent waiting on
+     * that child can resume. Without this the parent would sit in
+     * AWAITING_SUB_AGENTS until the reaper failed it — the retry it was
+     * waiting for is not coming.
+     *
+     * @param list<int> $chainIds
+     */
+    private function resumeParentsOfCancelledRetries(array $chainIds): void
+    {
+        if ($this->subAgent === null) {
+            return;
+        }
+
+        foreach ($chainIds as $chainId) {
+            try {
+                $this->subAgent->maybeResumeParent($chainId);
+            } catch (Throwable) {
+                // The cancel already happened; a failed resume must not
+                // undo it or fail the request.
+            }
+        }
     }
 }
