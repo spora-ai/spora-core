@@ -141,18 +141,20 @@ final class Task extends Model
      * that much. Parsed as UTC here, the way
      * {@see \Spora\Http\Middleware\ApiKeyAuthenticator} reads `last_used_at`.
      *
-     * The raw value is read rather than the cast: a row loaded from the
-     * database holds the stored string, while a model whose attribute was
-     * set in memory holds the Carbon itself.
+     * The value the model currently holds is read rather than the last
+     * synchronised snapshot: the snapshot cannot see an assignment that
+     * has not been saved, and the model in hand is the truth about the
+     * row. {@see setRetryAfterAttribute()} spells every assignment in
+     * UTC, so the instant survives that assignment.
      */
     public function retryAfterUtc(): ?Carbon
     {
-        $raw = $this->getRawOriginal('retry_after');
+        $raw = $this->attributes['retry_after'] ?? null;
 
         if ($raw instanceof DateTimeInterface) {
-            // A model set in memory holds the instant; the column holds
-            // its UTC spelling. Normalising to that spelling here lets
-            // both go through the one parse below.
+            // A model built from an array holds the instant itself; the
+            // column holds its UTC spelling. Normalising to that spelling
+            // here lets both go through the one parse below.
             $raw = Carbon::instance($raw)->utc()->format('Y-m-d H:i:s');
         }
 
@@ -165,6 +167,30 @@ final class Task extends Model
         } catch (Throwable) {
             return null;
         }
+    }
+
+    /**
+     * The column is UTC, so an assignment is spelled in UTC.
+     *
+     * The `datetime` cast would write the wall clock of whatever timezone
+     * the assigned value carries — an hour off on a host that is not UTC,
+     * and the worker's claim query compares the column against `gmdate()`.
+     * A string is the column's own spelling and is kept as it is; a date
+     * object carries the instant and is converted.
+     */
+    protected function setRetryAfterAttribute(mixed $value): void
+    {
+        if ($value === null) {
+            $this->attributes['retry_after'] = null;
+            return;
+        }
+
+        if ($value instanceof DateTimeInterface) {
+            $this->attributes['retry_after'] = Carbon::instance($value)->utc()->format('Y-m-d H:i:s');
+            return;
+        }
+
+        $this->attributes['retry_after'] = (string) $value;
     }
 
     /**

@@ -136,6 +136,47 @@ it('reads a stamp that was set on the model rather than stored', function (): vo
     expect($inMemory->retryAfterUtc()?->toIso8601String())->toBe(RETRY_AFTER_INSTANT_UTC);
 });
 
+it('names the instant an unsaved assignment carries', function (): void {
+    // The model in hand is the truth about the row: an assignment that
+    // has not been saved yet is still the value the accessor has to read.
+    // The snapshot of the last synchronised state cannot see it.
+    $task = retryAfterInstantSeedTask();
+
+    $original = date_default_timezone_get();
+
+    try {
+        date_default_timezone_set('Europe/Berlin');
+
+        $task->retry_after = Carbon::parse('2026-12-01 10:00:00', 'UTC');
+
+        expect($task->retryAfterUtc()?->toIso8601String())->toBe('2026-12-01T10:00:00+00:00');
+    } finally {
+        date_default_timezone_set($original);
+    }
+});
+
+it('names the instant an assignment carries, whatever timezone that value carries', function (): void {
+    // The column is UTC. A value that carries another offset still names
+    // one instant, and the accessor has to name that instant — not the
+    // wall clock the value was written in.
+    $task = retryAfterInstantSeedTask();
+
+    $task->retry_after = Carbon::parse('2026-12-01 11:00:00', 'Europe/Berlin');
+
+    expect($task->retryAfterUtc()?->toIso8601String())->toBe('2026-12-01T10:00:00+00:00');
+});
+
+it('sees a retry that was cleared in memory', function (): void {
+    // The other half: the assignment says there is no retry pending, and
+    // the accessor has to say so too — the snapshot of the last
+    // synchronised state still names the old one.
+    $task = retryAfterInstantSeedTask();
+
+    $task->retry_after = null;
+
+    expect($task->retryAfterUtc())->toBeNull();
+});
+
 it('treats an unreadable stamp as no retry pending', function (): void {
     // A hand-edited row must not break the payload: the answer is "no
     // retry is scheduled", which is what the browser reads it as.
