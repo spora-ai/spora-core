@@ -3,8 +3,12 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use PHPUnit\Framework\Assert;
+use Psr\Log\NullLogger;
 use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Core\Paths;
 use Spora\Drivers\DriverFactory;
@@ -83,12 +87,14 @@ function autoRetrySeedAgent(int $retryAfterMinutes = 5, int $maxRetries = 3): ar
     return [(int) $agent->id, $userId];
 }
 
-function autoRetryOrchestrator(LLMDriverInterface $driver): Orchestrator
-{
+function autoRetryOrchestrator(
+    LLMDriverInterface $driver,
+    WorkerRuntimeMode $workerRuntimeMode = WorkerRuntimeMode::Server,
+): Orchestrator {
     $factory = Mockery::mock(DriverFactory::class);
     $factory->allows('makeFromAgent')->andReturn($driver);
 
-    return new Orchestrator($factory);
+    return new Orchestrator($factory, new OrchestratorConfig(workerRuntimeMode: $workerRuntimeMode));
 }
 
 function autoRetryRunningTask(int $agentId, int $userId): Task
@@ -122,7 +128,7 @@ function autoRetryWorker(OrchestratorInterface $orchestrator): WorkerQueueProces
 
     return new WorkerQueueProcessor(
         orchestrator: $orchestrator,
-        logger: new Psr\Log\NullLogger(),
+        logger: new NullLogger(),
         mercure: $mercure,
         notificationService: $notification,
         paths: new Paths(BASE_PATH),
@@ -148,7 +154,7 @@ function autoRetryFailedTask(
 
     try {
         $orchestrator->tick($task->id);
-        PHPUnit\Framework\Assert::fail('Expected the failure to propagate');
+        Assert::fail('Expected the failure to propagate');
     } catch (Throwable $e) {
         if ($e !== $failure) {
             throw $e;
@@ -180,6 +186,34 @@ it('arms the configured retry when the provider cannot be reached', function ():
         ->and((int) $task->retry_of_task_id)->toBe((int) $task->id);
 });
 
+it('does not arm a retry in client-worker mode', function (): void {
+    // Only the server worker claims a scheduled retry — the retry queue
+    // lives in its daemon. Arming one in client-worker mode would promise
+    // a retry that never comes, and a parent waiting on that retry would
+    // wait for it forever.
+    [$agentId, $userId] = autoRetrySeedAgent();
+
+    $driver = Mockery::mock(LLMDriverInterface::class);
+    $driver->allows('complete')->andThrow(new LLMRateLimitException('429 rate limit'));
+
+    $orchestrator = autoRetryOrchestrator($driver, WorkerRuntimeMode::Client);
+    $task = autoRetryRunningTask($agentId, $userId);
+
+    try {
+        $orchestrator->tick($task->id);
+        Assert::fail('Expected the failure to propagate');
+    } catch (LLMRateLimitException) {
+        // expected
+    }
+
+    $task->refresh();
+
+    expect((string) $task->status)->toBe('FAILED')
+        ->and((int) $task->retry_count)->toBe(0)
+        ->and($task->retry_after)->toBeNull()
+        ->and($task->retry_of_task_id)->toBeNull();
+});
+
 it('the real driver lets a connection error through as a retryable failure', function (): void {
     // The classification gap is only worth fixing if the production driver
     // actually produces the exception the classifier has to recognise. The
@@ -205,7 +239,7 @@ it('the real driver lets a connection error through as a retryable failure', fun
 
     try {
         $orchestrator->tick($task->id);
-        PHPUnit\Framework\Assert::fail('Expected the transport failure to propagate');
+        Assert::fail('Expected the transport failure to propagate');
     } catch (TransportException) {
         // expected
     }

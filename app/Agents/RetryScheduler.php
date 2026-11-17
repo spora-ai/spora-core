@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Agents;
 
 use Psr\Log\LoggerInterface;
+use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\NotificationService;
@@ -13,8 +14,8 @@ use Throwable;
 /**
  * Schedules and dispatches auto-retries for failed tasks.
  *
- * Package-private collaborator: constructed and called only by
- * {@see Orchestrator}.
+ * Called by the orchestrator when a run fails, and by the worker reaper
+ * when the worker running a task vanished.
  */
 final class RetryScheduler
 {
@@ -33,11 +34,21 @@ final class RetryScheduler
     public function __construct(
         private readonly ?LoggerInterface $logger = null,
         private readonly ?NotificationService $notificationService = null,
+        private readonly WorkerRuntimeMode $workerRuntimeMode = WorkerRuntimeMode::Server,
     ) {}
 
     public function scheduleAutoRetry(Task $failedTask, string $errorCode): void
     {
         if (!in_array($errorCode, self::RETRYABLE_ERROR_CODES, true)) {
+            return;
+        }
+
+        // Only the server worker claims scheduled retries — the retry queue
+        // lives in its daemon. In client-worker mode nothing would ever
+        // pick the row up, so arming it there would promise a retry that
+        // never comes, and a parent waiting on that retry would wait for
+        // it forever.
+        if ($this->workerRuntimeMode === WorkerRuntimeMode::Client) {
             return;
         }
 

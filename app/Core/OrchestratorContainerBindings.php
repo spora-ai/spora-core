@@ -139,6 +139,7 @@ final class OrchestratorContainerBindings
                         effortService: $c->get(EffortService::class),
                         usageMeter: $c->get(UsageMeterInterface::class),
                         llmCallRunner: $c->get(LlmCallRunner::class),
+                        workerRuntimeMode: $c->get(WorkerRuntimeMode::class),
                     ),
                     $c->get(PrincipalResolver::class),
                     $c->get(AuthService::class),
@@ -189,6 +190,16 @@ final class OrchestratorContainerBindings
             DbRateLimiter::class => static fn(): DbRateLimiter => new DbRateLimiter(),
 
             HousekeepingLock::class => static fn(): HousekeepingLock => new HousekeepingLock(),
+
+            // The scheduler is the one place that arms a retry, so it is
+            // the one place that knows which runtime can claim it.
+            RetryScheduler::class => static function (ContainerInterface $c): RetryScheduler {
+                return new RetryScheduler(
+                    $c->get(LoggerInterface::class),
+                    $c->get(NotificationService::class),
+                    $c->get(WorkerRuntimeMode::class),
+                );
+            },
 
             WorkerReaper::class => static function (ContainerInterface $c): WorkerReaper {
                 return new WorkerReaper(
