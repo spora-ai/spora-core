@@ -43,6 +43,16 @@ use Throwable;
 final class Task extends Model
 {
     use HasStringColumnLengthValidation;
+
+    /**
+     * The column's own spelling of a timestamp.
+     *
+     * `retry_after` is a UTC column, and the worker daemon's claim query
+     * compares it against `gmdate()` — so the value that goes in and the
+     * value that comes out are spelled the same way.
+     */
+    public const TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
+
     /** @var string */
     protected $table = 'tasks';
 
@@ -155,7 +165,7 @@ final class Task extends Model
             // A model built from an array holds the instant itself; the
             // column holds its UTC spelling. Normalising to that spelling
             // here lets both go through the one parse below.
-            $raw = Carbon::instance($raw)->utc()->format('Y-m-d H:i:s');
+            $raw = Carbon::instance($raw)->utc()->format(self::TIMESTAMP_FORMAT);
         }
 
         if (!is_string($raw) || $raw === '') {
@@ -163,7 +173,7 @@ final class Task extends Model
         }
 
         try {
-            return Carbon::createFromFormat('Y-m-d H:i:s', $raw, 'UTC');
+            return Carbon::createFromFormat(self::TIMESTAMP_FORMAT, $raw, 'UTC');
         } catch (Throwable) {
             return null;
         }
@@ -186,7 +196,7 @@ final class Task extends Model
         }
 
         if ($value instanceof DateTimeInterface) {
-            $this->attributes['retry_after'] = Carbon::instance($value)->utc()->format('Y-m-d H:i:s');
+            $this->attributes['retry_after'] = Carbon::instance($value)->utc()->format(self::TIMESTAMP_FORMAT);
             return;
         }
 
