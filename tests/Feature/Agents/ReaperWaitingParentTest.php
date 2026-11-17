@@ -15,14 +15,16 @@ use Spora\Services\NotificationService;
 use Symfony\Component\Console\Output\BufferedOutput;
 
 /**
- * A parent that waits on a child's retry is not an orphan.
+ * A parent that waits on a child that still owes it an answer is not an
+ * orphan.
  *
  * A parent in AWAITING_SUB_AGENTS holds no live lease while its child
  * runs: the lease is only renewed inside a tick, and the parent is not
  * ticking. The sweep's stale threshold is an hour, so a parent whose
- * child is waiting for a retry that is due later than that is reachable
- * by the sweep — and failing it would take away the answer the retry is
- * about to produce, and blame the parent for the child's failure.
+ * child is still working — or waiting for a retry that is due later than
+ * that — is reachable by the sweep, and failing it would take away the
+ * answer the child is about to produce, and blame the parent for the
+ * child's failure.
  *
  * The exclusion has to hold for the write as well as for the selection:
  * a child can arm its retry between the two, and the write is the one
@@ -32,6 +34,10 @@ use Symfony\Component\Console\Output\BufferedOutput;
  * reaped and their retries are armed before the parents are judged, so a
  * parent whose child the sweep reaped in this very pass waits for that
  * child's retry instead of being failed for it.
+ *
+ * The other half of the rule is that the parent must not wait forever: a
+ * child that has not moved for longer than the threshold is not coming
+ * back, and nothing else would ever free the parent that waits for it.
  */
 
 defined('WAITING_PARENT_TEST_PASSWORD') || define('WAITING_PARENT_TEST_PASSWORD', 'Password1!');
@@ -281,4 +287,64 @@ it('reaps a parent whose child has no retry coming', function (): void {
     expect($child->refresh()->status)->toBe('FAILED')
         ->and($child->retry_after)->toBeNull()
         ->and($parent->refresh()->status)->toBe('FAILED');
+});
+
+it('does not reap a parent whose child retry has been claimed', function (): void {
+    // The retry was claimed: the child is queued and its `retry_after` is
+    // cleared. The parent's answer is still coming — the child is waiting
+    // for a worker to pick it up — so the parent must not be failed while
+    // the child is in the queue.
+    [$agentId, $userId] = waitingParentSeedAgent();
+    $parent = waitingParentStaleParent($agentId, $userId);
+    $child  = waitingParentChild($agentId, $userId, (int) $parent->id, null, 'QUEUED');
+    Capsule::table('tasks')->where('id', $child->id)->update([
+        'updated_at' => gmdate(WAITING_PARENT_DT, time() - 60),
+    ]);
+
+    waitingParentReaper()->reapStaleTasks(new BufferedOutput(), 60);
+
+    expect($parent->refresh()->status)->toBe('AWAITING_SUB_AGENTS')
+        ->and($child->refresh()->status)->toBe('QUEUED');
+});
+
+it('reaps a parent whose claimed child never runs again', function (): void {
+    // The counterpart: nothing will ever claim that queued child — the
+    // sweep does not touch QUEUED rows — so a parent that waited for it
+    // forever would never be recovered. The child's own staleness is what
+    // ends the wait.
+    [$agentId, $userId] = waitingParentSeedAgent();
+    $parent = waitingParentStaleParent($agentId, $userId);
+    $child  = waitingParentChild($agentId, $userId, (int) $parent->id, null, 'QUEUED');
+    waitingParentMakeStale($child);
+
+    waitingParentReaper()->reapStaleTasks(new BufferedOutput(), 60);
+
+    $fresh = $parent->refresh();
+
+    expect($fresh->status)->toBe('FAILED')
+        ->and((string) $fresh->error_code)->toBe('WORKER_DISCONNECTED');
+});
+
+it('does not reap a grandparent whose child is waiting for the reaped child', function (): void {
+    // A grandparent waits for the parent, and the parent waits for the
+    // child the sweep just reaped. The retry is still on its way, so the
+    // grandparent must not be failed for it — the parent's own clock is
+    // restarted when the child's retry is armed, and that is what keeps
+    // the grandparent waiting.
+    [$agentId, $userId] = waitingParentSeedAgent(maxRetries: 3, retryAfterMinutes: 5);
+    $grandparent = waitingParentStaleParent($agentId, $userId);
+    $parent = waitingParentStaleParent($agentId, $userId);
+    Capsule::table('tasks')->where('id', $parent->id)->update([
+        'parent_task_id' => $grandparent->id,
+    ]);
+
+    $child = waitingParentChild($agentId, $userId, (int) $parent->id, null, 'RUNNING');
+    waitingParentMakeStale($child);
+
+    waitingParentReaperWithRetries()->reapStaleTasks(new BufferedOutput(), 60);
+
+    expect($child->refresh()->status)->toBe('FAILED')
+        ->and($child->retry_after)->not->toBeNull()
+        ->and($parent->refresh()->status)->toBe('AWAITING_SUB_AGENTS')
+        ->and($grandparent->refresh()->status)->toBe('AWAITING_SUB_AGENTS');
 });

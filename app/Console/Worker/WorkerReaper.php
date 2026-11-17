@@ -6,7 +6,9 @@ namespace Spora\Console\Worker;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\LoggerInterface;
+use Spora\Agents\Orchestrator;
 use Spora\Agents\RetryScheduler;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Models\Task;
@@ -29,10 +31,10 @@ use Throwable;
  * parent whose child was reaped in this very sweep waits for that
  * child's retry, and the guard can only see that retry once it is armed.
  *
- * A parent that waits on a child's pending retry is not swept: the
- * parent's lease is not renewed while it waits, so the sweep would reach
- * it, and failing it would take away the answer the retry is about to
- * produce.
+ * A parent that waits on a child that still owes it an answer is not
+ * swept: the parent's lease is not renewed while it waits, so the sweep
+ * would reach it, and failing it would take away the answer that is
+ * still on its way.
  *
  * These orphans are produced when a worker process is killed ungracefully (OOM, server
  * reboot, SIGKILL) before it can clean up. The reaper runs once at startup and
@@ -67,12 +69,6 @@ final class WorkerReaper
             return;
         }
 
-        // The children are reaped and their retries are armed before the
-        // parents are judged: a parent whose child was reaped in this very
-        // sweep waits for that child's retry, and the guard that keeps such
-        // a parent out of the sweep can only see the retry once it is
-        // armed.
-        //
         // The flip carries the predicates that decide a row's fate: the
         // status it was selected in and the chain marker. Two reapers may
         // sweep at once — `--reap-only` deliberately skips the
@@ -81,10 +77,15 @@ final class WorkerReaper
         // attempt of the retry budget and send a second notification. The
         // rows this write actually matched are the ones that were reaped;
         // the rest belong to the sweep that won.
+        //
+        // The children are reaped and armed before the parents are judged:
+        // a parent whose child was just reaped waits for that child's
+        // retry, and the guard that keeps such a parent out of the sweep
+        // can only see the retry once it is armed.
         $reapedChildren = $this->markReaped($children, $staleMinutes);
         $this->armRetries($reapedChildren);
 
-        $reapedParents = $this->markReaped($parents, $staleMinutes);
+        $reapedParents = $this->markWaitingParents($parents, $now, $threshold, $staleMinutes);
         $this->armRetries($reapedParents);
 
         $reaped = array_merge($reapedChildren, $reapedParents);
@@ -143,6 +144,9 @@ final class WorkerReaper
      * the difference is the whole point: the reaped set decides which
      * tasks get a retry, a notification and a resume hook.
      *
+     * A RUNNING row is not waiting for anything: it is a task whose
+     * worker vanished, and the recovery for that is its own retry.
+     *
      * @param list<int> $candidateIds
      * @return list<int>
      */
@@ -151,11 +155,7 @@ final class WorkerReaper
         $reaped = [];
 
         foreach ($candidateIds as $candidateId) {
-            if ($this->childWaitsOnPendingRetry($candidateId)) {
-                continue;
-            }
-
-            $affected = $this->flipToFailed($candidateId, ['RUNNING', 'AWAITING_SUB_AGENTS'], $staleMinutes);
+            $affected = $this->flipToFailed($candidateId, 'RUNNING', $staleMinutes);
 
             if ($affected > 0) {
                 $reaped[] = $candidateId;
@@ -166,49 +166,122 @@ final class WorkerReaper
     }
 
     /**
-     * Keep a parent that waits on a child's pending retry out of the sweep.
+     * Flip the waiting parents that are genuinely stalled.
      *
-     * A parent in AWAITING_SUB_AGENTS holds no live lease while its child
-     * waits: the lease is only renewed inside a tick, and the parent is not
-     * ticking. So the sweep reaches a parent whose child is waiting for a
-     * retry — and failing that parent would take away the answer the retry
-     * is going to produce, and would blame the parent for a failure that is
-     * not its own.
+     * A parent whose child still owes it an answer is left alone — see
+     * {@see childStillOwesAnAnswer()}. The rest are flipped exactly like
+     * the RUNNING rows: the write is the database's decision, so a parent
+     * another sweep already flipped, or one that has resumed in the
+     * meantime, matches nothing and is left alone.
      *
-     * The child lookup is a read of its own: the flip's predicate must not
-     * read the table it writes, because MySQL refuses an UPDATE that
-     * selects from its own target table ("You can't specify target table
-     * 'tasks' for update in FROM clause"), and the way around it — a
-     * derived table the optimizer is free to merge back into that
-     * self-reference — is a promise no engine keeps.
+     * @param list<int> $candidateIds
+     * @return list<int>
      */
-    private function childWaitsOnPendingRetry(int $parentId): bool
-    {
-        return Task::where('parent_task_id', $parentId)
-            ->whereNotNull('retry_after')
-            ->exists();
+    private function markWaitingParents(
+        array $candidateIds,
+        DateTimeImmutable $now,
+        DateTimeImmutable $threshold,
+        int $staleMinutes,
+    ): array {
+        $reaped = [];
+
+        foreach ($candidateIds as $candidateId) {
+            if ($this->childStillOwesAnAnswer($candidateId, $now, $threshold)) {
+                continue;
+            }
+
+            $affected = $this->flipToFailed($candidateId, 'AWAITING_SUB_AGENTS', $staleMinutes);
+
+            if ($affected > 0) {
+                $reaped[] = $candidateId;
+            }
+        }
+
+        return $reaped;
     }
 
     /**
      * The one write the sweep makes.
      *
-     * It names the row, the statuses the row may be in and the chain
+     * It names the row, the status the row has to be in and the chain
      * marker, and nothing else: it never selects from the table it
-     * writes.
-     *
-     * @param list<string> $statuses
+     * writes. MySQL refuses an UPDATE whose predicate reads its own
+     * target table ("You can't specify target table 'tasks' for update in
+     * FROM clause"), and the way around it — a derived table the
+     * optimizer is free to merge back into that self-reference — is a
+     * promise no engine keeps.
      */
-    private function flipToFailed(int $candidateId, array $statuses, int $staleMinutes): int
+    private function flipToFailed(int $candidateId, string $status, int $staleMinutes): int
     {
         return Task::where('id', $candidateId)
-            ->whereIn('status', $statuses)
+            ->where('status', $status)
             ->whereNull('retry_of_task_id')
-            ->update([
-                'status'         => 'FAILED',
-                'failure_reason' => "Task orphaned: lease expired and no progress for {$staleMinutes} minutes.",
-                'error_code'     => 'WORKER_DISCONNECTED',
-                'error_message'  => $this->disconnectMessage(),
-            ]);
+            ->update($this->failureAttributes($staleMinutes));
+    }
+
+    /**
+     * Whether one of the parent's children still owes it an answer.
+     *
+     * A parent in AWAITING_SUB_AGENTS holds no live lease while it waits,
+     * and nothing advances its `updated_at` — the lease is only renewed
+     * inside a tick, and the parent is not ticking. So the sweep reaches a
+     * parent whose child is still working, and failing that parent would
+     * take away the answer the child is about to produce, and would blame
+     * the parent for a failure that is not its own.
+     *
+     * A child owes an answer while it carries a pending retry — the retry
+     * is still on its way — or while it has not settled and is not stale
+     * itself: a child that is queued, running or waiting is alive, and its
+     * own clock (a live lease, or a timestamp that still moves) is what
+     * says so. A child that has not moved for longer than the threshold
+     * is not coming back, and the parent must not wait for it forever: the
+     * sweep does not touch QUEUED rows, so nothing else would ever free
+     * that parent.
+     *
+     * The guard is read, not written into the flip: the flip's own
+     * predicate must not read the table it writes. The read sits
+     * immediately before the write, so the window in which a child arms
+     * its retry between the two is one statement wide. A child that
+     * fails inside that window has the outcome it had before this guard
+     * existed: its failure and the arming that follows it are two
+     * writes, and a parent judged between them sees a child that owes
+     * nothing yet.
+     */
+    private function childStillOwesAnAnswer(
+        int $parentId,
+        DateTimeImmutable $now,
+        DateTimeImmutable $threshold,
+    ): bool {
+        return Task::where('parent_task_id', $parentId)
+            ->where(function ($q) use ($now, $threshold): void {
+                $q->whereNotNull('retry_after')
+                    ->orWhere(function ($q) use ($now, $threshold): void {
+                        $q->whereNotIn('status', ['COMPLETED', 'FAILED'])
+                            ->where(function ($q) use ($now, $threshold): void {
+                                $q->where('updated_at', '>', $threshold)
+                                    ->orWhere(function ($q) use ($now): void {
+                                        $q->whereNotNull('lease_expires_at')
+                                            ->where('lease_expires_at', '>', $now);
+                                    });
+                            });
+                    });
+            })
+            ->exists();
+    }
+
+    /**
+     * What the flipped row says about why it was flipped.
+     *
+     * @return array<string, string>
+     */
+    private function failureAttributes(int $staleMinutes): array
+    {
+        return [
+            'status'         => 'FAILED',
+            'failure_reason' => "Task orphaned: lease expired and no progress for {$staleMinutes} minutes.",
+            'error_code'     => 'WORKER_DISCONNECTED',
+            'error_message'  => $this->disconnectMessage(),
+        ];
     }
 
     /**
@@ -260,7 +333,31 @@ final class WorkerReaper
             }
 
             $this->retryScheduler->scheduleAutoRetry($task, 'WORKER_DISCONNECTED');
+
+            if ($task->retry_after !== null) {
+                $this->restartParentClock($task);
+            }
         }
+    }
+
+    /**
+     * Restart the clock of the parent that waits for this child's retry.
+     *
+     * The parent is not ticking while it waits, so nothing else moves its
+     * `updated_at` — and a parent whose own parent waits for it would
+     * otherwise go stale while the retry is still on its way, which would
+     * fail that grandparent for a failure that is not its own.
+     */
+    private function restartParentClock(Task $child): void
+    {
+        if ($child->parent_task_id === null) {
+            return;
+        }
+
+        Capsule::table('tasks')
+            ->where('id', (int) $child->parent_task_id)
+            ->where('status', 'AWAITING_SUB_AGENTS')
+            ->update(['updated_at' => gmdate(Orchestrator::DB_TIMESTAMP_FORMAT, time())]);
     }
 
     private function reportReaped(int $updated, int $staleMinutes, OutputInterface $output): void
