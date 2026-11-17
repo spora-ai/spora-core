@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Agents;
 
 use Psr\Log\LoggerInterface;
+use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Metering\LlmCallRunner;
 use Spora\Metering\UsageMeterInterface;
 use Spora\Plugins\PluginLoader;
@@ -74,6 +75,10 @@ final class OrchestratorConfig
         // costs no query and behaves exactly as it did before the seam.
         public readonly ?UsageMeterInterface $usageMeter = null,
         public readonly ?LlmCallRunner $llmCallRunner = null,
+        // Which runtime drives the runs. The retry scheduler needs it:
+        // only the server worker claims a scheduled retry, so arming one
+        // in client-worker mode would promise a retry nothing picks up.
+        public readonly WorkerRuntimeMode $workerRuntimeMode = WorkerRuntimeMode::Server,
     ) {}
 
     public function withLease(string $leaseOwner, int $tickLeaseSeconds): self

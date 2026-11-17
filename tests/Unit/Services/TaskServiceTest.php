@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Events\Dispatcher;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
@@ -1321,6 +1323,213 @@ describe('TaskService — cancelRetryChain', function (): void {
         expect($failed->retry_after)->toBeNull()
             ->and($failed->retry_of_task_id)->toBeNull()
             ->and((int) $failed->retry_count)->toBe(0);
+    });
+
+    it('resumes the parent of a child whose retry was cancelled', function (): void {
+        // A child whose retry is pending keeps its parent waiting — the
+        // resume gate does not settle a parent on a failure that is about
+        // to be retried. Cancelling that retry settles the child for good,
+        // so the parent has to wake up: the retry it was waiting for is
+        // not coming.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('cancel-parent@example.com', 'Password1!', 'CancelParent');
+        simulateLoggedInSession($userId, 'cancel-parent@example.com');
+
+        $principalId = createUserPrincipalPublic($userId);
+        $agent = Agent::create([
+            'principal_id' => $principalId, 'name' => 'CancelParentAgent', 'max_steps' => 5, 'is_active' => true,
+        ]);
+
+        $parent = Task::create([
+            'principal_id' => $principalId, 'trigger_user_id' => $userId, 'agent_id' => $agent->id,
+            'status' => 'AWAITING_SUB_AGENTS', 'user_prompt' => 'delegate this', 'max_steps' => 5,
+        ]);
+
+        $child = Task::create([
+            'principal_id' => $principalId, 'trigger_user_id' => $userId, 'agent_id' => $agent->id,
+            'status' => 'FAILED', 'user_prompt' => 'do that', 'max_steps' => 5,
+            'parent_task_id' => $parent->id, 'retry_count' => 1,
+        ]);
+        $child->retry_of_task_id = $child->id;
+        $child->save();
+        Capsule::table('tasks')
+            ->where('id', $child->id)
+            ->update(['retry_after' => '2026-11-16 21:02:15']);
+
+        $parent->update([
+            'data' => [
+                'spawned_sub_task_ids'     => [$child->id],
+                'sub_agent_expected_count' => 1,
+            ],
+        ]);
+
+        $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
+        $orchestrator->shouldReceive('appendHistory')->once();
+
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+        $service = new TaskService(
+            $orchestrator,
+            $mercure,
+            Mockery::mock(TaskCompactionServiceInterface::class),
+            null,
+            new PrincipalResolver(),
+            new Spora\Services\SubAgentService(
+                static fn(): Spora\Agents\OrchestratorInterface => $orchestrator,
+            ),
+        );
+
+        expect($service->cancelRetryChain($child->id, $userId))->toBeTrue();
+
+        expect($parent->refresh()->status)->toBe('QUEUED');
+    });
+
+    it('logs a parent wake-up that fails, and tries it again', function (): void {
+        // The cancel has already happened. A wake-up that fails must not
+        // undo it — but it must not be silent either: the parent it
+        // belongs to stays waiting on a retry that is not coming, and the
+        // stale sweep would fail that parent with a cause that is not the
+        // one that happened.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('cancel-wakeup@example.com', 'Password1!', 'CancelWakeUp');
+        simulateLoggedInSession($userId, 'cancel-wakeup@example.com');
+
+        $principalId = createUserPrincipalPublic($userId);
+        $agent = Agent::create([
+            'principal_id' => $principalId, 'name' => 'CancelWakeUpAgent', 'max_steps' => 5, 'is_active' => true,
+        ]);
+
+        $parent = Task::create([
+            'principal_id' => $principalId, 'trigger_user_id' => $userId, 'agent_id' => $agent->id,
+            'status' => 'AWAITING_SUB_AGENTS', 'user_prompt' => 'delegate this', 'max_steps' => 5,
+        ]);
+
+        $child = Task::create([
+            'principal_id' => $principalId, 'trigger_user_id' => $userId, 'agent_id' => $agent->id,
+            'status' => 'FAILED', 'user_prompt' => 'do that', 'max_steps' => 5,
+            'parent_task_id' => $parent->id, 'retry_count' => 1,
+        ]);
+        $child->retry_of_task_id = $child->id;
+        $child->save();
+        Capsule::table('tasks')
+            ->where('id', $child->id)
+            ->update(['retry_after' => '2026-11-16 21:02:15']);
+
+        $subAgent = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
+        // Twice: the wake-up is retried once before the failure is logged.
+        $subAgent->shouldReceive('maybeResumeParent')->twice()
+            ->andThrow(new RuntimeException('the sub-agent service is down'));
+
+        $handler = new Monolog\Handler\TestHandler();
+        $logger = new Monolog\Logger('test', [$handler]);
+
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+        $service = new TaskService(
+            Mockery::mock(Spora\Agents\OrchestratorInterface::class),
+            $mercure,
+            Mockery::mock(TaskCompactionServiceInterface::class),
+            null,
+            new PrincipalResolver(),
+            $subAgent,
+            $logger,
+        );
+
+        // The cancel itself still succeeds: the wake-up failure must not
+        // undo it or fail the request.
+        expect($service->cancelRetryChain($child->id, $userId))->toBeTrue();
+
+        $records = $handler->getRecords();
+
+        expect($records)->not->toBeEmpty()
+            ->and($records[0]->message)->toBe('Parent wake-up after a cancelled retry failed')
+            // The parent the failure belongs to, so it can be traced.
+            ->and($records[0]->context['parent_task_id'])->toBe((int) $parent->id)
+            ->and($records[0]->context['task_id'])->toBe((int) $child->id);
+    });
+
+    it('completes the cancel when the parent lookup fails', function (): void {
+        // The cancel has already happened; the lookup that names the parent
+        // for the log entry is a diagnostic. A database that fails there
+        // must not fail the request — the entry records the parent as
+        // unknown and the failure path completes.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('cancel-lookup@example.com', 'Password1!', 'CancelLookup');
+        simulateLoggedInSession($userId, 'cancel-lookup@example.com');
+
+        $principalId = createUserPrincipalPublic($userId);
+        $agent = Agent::create([
+            'principal_id' => $principalId, 'name' => 'CancelLookupAgent', 'max_steps' => 5, 'is_active' => true,
+        ]);
+
+        $parent = Task::create([
+            'principal_id' => $principalId, 'trigger_user_id' => $userId, 'agent_id' => $agent->id,
+            'status' => 'AWAITING_SUB_AGENTS', 'user_prompt' => 'delegate this', 'max_steps' => 5,
+        ]);
+
+        $child = Task::create([
+            'principal_id' => $principalId, 'trigger_user_id' => $userId, 'agent_id' => $agent->id,
+            'status' => 'FAILED', 'user_prompt' => 'do that', 'max_steps' => 5,
+            'parent_task_id' => $parent->id, 'retry_count' => 1,
+        ]);
+        $child->retry_of_task_id = $child->id;
+        $child->save();
+        Capsule::table('tasks')
+            ->where('id', $child->id)
+            ->update(['retry_after' => '2026-11-16 21:02:15']);
+
+        $subAgent = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
+        // Twice: the wake-up is retried once before the failure is logged.
+        $subAgent->shouldReceive('maybeResumeParent')->twice()
+            ->andThrow(new RuntimeException('the sub-agent service is down'));
+
+        $handler = new Monolog\Handler\TestHandler();
+        $logger = new Monolog\Logger('test', [$handler]);
+
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+        $service = new TaskService(
+            Mockery::mock(Spora\Agents\OrchestratorInterface::class),
+            $mercure,
+            Mockery::mock(TaskCompactionServiceInterface::class),
+            null,
+            new PrincipalResolver(),
+            $subAgent,
+            $logger,
+        );
+
+        // The lookup of the parent for the log entry is the one query that
+        // fails; the cancel's own reads and writes still work.
+        $connection = Capsule::connection();
+        $previousDispatcher = $connection->getEventDispatcher();
+        $dispatcher = new Dispatcher();
+        $connection->setEventDispatcher($dispatcher);
+        $dispatcher->listen(QueryExecuted::class, function (QueryExecuted $event): void {
+            $sql = strtolower(trim($event->sql));
+            if (!str_starts_with($sql, 'select') || !str_contains($sql, 'parent_task_id')) {
+                return;
+            }
+
+            throw new RuntimeException('the database is down');
+        });
+
+        try {
+            expect($service->cancelRetryChain($child->id, $userId))->toBeTrue();
+        } finally {
+            if ($previousDispatcher === null) {
+                $connection->unsetEventDispatcher();
+            } else {
+                $connection->setEventDispatcher($previousDispatcher);
+            }
+        }
+
+        $records = $handler->getRecords();
+
+        expect($records)->not->toBeEmpty()
+            ->and($records[0]->message)->toBe('Parent wake-up after a cancelled retry failed')
+            // The parent could not be looked up, so the entry says so.
+            ->and($records[0]->context['parent_task_id'])->toBeNull()
+            ->and($records[0]->context['task_id'])->toBe((int) $child->id);
     });
 });
 

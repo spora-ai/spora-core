@@ -19,7 +19,8 @@ use Throwable;
 
 /**
  * Spawns child tasks from a `SubAgentTool` `sub_agent` invocation and
- * resumes the parent once every child reaches a terminal state.
+ * resumes the parent once every child has settled — terminal, and not
+ * waiting on a retry of its own.
  *
  * Authorization mirrors {@see HandoverService::handover()}: the caller
  * must own both the parent task and the target agent.
@@ -217,7 +218,7 @@ final class SubAgentService implements SubAgentServiceInterface
      * Batch-boundary hook — fires from ApprovedBatchExecutor (sync) and
      * TickPhaseRunner (worker) after every approved tool in a batch has
      * run. Resumes the parent iff the spawned-id count matches
-     * `sub_agent_expected_count` and every sibling is terminal.
+     * `sub_agent_expected_count` and every sibling has settled.
      *
      * The batch-open flag is cleared BEFORE the resume decision so the next
      * per-child event (e.g. a sibling re-ticked from QUEUED in worker mode)
@@ -276,8 +277,8 @@ final class SubAgentService implements SubAgentServiceInterface
 
     /**
      * Multi-child gate: true only when the spawned-id count matches
-     * `sub_agent_expected_count`, the child just completed is terminal, and
-     * every sibling has reached a terminal state.
+     * `sub_agent_expected_count`, the child just completed is settled, and
+     * every sibling has settled too.
      */
     private function isBatchReadyToResume(Task $parent, array $siblingIds, Task $child): bool
     {
@@ -285,7 +286,7 @@ final class SubAgentService implements SubAgentServiceInterface
 
         return $expectedCount > 0
             && count($siblingIds) === $expectedCount
-            && in_array($child->status, ['COMPLETED', 'FAILED'], true)
+            && ChildSettlement::isSettled($child)
             && $this->allSiblingsTerminal($siblingIds);
     }
 
@@ -296,7 +297,7 @@ final class SubAgentService implements SubAgentServiceInterface
     {
         foreach ($siblingIds as $siblingId) {
             $sibling = Task::find($siblingId);
-            if ($sibling === null || !in_array($sibling->status, ['COMPLETED', 'FAILED'], true)) {
+            if ($sibling === null || !ChildSettlement::isSettled($sibling)) {
                 return false;
             }
         }

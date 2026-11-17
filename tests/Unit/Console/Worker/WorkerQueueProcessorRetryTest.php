@@ -181,15 +181,20 @@ describe('WorkerQueueProcessor::processRetryQueue — DB-driven candidate select
     it('matches a task whose retry_after equals now exactly (boundary, <=)', function (): void {
         // The SQL uses `<=`, so a retry_after stamped at exactly the
         // same second the worker's $now is computed MUST still match.
-        // Take a single snapshot of date() and apply it via DB::raw so
+        // Take a single snapshot of gmdate() and apply it via DB::raw so
         // the stored value is bit-identical to what the worker
         // generates a moment later — avoids a string-vs-string
         // comparison skew on either engine.
+        //
+        // gmdate(), not date(): `tasks.retry_after` is a UTC column, and
+        // the worker compares it against UTC. A local-time snapshot would
+        // put the two clocks in different places and the boundary would
+        // only hold on a host that happens to run in UTC.
         [$logger] = makeRetryLogger();
         [$userId, $agentId, $principalId] = seedRetryAgent('retry-boundary@example.com');
 
         $taskId = insertRetryTask($agentId, $principalId, $userId);
-        $nowSnapshot = "'" . date(RETRY_T_DT) . "'";
+        $nowSnapshot = "'" . gmdate(RETRY_T_DT) . "'";
         setTaskRetryAfter($taskId, $nowSnapshot);
         Capsule::table('tasks')->where('id', $taskId)->update(['retry_of_task_id' => $taskId]);
 

@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Spora\Models;
 
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 use Spora\Models\Concerns\HasStringColumnLengthValidation;
+use Throwable;
 
 /**
  * @property int         $id
@@ -41,6 +43,16 @@ use Spora\Models\Concerns\HasStringColumnLengthValidation;
 final class Task extends Model
 {
     use HasStringColumnLengthValidation;
+
+    /**
+     * The column's own spelling of a timestamp.
+     *
+     * `retry_after` is a UTC column, and the worker daemon's claim query
+     * compares it against `gmdate()` — so the value that goes in and the
+     * value that comes out are spelled the same way.
+     */
+    public const TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
+
     /** @var string */
     protected $table = 'tasks';
 
@@ -125,6 +137,70 @@ final class Task extends Model
     public function triggerUserId(): ?int
     {
         return $this->trigger_user_id !== null ? (int) $this->trigger_user_id : null;
+    }
+
+    /**
+     * The moment a pending retry becomes due, read as the instant it names.
+     *
+     * `retry_after` is a UTC column: the worker daemon's claim query
+     * compares it against `gmdate()`, so the stored string is UTC.
+     * Eloquent's `datetime` cast parses it in the process default timezone
+     * instead — and `Kernel` never calls `date_default_timezone_set()` — so
+     * on a host whose php.ini names a local zone the stamp comes back an
+     * hour (or more) off, and the countdown the browser shows is wrong by
+     * that much. Parsed as UTC here, the way
+     * {@see \Spora\Http\Middleware\ApiKeyAuthenticator} reads `last_used_at`.
+     *
+     * The value the model currently holds is read rather than the last
+     * synchronised snapshot: the snapshot cannot see an assignment that
+     * has not been saved, and the model in hand is the truth about the
+     * row. {@see setRetryAfterAttribute()} spells every assignment in
+     * UTC, so the instant survives that assignment.
+     */
+    public function retryAfterUtc(): ?Carbon
+    {
+        $raw = $this->attributes['retry_after'] ?? null;
+
+        if ($raw instanceof DateTimeInterface) {
+            // A model built from an array holds the instant itself; the
+            // column holds its UTC spelling. Normalising to that spelling
+            // here lets both go through the one parse below.
+            $raw = Carbon::instance($raw)->utc()->format(self::TIMESTAMP_FORMAT);
+        }
+
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::createFromFormat(self::TIMESTAMP_FORMAT, $raw, 'UTC');
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * The column is UTC, so an assignment is spelled in UTC.
+     *
+     * The `datetime` cast would write the wall clock of whatever timezone
+     * the assigned value carries — an hour off on a host that is not UTC,
+     * and the worker's claim query compares the column against `gmdate()`.
+     * A string is the column's own spelling and is kept as it is; a date
+     * object carries the instant and is converted.
+     */
+    protected function setRetryAfterAttribute(mixed $value): void
+    {
+        if ($value === null) {
+            $this->attributes['retry_after'] = null;
+            return;
+        }
+
+        if ($value instanceof DateTimeInterface) {
+            $this->attributes['retry_after'] = Carbon::instance($value)->utc()->format(self::TIMESTAMP_FORMAT);
+            return;
+        }
+
+        $this->attributes['retry_after'] = (string) $value;
     }
 
     /**

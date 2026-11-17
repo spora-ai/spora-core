@@ -8,6 +8,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use InvalidArgumentException;
+use Psr\Log\LoggerInterface;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\TaskStartOptions;
@@ -24,6 +25,12 @@ final class TaskService implements TaskServiceInterface
 {
     private const ERR_TASK_NOT_FOUND = 'Task not found.';
 
+    /**
+     * How often a parent is woken after a cancelled retry before the
+     * failure is logged.
+     */
+    private const PARENT_WAKE_ATTEMPTS = 2;
+
     private AnswerTaskRecorder $answerRecorder;
     private TaskResourceBuilder $resources;
 
@@ -33,6 +40,8 @@ final class TaskService implements TaskServiceInterface
         private readonly TaskCompactionServiceInterface $compactionService,
         ?ToolCallSerializer $toolCallSerializer = null,
         private readonly ?PrincipalResolver $principalResolver = null,
+        private readonly ?SubAgentServiceInterface $subAgent = null,
+        private readonly ?LoggerInterface $logger = null,
     ) {
         $this->answerRecorder = new AnswerTaskRecorder($this->orchestrator, $this->principalResolver);
         $this->resources = new TaskResourceBuilder($toolCallSerializer);
@@ -535,6 +544,18 @@ final class TaskService implements TaskServiceInterface
         // group member triggered the cancel. Filter on the user's
         // own user-principal would silently no-op for group-shared
         // chains (their principal_id is the group, not the caller).
+        //
+        // The rows are listed before the write: afterwards they no longer
+        // carry the chain marker, so the query would find nothing.
+        $chainIds = Capsule::table('tasks')
+            ->where('principal_id', (int) $task->principal_id)
+            ->where('retry_of_task_id', $task->retry_of_task_id)
+            ->where('retry_count', '>=', $task->retry_count)
+            ->where('status', 'FAILED')
+            ->pluck('id')
+            ->map(static fn(mixed $id): int => (int) $id)
+            ->all();
+
         Capsule::table('tasks')
             ->where('principal_id', (int) $task->principal_id)
             ->where('retry_of_task_id', $task->retry_of_task_id)
@@ -546,6 +567,66 @@ final class TaskService implements TaskServiceInterface
                 'retry_count'      => 0,
             ]);
 
+        $this->resumeParentsOfCancelledRetries($chainIds);
+
         return true;
+    }
+
+    /**
+     * Wake the parents of the rows the cancel settled.
+     *
+     * A cancelled retry settles the child for good, so a parent waiting on
+     * that child can resume. Without this the parent would sit in
+     * AWAITING_SUB_AGENTS until the reaper failed it — the retry it was
+     * waiting for is not coming.
+     *
+     * @param list<int> $chainIds
+     */
+    private function resumeParentsOfCancelledRetries(array $chainIds): void
+    {
+        if ($this->subAgent === null) {
+            return;
+        }
+
+        // The cancel has already happened; a failed wake-up must not undo
+        // it or fail the request. It must not be silent either: a parent
+        // left waiting on a retry that is not coming is failed by the
+        // stale sweep with a cause that is not the one that happened. The
+        // wake-up is tried twice — a transient failure is the common case
+        // — and the failure is logged with the parent it belongs to.
+        foreach ($chainIds as $chainId) {
+            $failure = null;
+
+            for ($attempt = 1; $attempt <= self::PARENT_WAKE_ATTEMPTS; $attempt++) {
+                try {
+                    $this->subAgent->maybeResumeParent($chainId);
+                    $failure = null;
+                    break;
+                } catch (Throwable $e) {
+                    $failure = $e;
+                }
+            }
+
+            if ($failure === null) {
+                continue;
+            }
+
+            // The parent is only named for the log entry, so a lookup that
+            // fails must not fail the request: the cancel has already
+            // happened, and the entry records the parent as unknown.
+            $parentId = null;
+
+            try {
+                $parentId = Task::where('id', $chainId)->value('parent_task_id');
+            } catch (Throwable) {
+                // The wake-up failure below is the one worth reporting.
+            }
+
+            $this->logger?->error('Parent wake-up after a cancelled retry failed', [
+                'task_id'        => $chainId,
+                'parent_task_id' => $parentId === null ? null : (int) $parentId,
+                'exception'      => $failure->getMessage(),
+            ]);
+        }
     }
 }

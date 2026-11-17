@@ -159,7 +159,7 @@ final class Orchestrator implements OrchestratorInterface
             fn(array $llmSettings): string => (new LlmConfigBlockRenderer())->render($llmSettings),
             $config->logger,
         );
-        $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
+        $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService, $config->workerRuntimeMode);
 
         $this->usageMeter             = $config->usageMeter ?? new NullUsageMeter();
         $this->meteringContextFactory = new MeteringContextFactory();

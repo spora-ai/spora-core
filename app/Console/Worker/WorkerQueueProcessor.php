@@ -422,7 +422,12 @@ final class WorkerQueueProcessor
      */
     public function processRetryQueue(): void
     {
-        $now = date(self::DB_DATETIME_FORMAT);
+        // UTC: `tasks.retry_after` is a UTC column — the scheduler stamps it
+        // with gmdate — so this comparison has to read it the same way,
+        // whatever the host's timezone is. The worker daemon pins UTC, but
+        // the stamp has to be correct for the scheduler too, which runs in
+        // a different process and does not.
+        $now = gmdate(self::DB_DATETIME_FORMAT);
 
         $retryTasks = Capsule::connection()->select("
             SELECT id, retry_count, agent_id
