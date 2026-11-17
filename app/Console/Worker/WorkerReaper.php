@@ -7,11 +7,13 @@ namespace Spora\Console\Worker;
 use DateTimeImmutable;
 use DateTimeZone;
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Support\Collection;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\RetryScheduler;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Models\Task;
+use Spora\Services\ChildSettlement;
 use Spora\Services\NotificationService;
 use Spora\Services\SubAgentServiceInterface;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -34,7 +36,9 @@ use Throwable;
  * A parent that waits on a child that still owes it an answer is not
  * swept: the parent's lease is not renewed while it waits, so the sweep
  * would reach it, and failing it would take away the answer that is
- * still on its way.
+ * still on its way. The answer is owed down the whole chain: a
+ * grandchild's retry keeps its parent waiting, and that parent keeps
+ * the grandparent waiting.
  *
  * These orphans are produced when a worker process is killed ungracefully (OOM, server
  * reboot, SIGKILL) before it can clean up. The reaper runs once at startup and
@@ -45,6 +49,18 @@ use Throwable;
  */
 final class WorkerReaper
 {
+    /**
+     * How deep the walk that asks "does this task still owe an answer?"
+     * descends.
+     *
+     * A sub-agent chain is a handful of levels deep — a conversation
+     * spawns a sub-agent, which spawns a sub-agent — and eight is far
+     * past what a run produces. The bound is also what keeps a malformed
+     * `parent_task_id` (a row that is its own ancestor) from turning the
+     * walk into an endless one.
+     */
+    private const MAX_OWES_DEPTH = 8;
+
     public function __construct(
         private readonly LoggerInterface $logger,
         private readonly NotificationService $notificationService,
@@ -222,21 +238,12 @@ final class WorkerReaper
     /**
      * Whether one of the parent's children still owes it an answer.
      *
-     * A parent in AWAITING_SUB_AGENTS holds no live lease while it waits,
-     * and nothing advances its `updated_at` — the lease is only renewed
-     * inside a tick, and the parent is not ticking. So the sweep reaches a
-     * parent whose child is still working, and failing that parent would
-     * take away the answer the child is about to produce, and would blame
-     * the parent for a failure that is not its own.
-     *
-     * A child owes an answer while it carries a pending retry — the retry
-     * is still on its way — or while it has not settled and is not stale
-     * itself: a child that is queued, running or waiting is alive, and its
-     * own clock (a live lease, or a timestamp that still moves) is what
-     * says so. A child that has not moved for longer than the threshold
-     * is not coming back, and the parent must not wait for it forever: the
-     * sweep does not touch QUEUED rows, so nothing else would ever free
-     * that parent.
+     * The answer is owed down the whole chain, not only to the direct
+     * parent: a grandchild's retry keeps its parent waiting, and that
+     * parent keeps the grandparent waiting. One timestamp cannot carry
+     * that — a retry that is due later than the sweep's threshold runs
+     * out of the single period a parent's clock buys — so the walk asks
+     * each descendant in turn.
      *
      * The guard is read, not written into the flip: the flip's own
      * predicate must not read the table it writes. The read sits
@@ -252,21 +259,88 @@ final class WorkerReaper
         DateTimeImmutable $now,
         DateTimeImmutable $threshold,
     ): bool {
-        return Task::where('parent_task_id', $parentId)
+        foreach ($this->childrenOf($parentId) as $child) {
+            if ($this->taskOwesAnAnswer($child, $now, $threshold, self::MAX_OWES_DEPTH)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the task still owes an answer to its parent.
+     *
+     * A task owes an answer while it carries a pending retry — the retry
+     * is still on its way — or while it has not settled and it is either
+     * alive itself (a timestamp that still moves, or a live lease) or
+     * one of its own children owes an answer.
+     *
+     * The staleness test is the bottom of the walk: a task that has not
+     * moved for longer than the threshold, carries no pending retry and
+     * has no child that owes an answer does not owe an answer itself,
+     * and the chain it belonged to stops protecting anything above it.
+     * A parent must not wait forever on a child that will never run
+     * again — the sweep does not touch QUEUED rows, so nothing else
+     * would ever free that parent.
+     */
+    private function taskOwesAnAnswer(
+        Task $task,
+        DateTimeImmutable $now,
+        DateTimeImmutable $threshold,
+        int $depth,
+    ): bool {
+        $owes = false;
+        $settled = ChildSettlement::isSettled($task);
+
+        if (!$settled) {
+            if ($task->retry_after !== null) {
+                // The retry is still on its way.
+                $owes = true;
+            } elseif ($this->isStillAlive($task, $now, $threshold)) {
+                $owes = true;
+            } elseif ($depth > 0) {
+                // Not alive itself: the answer is still on its way if one
+                // of its own children owes one.
+                foreach ($this->childrenOf((int) $task->id) as $child) {
+                    if ($this->taskOwesAnAnswer($child, $now, $threshold, $depth - 1)) {
+                        $owes = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return $owes;
+    }
+
+    /**
+     * Whether the task's own clock says it is still working.
+     *
+     * The comparison stays in the database: `updated_at` and
+     * `lease_expires_at` are UTC columns, and the model's cast would
+     * parse them in the process's timezone — which is not UTC on every
+     * host, while the threshold is a UTC instant.
+     */
+    private function isStillAlive(Task $task, DateTimeImmutable $now, DateTimeImmutable $threshold): bool
+    {
+        return Task::where('id', $task->id)
             ->where(function ($q) use ($now, $threshold): void {
-                $q->whereNotNull('retry_after')
-                    ->orWhere(function ($q) use ($now, $threshold): void {
-                        $q->whereNotIn('status', ['COMPLETED', 'FAILED'])
-                            ->where(function ($q) use ($now, $threshold): void {
-                                $q->where('updated_at', '>', $threshold)
-                                    ->orWhere(function ($q) use ($now): void {
-                                        $q->whereNotNull('lease_expires_at')
-                                            ->where('lease_expires_at', '>', $now);
-                                    });
-                            });
+                $q->where('updated_at', '>', $threshold)
+                    ->orWhere(function ($q) use ($now): void {
+                        $q->whereNotNull('lease_expires_at')
+                            ->where('lease_expires_at', '>', $now);
                     });
             })
             ->exists();
+    }
+
+    /**
+     * @return Collection<int, Task>
+     */
+    private function childrenOf(int $parentId): Collection
+    {
+        return Task::where('parent_task_id', $parentId)->get();
     }
 
     /**
@@ -344,9 +418,10 @@ final class WorkerReaper
      * Restart the clock of the parent that waits for this child's retry.
      *
      * The parent is not ticking while it waits, so nothing else moves its
-     * `updated_at` — and a parent whose own parent waits for it would
-     * otherwise go stale while the retry is still on its way, which would
-     * fail that grandparent for a failure that is not its own.
+     * `updated_at` — and its situation did change: the retry it was
+     * waiting for is now on its way. The chain's protection does not
+     * rest on this stamp; {@see childStillOwesAnAnswer()} walks the chain
+     * and finds the pending retry wherever it sits.
      */
     private function restartParentClock(Task $child): void
     {

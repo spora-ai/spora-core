@@ -148,6 +148,23 @@ function waitingParentMakeStale(Task $task): void
     ]);
 }
 
+/**
+ * A chain of three: a grandparent that waits for a parent, and a parent
+ * that waits for a child. Both ancestors are stale.
+ *
+ * @return array{grandparent: Task, parent: Task}
+ */
+function waitingParentChain(int $agentId, int $userId): array
+{
+    $grandparent = waitingParentStaleParent($agentId, $userId);
+    $parent = waitingParentStaleParent($agentId, $userId);
+    Capsule::table('tasks')->where('id', $parent->id)->update([
+        'parent_task_id' => $grandparent->id,
+    ]);
+
+    return ['grandparent' => $grandparent, 'parent' => $parent];
+}
+
 it('does not reap a parent whose child is waiting for a retry', function (): void {
     // The retry is due in an hour — longer than the sweep's threshold, so
     // the parent goes stale while the child still waits.
@@ -328,15 +345,10 @@ it('reaps a parent whose claimed child never runs again', function (): void {
 it('does not reap a grandparent whose child is waiting for the reaped child', function (): void {
     // A grandparent waits for the parent, and the parent waits for the
     // child the sweep just reaped. The retry is still on its way, so the
-    // grandparent must not be failed for it — the parent's own clock is
-    // restarted when the child's retry is armed, and that is what keeps
-    // the grandparent waiting.
+    // grandparent must not be failed for it — the guard walks the chain
+    // and finds the pending retry at the bottom of it.
     [$agentId, $userId] = waitingParentSeedAgent(maxRetries: 3, retryAfterMinutes: 5);
-    $grandparent = waitingParentStaleParent($agentId, $userId);
-    $parent = waitingParentStaleParent($agentId, $userId);
-    Capsule::table('tasks')->where('id', $parent->id)->update([
-        'parent_task_id' => $grandparent->id,
-    ]);
+    ['grandparent' => $grandparent, 'parent' => $parent] = waitingParentChain($agentId, $userId);
 
     $child = waitingParentChild($agentId, $userId, (int) $parent->id, null, 'RUNNING');
     waitingParentMakeStale($child);
@@ -347,4 +359,91 @@ it('does not reap a grandparent whose child is waiting for the reaped child', fu
         ->and($child->retry_after)->not->toBeNull()
         ->and($parent->refresh()->status)->toBe('AWAITING_SUB_AGENTS')
         ->and($grandparent->refresh()->status)->toBe('AWAITING_SUB_AGENTS');
+});
+
+it('does not reap a grandparent while the chain below it is still owed an answer', function (): void {
+    // The retry the sweep arms is due in two hours — longer than the
+    // sweep's one-hour threshold. A sweep after that threshold must still
+    // leave the grandparent alone: the chain below it is still owed an
+    // answer, and no single timestamp says so.
+    [$agentId, $userId] = waitingParentSeedAgent(maxRetries: 3, retryAfterMinutes: 120);
+    ['grandparent' => $grandparent, 'parent' => $parent] = waitingParentChain($agentId, $userId);
+
+    $child = waitingParentChild($agentId, $userId, (int) $parent->id, null, 'RUNNING');
+    waitingParentMakeStale($child);
+
+    $reaper = waitingParentReaperWithRetries();
+
+    // The first sweep reaps the child and arms its retry.
+    $reaper->reapStaleTasks(new BufferedOutput(), 60);
+
+    expect($child->refresh()->status)->toBe('FAILED')
+        ->and($child->retry_after)->not->toBeNull()
+        ->and($parent->refresh()->status)->toBe('AWAITING_SUB_AGENTS')
+        ->and($grandparent->refresh()->status)->toBe('AWAITING_SUB_AGENTS');
+
+    // The threshold passes while the retry is still on its way.
+    waitingParentMakeStale($parent);
+    waitingParentMakeStale($grandparent);
+
+    $reaper->reapStaleTasks(new BufferedOutput(), 60);
+
+    expect($parent->refresh()->status)->toBe('AWAITING_SUB_AGENTS')
+        ->and($grandparent->refresh()->status)->toBe('AWAITING_SUB_AGENTS');
+});
+
+it('reaps an ancestor whose chain below has gone stale', function (): void {
+    // The counterpart: nothing in the chain below is coming back. The
+    // deepest child is stale, not settled, carries no pending retry and
+    // has no child of its own, so the chain owes nothing and the
+    // grandparent must not wait for it forever.
+    [$agentId, $userId] = waitingParentSeedAgent();
+    ['grandparent' => $grandparent, 'parent' => $parent] = waitingParentChain($agentId, $userId);
+
+    $child = waitingParentChild($agentId, $userId, (int) $parent->id, null, 'QUEUED');
+    waitingParentMakeStale($child);
+
+    waitingParentReaper()->reapStaleTasks(new BufferedOutput(), 60);
+
+    expect($grandparent->refresh()->status)->toBe('FAILED')
+        ->and($parent->refresh()->status)->toBe('FAILED')
+        ->and($child->refresh()->status)->toBe('QUEUED');
+});
+
+it('does not reap an ancestor whose descendant is still alive', function (): void {
+    // The link that protects an ancestor does not have to be a pending
+    // retry: a descendant that was claimed a moment ago is still
+    // working, and its answer is still on its way.
+    [$agentId, $userId] = waitingParentSeedAgent();
+    ['grandparent' => $grandparent, 'parent' => $parent] = waitingParentChain($agentId, $userId);
+
+    $child = waitingParentChild($agentId, $userId, (int) $parent->id, null, 'QUEUED');
+    Capsule::table('tasks')->where('id', $child->id)->update([
+        'updated_at' => gmdate(WAITING_PARENT_DT, time() - 60),
+    ]);
+
+    waitingParentReaper()->reapStaleTasks(new BufferedOutput(), 60);
+
+    expect($grandparent->refresh()->status)->toBe('AWAITING_SUB_AGENTS')
+        ->and($parent->refresh()->status)->toBe('AWAITING_SUB_AGENTS')
+        ->and($child->refresh()->status)->toBe('QUEUED');
+});
+
+it('does not reap an ancestor whose descendant still holds a lease', function (): void {
+    // The other half of "alive": a live lease says the task is still
+    // being worked on, whatever its timestamp says.
+    [$agentId, $userId] = waitingParentSeedAgent();
+    ['grandparent' => $grandparent, 'parent' => $parent] = waitingParentChain($agentId, $userId);
+
+    $child = waitingParentChild($agentId, $userId, (int) $parent->id, null, 'RUNNING');
+    Capsule::table('tasks')->where('id', $child->id)->update([
+        'lease_expires_at' => gmdate(WAITING_PARENT_DT, time() + 5 * 60),
+        'updated_at'       => gmdate(WAITING_PARENT_DT, time() - 61 * 60),
+    ]);
+
+    waitingParentReaper()->reapStaleTasks(new BufferedOutput(), 60);
+
+    expect($grandparent->refresh()->status)->toBe('AWAITING_SUB_AGENTS')
+        ->and($parent->refresh()->status)->toBe('AWAITING_SUB_AGENTS')
+        ->and($child->refresh()->status)->toBe('RUNNING');
 });
