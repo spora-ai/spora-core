@@ -8,6 +8,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use InvalidArgumentException;
+use Psr\Log\LoggerInterface;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\TaskStartOptions;
@@ -24,6 +25,12 @@ final class TaskService implements TaskServiceInterface
 {
     private const ERR_TASK_NOT_FOUND = 'Task not found.';
 
+    /**
+     * How often a parent is woken after a cancelled retry before the
+     * failure is logged.
+     */
+    private const PARENT_WAKE_ATTEMPTS = 2;
+
     private AnswerTaskRecorder $answerRecorder;
     private TaskResourceBuilder $resources;
 
@@ -34,6 +41,7 @@ final class TaskService implements TaskServiceInterface
         ?ToolCallSerializer $toolCallSerializer = null,
         private readonly ?PrincipalResolver $principalResolver = null,
         private readonly ?SubAgentServiceInterface $subAgent = null,
+        private readonly ?LoggerInterface $logger = null,
     ) {
         $this->answerRecorder = new AnswerTaskRecorder($this->orchestrator, $this->principalResolver);
         $this->resources = new TaskResourceBuilder($toolCallSerializer);
@@ -580,13 +588,36 @@ final class TaskService implements TaskServiceInterface
             return;
         }
 
+        // The cancel has already happened; a failed wake-up must not undo
+        // it or fail the request. It must not be silent either: a parent
+        // left waiting on a retry that is not coming is failed by the
+        // stale sweep with a cause that is not the one that happened. The
+        // wake-up is tried twice — a transient failure is the common case
+        // — and the failure is logged with the parent it belongs to.
         foreach ($chainIds as $chainId) {
-            try {
-                $this->subAgent->maybeResumeParent($chainId);
-            } catch (Throwable) {
-                // The cancel already happened; a failed resume must not
-                // undo it or fail the request.
+            $failure = null;
+
+            for ($attempt = 1; $attempt <= self::PARENT_WAKE_ATTEMPTS; $attempt++) {
+                try {
+                    $this->subAgent->maybeResumeParent($chainId);
+                    $failure = null;
+                    break;
+                } catch (Throwable $e) {
+                    $failure = $e;
+                }
             }
+
+            if ($failure === null) {
+                continue;
+            }
+
+            $parentId = Task::where('id', $chainId)->value('parent_task_id');
+
+            $this->logger?->error('Parent wake-up after a cancelled retry failed', [
+                'task_id'        => $chainId,
+                'parent_task_id' => $parentId === null ? null : (int) $parentId,
+                'exception'      => $failure->getMessage(),
+            ]);
         }
     }
 }

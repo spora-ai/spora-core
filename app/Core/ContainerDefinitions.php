@@ -1397,6 +1397,7 @@ final class ContainerDefinitions
                     $c->get(ToolCallSerializer::class),
                     $c->get(PrincipalResolver::class),
                     $c->get(SubAgentServiceInterface::class),
+                    $c->get(LoggerInterface::class),
                 );
             },
 

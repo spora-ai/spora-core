@@ -1381,6 +1381,70 @@ describe('TaskService — cancelRetryChain', function (): void {
 
         expect($parent->refresh()->status)->toBe('QUEUED');
     });
+
+    it('logs a parent wake-up that fails, and tries it again', function (): void {
+        // The cancel has already happened. A wake-up that fails must not
+        // undo it — but it must not be silent either: the parent it
+        // belongs to stays waiting on a retry that is not coming, and the
+        // stale sweep would fail that parent with a cause that is not the
+        // one that happened.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('cancel-wakeup@example.com', 'Password1!', 'CancelWakeUp');
+        simulateLoggedInSession($userId, 'cancel-wakeup@example.com');
+
+        $principalId = createUserPrincipalPublic($userId);
+        $agent = Agent::create([
+            'principal_id' => $principalId, 'name' => 'CancelWakeUpAgent', 'max_steps' => 5, 'is_active' => true,
+        ]);
+
+        $parent = Task::create([
+            'principal_id' => $principalId, 'trigger_user_id' => $userId, 'agent_id' => $agent->id,
+            'status' => 'AWAITING_SUB_AGENTS', 'user_prompt' => 'delegate this', 'max_steps' => 5,
+        ]);
+
+        $child = Task::create([
+            'principal_id' => $principalId, 'trigger_user_id' => $userId, 'agent_id' => $agent->id,
+            'status' => 'FAILED', 'user_prompt' => 'do that', 'max_steps' => 5,
+            'parent_task_id' => $parent->id, 'retry_count' => 1,
+        ]);
+        $child->retry_of_task_id = $child->id;
+        $child->save();
+        Capsule::table('tasks')
+            ->where('id', $child->id)
+            ->update(['retry_after' => '2026-11-16 21:02:15']);
+
+        $subAgent = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
+        // Twice: the wake-up is retried once before the failure is logged.
+        $subAgent->shouldReceive('maybeResumeParent')->twice()
+            ->andThrow(new RuntimeException('the sub-agent service is down'));
+
+        $handler = new Monolog\Handler\TestHandler();
+        $logger = new Monolog\Logger('test', [$handler]);
+
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+        $service = new TaskService(
+            Mockery::mock(Spora\Agents\OrchestratorInterface::class),
+            $mercure,
+            Mockery::mock(TaskCompactionServiceInterface::class),
+            null,
+            new PrincipalResolver(),
+            $subAgent,
+            $logger,
+        );
+
+        // The cancel itself still succeeds: the wake-up failure must not
+        // undo it or fail the request.
+        expect($service->cancelRetryChain($child->id, $userId))->toBeTrue();
+
+        $records = $handler->getRecords();
+
+        expect($records)->not->toBeEmpty()
+            ->and($records[0]->message)->toBe('Parent wake-up after a cancelled retry failed')
+            // The parent the failure belongs to, so it can be traced.
+            ->and($records[0]->context['parent_task_id'])->toBe((int) $parent->id)
+            ->and($records[0]->context['task_id'])->toBe((int) $child->id);
+    });
 });
 
 /**
