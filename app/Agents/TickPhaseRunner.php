@@ -541,6 +541,20 @@ final class TickPhaseRunner
 
     private function notifyFailedAndScheduleRetry(Task $failedTask, string $errorCode): void
     {
+        // The retry is armed BEFORE the failure is announced. The announce
+        // is I/O — a notification row per user and a Mercure publish, which
+        // waits out the publisher's timeout when the hub is wedged — and
+        // every microsecond between the failed state and the arming is a
+        // window in which a sibling's completion hook can read this child
+        // as settled (terminal, no retry pending) and resume the parent
+        // on a failure that is about to be retried.
+        //
+        // The scheduler swallows its own failures and logs them — a retry
+        // that could not be armed must not fail the tick that reported
+        // the failure. Arming first means the "Retry scheduled"
+        // notification reaches the operator before the "Task failed" one.
+        $this->orchestrator->retryScheduler->scheduleAutoRetry($failedTask, $errorCode);
+
         try {
             $this->notificationService?->notifyTaskFailed($failedTask);
         } catch (Throwable $e) {
@@ -549,11 +563,6 @@ final class TickPhaseRunner
                 'exception' => $e->getMessage(),
             ]);
         }
-
-        // The scheduler swallows its own failures and logs them — a retry
-        // that could not be armed must not fail the tick that reported
-        // the failure.
-        $this->orchestrator->retryScheduler->scheduleAutoRetry($failedTask, $errorCode);
     }
 
     private function handleToolCalls(Task $task, Agent $agent, array $toolCalls): void

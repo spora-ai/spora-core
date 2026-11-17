@@ -387,15 +387,21 @@ final class TaskTickController
      * client-mode /tick path triggers the same downstream side-effects
      * (notification + auto-retry scheduling) as the server-mode daemon.
      *
-     * The notification is isolated — a failed one must not stop the retry
-     * from being armed. The scheduler swallows its own failures and logs
-     * them, so a retry that could not be armed does not fail the tick
-     * that reported the failure; the operator-facing `Task failed during
-     * /tick` log line above is the source of truth for the failure
+     * The retry is armed before the failure is announced: the announce is
+     * I/O, and the window between the failed state and the arming is one
+     * in which a sibling's completion hook can read the failed child as
+     * settled and resume the parent on a failure that is about to be
+     * retried. The notification is isolated — a failed one must not stop
+     * the retry from being armed. The scheduler swallows its own failures
+     * and logs them, so a retry that could not be armed does not fail the
+     * tick that reported the failure; the operator-facing `Task failed
+     * during /tick` log line above is the source of truth for the failure
      * itself.
      */
     private function notifyFailedAndScheduleRetry(Task $failedTask, string $errorCode): void
     {
+        $this->retryScheduler->scheduleAutoRetry($failedTask, $errorCode);
+
         try {
             $this->notificationService?->notifyTaskFailed($failedTask);
         } catch (Throwable $e) {
@@ -404,8 +410,6 @@ final class TaskTickController
                 'exception' => $e->getMessage(),
             ]);
         }
-
-        $this->retryScheduler->scheduleAutoRetry($failedTask, $errorCode);
     }
 
     private function notFoundResponse(): JsonResponse

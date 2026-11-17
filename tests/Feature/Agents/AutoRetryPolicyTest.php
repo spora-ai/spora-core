@@ -275,6 +275,45 @@ it('stamps the retry at the configured delay in absolute time', function (): voi
     expect($stamped->getTimestamp())->toBeBetween(time() + 5 * 60 - 5, time() + 5 * 60 + 5);
 });
 
+it('arms the retry before it announces the failure', function (): void {
+    // Between the failed state and the arming there is a window in which
+    // a sibling's completion hook can read the failed child as settled
+    // (terminal, no retry pending) and resume the parent on a failure
+    // that is about to be retried. The announce is I/O — a notification
+    // row per user and a Mercure publish — so the arming has to come
+    // first.
+    [$agentId, $userId] = autoRetrySeedAgent();
+
+    $armedWhenAnnounced = null;
+
+    $notification = Mockery::mock(NotificationService::class);
+    $notification->shouldReceive('notifyTaskFailed')->once()->andReturnUsing(
+        static function (Task $task) use (&$armedWhenAnnounced): void {
+            $armedWhenAnnounced = Task::where('id', $task->id)->value('retry_after') !== null;
+        },
+    );
+    $notification->shouldIgnoreMissing();
+
+    $driver = Mockery::mock(LLMDriverInterface::class);
+    $driver->allows('complete')->andThrow(new LLMRateLimitException('429 rate limit'));
+
+    $factory = Mockery::mock(DriverFactory::class);
+    $factory->allows('makeFromAgent')->andReturn($driver);
+
+    $orchestrator = new Orchestrator($factory, new OrchestratorConfig(notificationService: $notification));
+    $task = autoRetryRunningTask($agentId, $userId);
+
+    try {
+        $orchestrator->tick($task->id);
+        Assert::fail('Expected the failure to propagate');
+    } catch (LLMRateLimitException) {
+        // expected
+    }
+
+    expect($armedWhenAnnounced)->toBeTrue()
+        ->and($task->refresh()->retry_after)->not->toBeNull();
+});
+
 it('the worker leaves the armed retry alone before the wait has elapsed', function (): void {
     [$agentId, $userId] = autoRetrySeedAgent();
 
