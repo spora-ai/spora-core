@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.33.0-7-gba787d08"
+        "version": "0.34.0"
     },
     "servers": [
         {
@@ -6719,6 +6719,42 @@
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/llm-configs/effective": {
+            "get": {
+                "tags": [
+                    "Llm-configs"
+                ],
+                "summary": "Effective LLM configuration for an agent",
+                "parameters": [
+                    {
+                        "name": "agent_id",
+                        "in": "query",
+                        "description": "The agent whose effective configuration is resolved. The caller must be able to see the agent.",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Effective configuration and the tier it came from"
+                    },
+                    "404": {
+                        "description": "The agent is not visible to the caller"
+                    },
+                    "422": {
+                        "description": "agent_id is missing or not a positive integer"
                     }
                 },
                 "security": [

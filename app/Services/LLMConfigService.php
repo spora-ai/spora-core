@@ -16,7 +16,7 @@ use Throwable;
  * heavy lifting to three focused collaborators:
  *  - {@see LLMConfigSchemaInspector} for driver discovery and schema introspection
  *  - {@see LLMConfigPersistence} for CRUD with per-field encryption
- *  - {@see LLMConfigPreferences} for the three-tier default-resolution path
+ *  - {@see LLMConfigPreferences} for the four-tier default-resolution path
  *
  * Migration 0067 cut the wire format over from `user_id` to
  * `principal_id`; the public method names that say "user" remain only
@@ -282,6 +282,24 @@ final class LLMConfigService implements LLMConfigServiceInterface
     public function unsetPrincipalPreferredConfig(int $principalId): void
     {
         $this->preferences->unsetPrincipalPreferredConfig($principalId);
+    }
+
+    /**
+     * The configuration an agent actually runs with, and the tier it came
+     * from — the same answer every runtime consumer gets, so a client
+     * never has to re-implement the cascade.
+     *
+     * @return array{config: ?array<string, mixed>, source: string}
+     */
+    public function resolveEffectiveConfigForAgent(Agent $agent): array
+    {
+        $resolved = $this->preferences->resolveEffectiveConfigForAgent($agent);
+        $config = $resolved['config'];
+
+        return [
+            'config' => $config !== null ? $this->configResource($config) : null,
+            'source' => $resolved['source'],
+        ];
     }
 
     // The resource DTO.

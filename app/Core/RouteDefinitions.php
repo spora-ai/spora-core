@@ -417,6 +417,10 @@ final class RouteDefinitions
         // on the agent composer. The write/management side stays admin-only via
         // `POST /llm-configs/.../set-default` + `POST /llm-configs` semantics.
         $r->addRoute('GET', '/api/v1/llm-configs/global', [LLMConfigController::class, 'globalConfigs'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        // Static route registered before the variable `/{id}` one so
+        // fast-route's regex-based dispatcher does not shadow it with a
+        // catch-all — the same reason `/llm-configs/global` sits above.
+        $r->addRoute('GET', '/api/v1/llm-configs/effective', [LLMConfigController::class, 'effective'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_LLM_CONFIGS_ID, [LLMConfigController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', self::ROUTE_LLM_CONFIGS_ID, [LLMConfigController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_LLM_CONFIGS_ID, [LLMConfigController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);

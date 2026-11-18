@@ -273,21 +273,25 @@ test('getEffectiveConfigForAgent prefers agent config over user preferred config
 
 // unsetUserPreferredConfig
 
-test('unsetUserPreferredConfig deletes the row', function (): void {
+test('unsetUserPreferredConfig clears the LLM column and keeps the row', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
     $userId = $authService->register('unsetpref1@example.com', PREF_TEST_USER_PASSWORD, 'Unsetpref1');
+    $principalId = createUserPrincipalPublic($userId);
 
     $config = createConfigForService($service, 'To Remove', $userId);
     PrincipalPreference::create([
-        'principal_id' => createUserPrincipalPublic($userId),
+        'principal_id' => $principalId,
         'preferred_llm_config_id' => $config->id,
     ]);
 
     $service->unsetUserPreferredConfig($userId);
 
-    $pref = PrincipalPreference::where('principal_id', $userId)->first();
-    expect($pref)->toBeNull();
+    // The row carries the speech preference too, so only the LLM column
+    // is cleared.
+    $pref = PrincipalPreference::where('principal_id', $principalId)->first();
+    expect($pref)->not->toBeNull()
+        ->and($pref->preferred_llm_config_id)->toBeNull();
 });
 
 test('unsetUserPreferredConfig does nothing when no preference exists', function (): void {
