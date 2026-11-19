@@ -108,12 +108,13 @@ final class LLMConfigPreferences
     public function resolveEffectiveConfigForAgent(Agent $agent): array
     {
         $principalId = (int) $agent->principal_id;
-        $scope = $this->principalScope($principalId);
 
         $config = $this->resolveAgentTier($agent, $principalId);
         if ($config !== null) {
             return ['config' => $config, 'source' => 'agent'];
         }
+
+        $scope = $this->principalScope($principalId);
 
         $config = $this->resolvePreferenceTier($principalId);
         if ($config !== null) {
@@ -208,6 +209,9 @@ final class LLMConfigPreferences
      * Whether the principal is a group's or a person's — the source label
      * depends on it. A principal row that cannot be read is treated as a
      * person's: the cascade still resolves, only the label reads "user".
+     *
+     * Read below tier 1 only — tier 1 names no scope, so the lookup
+     * would be a wasted query on every LLM request.
      */
     private function principalScope(int $principalId): string
     {

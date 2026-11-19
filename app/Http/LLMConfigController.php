@@ -116,11 +116,16 @@ final class LLMConfigController
      * means is the caller's decision — `index()` falls back to the
      * unscoped `getConfigurationsForUser()` path, while `effective()`
      * answers 422 because the agent is the whole question there.
+     *
+     * The value is read from the raw query bag, not through
+     * `InputBag::get()`: `?agent_id[]=1` arrives as an array, and `get()`
+     * throws `BadRequestException` on a non-scalar — a 500 where both
+     * callers are shaped to answer something.
      */
     private function parseAgentId(Request $request): ?int
     {
-        $raw = $request->query->get('agent_id');
-        if ($raw === null || $raw === '') {
+        $raw = $request->query->all()['agent_id'] ?? null;
+        if (!is_scalar($raw) || $raw === '') {
             return null;
         }
         $value = filter_var($raw, FILTER_VALIDATE_INT);

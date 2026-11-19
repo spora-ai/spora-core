@@ -19,12 +19,15 @@ use Throwable;
 /**
  * Builds the correct LLM driver for a given Agent.
  *
- * Resolution order:
+ * Resolution order (see
+ * {@see LLMConfigPreferences::resolveEffectiveConfigForAgent()}):
  *   1. Agent has llm_driver_config_id → use that config
- *   2. Otherwise → use the global default LLMDriverConfiguration
- *   3. If neither exists → throw {@see LlmConfigurationMissingException}
+ *   2. The agent's principal's preferred config
+ *   3. The agent's principal's own default config
+ *   4. The global default LLMDriverConfiguration
+ *   5. If none exists → throw {@see LlmConfigurationMissingException}
  *
- * Step 3 is a hard stop. The previous "fall back to an empty-key
+ * Step 5 is a hard stop. The previous "fall back to an empty-key
  * OpenAI driver" silently punted the request to api.openai.com with
  * `apiKey: ''` and surfaced as an upstream 401, hiding the operator-
  * visible "no LLM configured" error. ErrorClassifier's

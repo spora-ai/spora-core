@@ -150,9 +150,9 @@ test('getPrincipalPreferredConfig returns null when no preference has been set',
     expect($preferences->getPrincipalPreferredConfig($principalId))->toBeNull();
 });
 
-test('getEffectiveConfigForAgent falls back to global default when tiers 1 and 2 are empty', function (): void {
+test('getEffectiveConfigForAgent falls back to global default when tiers 1 to 3 are empty', function (): void {
     $preferences = new LLMConfigPreferences();
-    $global = makeGlobalDefaultConfig('Tier 3 Global');
+    $global = makeGlobalDefaultConfig('Tier 4 Global');
     $global->is_default = true;
     $global->save();
 
@@ -174,7 +174,7 @@ test('getEffectiveConfigForAgent falls back to global default when tiers 1 and 2
 
     expect($result)->not->toBeNull()
         ->and($result->id)->toBe($global->id)
-        ->and($result->name)->toBe('Tier 3 Global');
+        ->and($result->name)->toBe('Tier 4 Global');
 });
 
 test('getEffectiveConfigForAgent returns null at every tier when nothing is configured', function (): void {

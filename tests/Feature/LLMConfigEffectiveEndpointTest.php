@@ -179,6 +179,20 @@ test('effective() answers 422 when agent_id is missing or not a positive integer
     }
 });
 
+test('effective() answers 422 for an array-valued agent_id', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeEffectiveController();
+    bootAuth($authService, 'effective-array-agent-id@example.com');
+
+    // `?agent_id[]=1` arrives as an array. Symfony's InputBag::get()
+    // throws on a non-scalar, so the endpoint would answer 500 instead
+    // of the 422 it documents.
+    $request = jsonRequest('GET', '/api/v1/llm-configs/effective?agent_id[]=1', []);
+    $response = callController($controller, 'effective', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+    expect(json_decode($response->getContent(), true)['error']['code'])->toBe('VALIDATION_ERROR');
+});
+
 test('the effective path dispatches to the effective handler, not to the {id} route', function (): void {
     $collector = new Spora\Core\MiddlewareRouteCollector(
         new FastRoute\RouteParser\Std(),

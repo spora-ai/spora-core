@@ -368,6 +368,30 @@ test('index() returns all configs', function (): void {
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
 
+test('index() falls back to the unscoped list for an array-valued agent_id', function (): void {
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
+    bootAuth($authService);
+
+    $config = createTestConfig('Index Array Agent Id', AnthropicCompatibleDriver::class, [
+        'api_key' => 'sk-anthropic',
+        'model' => 'claude-3-5-sonnet',
+    ], false, null, $llmConfigService);
+
+    // `?agent_id[]=1` arrives as an array. Symfony's InputBag::get()
+    // throws on a non-scalar, so the endpoint would answer 500 instead
+    // of the list it answers for every other unusable `agent_id`.
+    $request = jsonRequest('GET', '/api/v1/llm-configs?agent_id[]=1', []);
+    $response = callController($controller, 'index', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    $body = json_decode($response->getContent(), true);
+    $names = array_column($body['data']['configs'], 'name');
+    expect($names)->toContain('Index Array Agent Id');
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
 // Multi-tenancy isolation
 
 test('index() only returns configs belonging to the current user', function (): void {
