@@ -16,7 +16,7 @@ use Throwable;
  * heavy lifting to three focused collaborators:
  *  - {@see LLMConfigSchemaInspector} for driver discovery and schema introspection
  *  - {@see LLMConfigPersistence} for CRUD with per-field encryption
- *  - {@see LLMConfigPreferences} for the three-tier default-resolution path
+ *  - {@see LLMConfigPreferences} for the four-tier default-resolution path
  *
  * Migration 0067 cut the wire format over from `user_id` to
  * `principal_id`; the public method names that say "user" remain only

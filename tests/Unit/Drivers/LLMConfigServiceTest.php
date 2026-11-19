@@ -315,7 +315,7 @@ test('getEffectiveConfigForAgent falls back to tier-2 user default when no agent
         ->and($result->name)->toBe(TEST_USER_DEFAULT_NAME);
 });
 
-test('getEffectiveConfigForAgent falls back to tier-3 global default when no user default', function (): void {
+test('getEffectiveConfigForAgent falls back to tier-4 global default when no user default', function (): void {
     $security = Mockery::mock(SecurityManagerInterface::class);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
     $preferences = new LLMConfigPreferences();

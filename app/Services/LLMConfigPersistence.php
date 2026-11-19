@@ -328,7 +328,11 @@ final class LLMConfigPersistence
     {
         Agent::where('llm_driver_config_id', $configId)->update(['llm_driver_config_id' => null]);
 
-        PrincipalPreference::where('preferred_llm_config_id', $configId)->delete();
+        // The preference row also carries the speech preference, so the LLM
+        // column is cleared instead of the row being deleted — deleting it
+        // would take the principal's speech-to-text preference with it.
+        PrincipalPreference::where('preferred_llm_config_id', $configId)
+            ->update(['preferred_llm_config_id' => null]);
     }
 
     private function detachConfigurationReferences(int $configId): void

@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use JsonException;
+use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\EffectiveLLMConfigResolver;
+use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
 use Spora\Services\PrincipalResolver;
@@ -21,29 +24,38 @@ use Symfony\Component\HttpFoundation\Response;
  * Endpoints:
  *   GET    /llm-drivers                — registered driver classes + schemas (no auth required for schema discovery)
  *   GET    /llm-configs                — all configs for current user
+ *   GET    /llm-configs/effective      — the config an agent actually runs with, + the tier it came from
  *   GET    /llm-configs/{id}           — single config
  *   POST   /llm-configs                — create config
  *   PUT    /llm-configs/{id}          — update config
  *   DELETE /llm-configs/{id}           — delete config
  *   POST   /llm-configs/{id}/set-default — set as global default
  *
- * Validation, authorization, and request shaping live in {@see LlmConfigValidator}
+ * Validation, authorization, and request shaping live in {@see LlmConfigValidator},
+ * and the effective-configuration mapping in {@see EffectiveLLMConfigResolver},
  * so this controller stays under the S1448 method-count limit. Public methods
  * follow the early-exit + helper pattern to stay under the S1142 return limit.
  */
 final class LLMConfigController
 {
+    private const MSG_AGENT_NOT_FOUND = 'Agent not found.';
+    private const MSG_AGENT_ID_REQUIRED = 'agent_id is required.';
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly LLMConfigServiceInterface $llmConfigService,
         private readonly LlmConfigValidator $validator,
         private readonly AgentServiceInterface $agentService,
         ?PrincipalResolver $principalResolver = null,
+        ?EffectiveLLMConfigResolver $effectiveResolver = null,
     ) {
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+        $this->effectiveResolver = $effectiveResolver
+            ?? new EffectiveLLMConfigResolver(new LLMConfigPreferences(), $this->llmConfigService);
     }
 
     private PrincipalResolver $principalResolver;
+    private EffectiveLLMConfigResolver $effectiveResolver;
 
     /**
      * GET /llm-drivers
@@ -107,14 +119,20 @@ final class LLMConfigController
 
     /**
      * Parse a positive integer `?agent_id=N` query parameter. Returns
-     * `null` when missing, negative, zero, or non-numeric; non-positive
-     * values yield `null` so the controller falls back to the unscoped
-     * `getConfigurationsForUser()` path instead of erroring.
+     * `null` when missing, negative, zero, or non-numeric; what a null
+     * means is the caller's decision — `index()` falls back to the
+     * unscoped `getConfigurationsForUser()` path, while `effective()`
+     * answers 422 because the agent is the whole question there.
+     *
+     * The value is read from the raw query bag, not through
+     * `InputBag::get()`: `?agent_id[]=1` arrives as an array, and `get()`
+     * throws `BadRequestException` on a non-scalar — a 500 where both
+     * callers are shaped to answer something.
      */
     private function parseAgentId(Request $request): ?int
     {
-        $raw = $request->query->get('agent_id');
-        if ($raw === null || $raw === '') {
+        $raw = $request->query->all()['agent_id'] ?? null;
+        if (!is_scalar($raw) || $raw === '') {
             return null;
         }
         $value = filter_var($raw, FILTER_VALIDATE_INT);
@@ -122,6 +140,86 @@ final class LLMConfigController
             return null;
         }
         return (int) $value;
+    }
+
+    /**
+     * GET /llm-configs/effective?agent_id=N
+     *
+     * The configuration the agent actually runs with, and the tier it
+     * came from. The cascade is resolved here, on the server — the client
+     * must not re-implement it, or a group-owned agent's badge would
+     * disagree with the provider account it actually spends.
+     */
+    #[OA\Get(
+        path: '/api/v1/llm-configs/effective',
+        summary: 'Effective LLM configuration for an agent',
+        parameters: [
+            new OA\Parameter(
+                name: 'agent_id',
+                in: 'query',
+                required: true,
+                schema: new OA\Schema(type: 'integer', minimum: 1),
+                description: 'The agent whose effective configuration is resolved. The caller must be able to see the agent.',
+            ),
+        ],
+        responses: [
+            new OA\Response(
+                response: 200,
+                description: 'Effective configuration and the tier it came from',
+                content: new OA\JsonContent(
+                    properties: [
+                        new OA\Property(
+                            property: 'data',
+                            properties: [
+                                new OA\Property(property: 'config', type: 'object', nullable: true),
+                                new OA\Property(
+                                    property: 'source',
+                                    type: 'string',
+                                    enum: [
+                                        'agent',
+                                        'group_preference',
+                                        'user_preference',
+                                        'group_default',
+                                        'user_default',
+                                        'global_default',
+                                        'none',
+                                    ],
+                                ),
+                            ],
+                            type: 'object',
+                        ),
+                    ],
+                ),
+            ),
+            new OA\Response(response: 404, description: 'The agent is not visible to the caller'),
+            new OA\Response(response: 422, description: 'agent_id is missing or not a positive integer'),
+        ],
+    )]
+    public function effective(Request $request): JsonResponse
+    {
+        $agentId = $this->parseAgentId($request);
+        if ($agentId === null) {
+            return $this->validator->error(
+                'VALIDATION_ERROR',
+                self::MSG_AGENT_ID_REQUIRED,
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
+
+        // The cascade resolves the agent's own principal's configuration,
+        // so the caller has to be able to see the agent — otherwise the
+        // response carries another principal's configuration metadata.
+        $agent = $this->agentService->getAgent($agentId, (int) $this->authService->currentUserId());
+        if ($agent === null) {
+            return $this->validator->error('AGENT_NOT_FOUND', self::MSG_AGENT_NOT_FOUND, Response::HTTP_NOT_FOUND);
+        }
+
+        $resolved = $this->effectiveResolver->resolve($agent);
+
+        return new JsonResponse(['data' => [
+            'config' => $resolved['config'],
+            'source' => $resolved['source'],
+        ]]);
     }
 
     /**

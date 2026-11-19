@@ -230,6 +230,30 @@ if (!function_exists('createUserPrincipalPublic')) {
     }
 }
 
+if (!function_exists('seedSpeechProviderConfig')) {
+    /**
+     * Insert a principal-scoped speech provider configuration row.
+     *
+     * The preference tests need a real row to point
+     * `principal_preferences.preferred_speech_config_id` at — the FK is
+     * enforced by the database, not by the application, so a bare id
+     * would not do.
+     */
+    function seedSpeechProviderConfig(int $principalId, string $displayName): int
+    {
+        return (int) Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insertGetId([
+            'principal_id'   => $principalId,
+            'provider_class' => Spora\Speech\OpenAiCompatibleTranscriber::class,
+            'display_name'   => $displayName,
+            'settings'       => '{}',
+            'is_default'     => false,
+            'is_global'      => false,
+            'created_at'     => date('Y-m-d H:i:s'),
+            'updated_at'     => date('Y-m-d H:i:s'),
+        ]);
+    }
+}
+
 if (!function_exists('seedMediaToolAgent')) {
     /**
      * Create an Agent row so the FK on media_assets.agent_id resolves.

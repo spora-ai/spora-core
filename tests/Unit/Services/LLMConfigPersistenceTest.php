@@ -6,6 +6,7 @@ use Spora\Core\SecurityManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Models\PrincipalPreference;
 use Spora\Services\LLMConfigPersistence;
 use Spora\Services\LLMConfigSchemaInspector;
 
@@ -229,4 +230,39 @@ test('updateConfiguration prunes stale keys from the settings blob on save', fun
         ->and($decoded)->not->toHaveKey('context_window');
 
     LLMDriverConfiguration::where('id', $created->id)->delete();
+});
+
+test('deleting a config clears the LLM preference but keeps the speech preference', function (): void {
+    $persistence = makePersistence();
+
+    $userId = Illuminate\Database\Capsule\Manager::table('users')->insertGetId([
+        'email'    => 'detach-preference@example.com',
+        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'registered' => time(),
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+    $principalId = createUserPrincipalPublic($userId);
+
+    $config = $persistence->createConfiguration($principalId, $userId, [
+        'name' => 'Delete Target',
+        'driver_class' => OpenAICompatibleDriver::class,
+        'settings' => ['api_key' => 'sk-target', 'model' => 'gpt-4o'],
+    ], false);
+    expect($config)->not->toBeNull();
+
+    $speechConfigId = seedSpeechProviderConfig($principalId, 'Speech Preference');
+
+    PrincipalPreference::create([
+        'principal_id' => $principalId,
+        'preferred_llm_config_id' => (int) $config->id,
+        'preferred_speech_config_id' => $speechConfigId,
+    ]);
+
+    expect($persistence->deleteConfiguration((int) $config->id, $userId, false))->toBeTrue();
+
+    $row = PrincipalPreference::where('principal_id', $principalId)->first();
+    expect($row)->not->toBeNull()
+        ->and($row->preferred_llm_config_id)->toBeNull()
+        ->and((int) $row->preferred_speech_config_id)->toBe($speechConfigId);
 });

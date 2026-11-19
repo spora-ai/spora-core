@@ -190,6 +190,7 @@ test('put sets a global config as preference', function (): void {
 test('put clears preference when config_id is null', function (): void {
     [$controller, $authService, $llmConfigService] = makeUserPreferenceController();
     $userId = bootAuth($authService, 'clearpref@example.com');
+    $principalId = createUserPrincipalPublic($userId);
 
     // Create and set a preference first
     $config = createTestConfig('To Clear', OpenAICompatibleDriver::class, [
@@ -197,7 +198,7 @@ test('put clears preference when config_id is null', function (): void {
         'model' => 'gpt-4o',
     ], false, $userId, $llmConfigService);
     PrincipalPreference::create([
-        'principal_id' => createUserPrincipalPublic($userId),
+        'principal_id' => $principalId,
         'preferred_llm_config_id' => $config->id,
     ]);
 
@@ -212,9 +213,10 @@ test('put clears preference when config_id is null', function (): void {
     $body = json_decode($response->getContent(), true);
     expect($body['data']['config'])->toBeNull();
 
-    // Verify database
-    $pref = PrincipalPreference::where('principal_id', $userId)->first();
-    expect($pref)->toBeNull();
+    // The row survives — it also carries the speech preference.
+    $pref = PrincipalPreference::where('principal_id', $principalId)->first();
+    expect($pref)->not->toBeNull()
+        ->and($pref->preferred_llm_config_id)->toBeNull();
 
     // Cleanup
     LLMDriverConfiguration::where('id', $config->id)->delete();
@@ -267,9 +269,10 @@ test('put returns 401 for unauthenticated request', function (): void {
     expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
 });
 
-test('preference is deleted when the referenced config is deleted (cascade)', function (): void {
+test('preference is cleared when the referenced config is deleted (cascade)', function (): void {
     [, $authService, $llmConfigService] = makeUserPreferenceController();
     $userId = bootAuth($authService, 'cascade_pref@example.com');
+    $principalId = createUserPrincipalPublic($userId);
 
     $config = createTestConfig('Cascade Test', OpenAICompatibleDriver::class, [
         'api_key' => 'sk-cascade',
@@ -278,14 +281,16 @@ test('preference is deleted when the referenced config is deleted (cascade)', fu
 
     // Set it as preference
     PrincipalPreference::create([
-        'principal_id' => createUserPrincipalPublic($userId),
+        'principal_id' => $principalId,
         'preferred_llm_config_id' => $config->id,
     ]);
 
     // Delete the config via the service (which handles cascade)
     $llmConfigService->deleteConfiguration($config->id, $userId, false);
 
-    // Verify preference is gone
-    $pref = PrincipalPreference::where('principal_id', $userId)->first();
-    expect($pref)->toBeNull();
+    // The pointer is cleared; the row survives because it also carries the
+    // speech preference.
+    $pref = PrincipalPreference::where('principal_id', $principalId)->first();
+    expect($pref)->not->toBeNull()
+        ->and($pref->preferred_llm_config_id)->toBeNull();
 });
