@@ -142,6 +142,7 @@ use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\DbRateLimiter;
+use Spora\Services\EffectiveLLMConfigResolver;
 use Spora\Services\EffortService;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\GroupService;
@@ -861,6 +862,13 @@ final class ContainerDefinitions
                 return new LLMConfigPreferences($c->get(PrincipalService::class));
             },
 
+            EffectiveLLMConfigResolver::class => static function (ContainerInterface $c): EffectiveLLMConfigResolver {
+                return new EffectiveLLMConfigResolver(
+                    $c->get(LLMConfigPreferences::class),
+                    $c->get(LLMConfigServiceInterface::class),
+                );
+            },
+
             AgentStepCap::class => static function (ContainerInterface $c): AgentStepCap {
                 return new AgentStepCap($c->get(Config::class));
             },
@@ -972,6 +980,7 @@ final class ContainerDefinitions
                     $c->get(LlmConfigValidator::class),
                     $c->get(AgentServiceInterface::class),
                     $c->get(PrincipalResolver::class),
+                    $c->get(EffectiveLLMConfigResolver::class),
                 );
             },
 

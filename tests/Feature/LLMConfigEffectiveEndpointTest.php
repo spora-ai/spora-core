@@ -24,11 +24,17 @@ function makeEffectiveController(): array
     $security = new Spora\Core\SecurityManager($key);
     $llmConfigService = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
     $validator = new Spora\Services\LlmConfigValidator($llmConfigService);
+    $resolver = new Spora\Services\EffectiveLLMConfigResolver(
+        new Spora\Services\LLMConfigPreferences(),
+        $llmConfigService,
+    );
     $controller = new Spora\Http\LLMConfigController(
         $authService,
         $llmConfigService,
         $validator,
         makeAgentService(),
+        null,
+        $resolver,
     );
 
     return [$controller, $authService, $llmConfigService, new AuthMiddleware($authService)];

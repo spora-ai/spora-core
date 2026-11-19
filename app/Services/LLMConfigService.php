@@ -284,24 +284,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
         $this->preferences->unsetPrincipalPreferredConfig($principalId);
     }
 
-    /**
-     * The configuration an agent actually runs with, and the tier it came
-     * from — the same answer every runtime consumer gets, so a client
-     * never has to re-implement the cascade.
-     *
-     * @return array{config: ?array<string, mixed>, source: string}
-     */
-    public function resolveEffectiveConfigForAgent(Agent $agent): array
-    {
-        $resolved = $this->preferences->resolveEffectiveConfigForAgent($agent);
-        $config = $resolved['config'];
-
-        return [
-            'config' => $config !== null ? $this->configResource($config) : null,
-            'source' => $resolved['source'],
-        ];
-    }
-
     // The resource DTO.
 
     /**

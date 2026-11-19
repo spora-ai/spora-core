@@ -9,6 +9,8 @@ use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\EffectiveLLMConfigResolver;
+use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
 use Spora\Services\PrincipalResolver;
@@ -29,7 +31,8 @@ use Symfony\Component\HttpFoundation\Response;
  *   DELETE /llm-configs/{id}           — delete config
  *   POST   /llm-configs/{id}/set-default — set as global default
  *
- * Validation, authorization, and request shaping live in {@see LlmConfigValidator}
+ * Validation, authorization, and request shaping live in {@see LlmConfigValidator},
+ * and the effective-configuration mapping in {@see EffectiveLLMConfigResolver},
  * so this controller stays under the S1448 method-count limit. Public methods
  * follow the early-exit + helper pattern to stay under the S1142 return limit.
  */
@@ -44,11 +47,15 @@ final class LLMConfigController
         private readonly LlmConfigValidator $validator,
         private readonly AgentServiceInterface $agentService,
         ?PrincipalResolver $principalResolver = null,
+        ?EffectiveLLMConfigResolver $effectiveResolver = null,
     ) {
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+        $this->effectiveResolver = $effectiveResolver
+            ?? new EffectiveLLMConfigResolver(new LLMConfigPreferences(), $this->llmConfigService);
     }
 
     private PrincipalResolver $principalResolver;
+    private EffectiveLLMConfigResolver $effectiveResolver;
 
     /**
      * GET /llm-drivers
@@ -207,7 +214,7 @@ final class LLMConfigController
             return $this->validator->error('AGENT_NOT_FOUND', self::MSG_AGENT_NOT_FOUND, Response::HTTP_NOT_FOUND);
         }
 
-        $resolved = $this->llmConfigService->resolveEffectiveConfigForAgent($agent);
+        $resolved = $this->effectiveResolver->resolve($agent);
 
         return new JsonResponse(['data' => [
             'config' => $resolved['config'],

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 
 /**
@@ -65,14 +64,6 @@ interface LLMConfigServiceInterface
      * Clear a principal's preferred LLM configuration.
      */
     public function unsetPrincipalPreferredConfig(int $principalId): void;
-
-    /**
-     * The configuration an agent actually runs with, as the API resource,
-     * plus the tier it came from.
-     *
-     * @return array{config: ?array<string, mixed>, source: string}
-     */
-    public function resolveEffectiveConfigForAgent(Agent $agent): array;
 
     /**
      * Find a configuration by ID (for authorization checks).
