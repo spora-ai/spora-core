@@ -101,7 +101,9 @@ factory — see
 `Config::applySettingsOverlay()` for why.
 
 ### CI
-GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). **Gating** jobs: `test` (Pest + coverage, default PHP), `test-85` (Pest, PHP 8.5), `static-analysis` (PHPStan, plus OpenAPI drift, merge-marker and markdown-link checks), `sonar`. **Advisory, not gating:** `test-mysql` and `test-mariadb`, which run the same suite against a real engine but carry `continue-on-error: true` until the SQLite-specific migration tests (`PRAGMA`/`sqlite_master`) are ported — a red run there is reported and blocks nothing. The three range-based checks in `static-analysis` cover pulls *and* pushes: the base sha is the PR base or the push's `before`, so a conflict marker merged straight to `main` is still caught. Formatting is not gated in CI — run `composer format` before committing.
+GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). **Gating** jobs: `test` (Pest + coverage, default PHP), `test-85` and `test-86` (Pest, PHP 8.5 and 8.6), `static-analysis` (PHPStan, plus OpenAPI drift, merge-marker and markdown-link checks), `sonar`. **Advisory, not gating:** `test-mysql` and `test-mariadb`, which run the same suite against a real engine but carry `continue-on-error: true` until the SQLite-specific migration tests (`PRAGMA`/`sqlite_master`) are ported — a red run there is reported and blocks nothing. The three range-based checks in `static-analysis` cover pulls *and* pushes: the base sha is the PR base or the push's `before`, so a conflict marker merged straight to `main` is still caught. Formatting is not gated in CI — run `composer format` before committing.
+
+The PHP floor is 8.4 (`composer.json` requires `^8.4.1`), and 8.5 and 8.6 are compatibility checks rather than targets. A dependency that caps its own PHP range below 8.6 breaks `composer install` on the 8.6 job — the lock file has to satisfy the newest version the pipeline runs.
 
 ### SonarQube (MCP)
 - Project key `spora-ai_Spora` (see `sonar-project.properties`).
