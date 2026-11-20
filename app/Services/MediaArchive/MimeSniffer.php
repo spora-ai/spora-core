@@ -45,11 +45,42 @@ final class MimeSniffer
     public const OCTET_STREAM = 'application/octet-stream';
 
     /**
-     * Typst source MIME. `finfo` reports `.typ` files as `text/plain`, so the
-     * byte sniffer upgrades a `text/plain` hit to this value when the filename
-     * extension confirms Typst.
+     * Typst source MIME — the archive's spelling of it.
+     *
+     * `text/vnd.typst` is the registered name (IANA, 2025-04-01) and
+     * `text/x-typst` its deprecated alias; the rows carry the alias.
      */
     private const string TYPST_MIME = 'text/x-typst';
+
+    /**
+     * The registered spelling of {@see TYPST_MIME}.
+     *
+     * A `libmagic` that knows the Typst syntax reports it under this name
+     * (PHP 8.6 ships one that does), so the platform's verdict arrives
+     * spelled this way.
+     */
+    private const string TYPST_MIME_REGISTERED = 'text/vnd.typst';
+
+    /**
+     * Platform spellings the archive stores under its own.
+     *
+     * @var array<string, string>
+     */
+    private const PLATFORM_ALIASES = [
+        self::TYPST_MIME_REGISTERED => self::TYPST_MIME,
+    ];
+
+    /**
+     * The archive's spelling of a platform-detected MIME.
+     *
+     * The same bytes have to land under one type whichever magic database
+     * the host ships, so a verdict the platform spells differently is
+     * normalised onto the spelling the rows carry.
+     */
+    public static function canonicalMime(string $detected): string
+    {
+        return self::PLATFORM_ALIASES[$detected] ?? $detected;
+    }
 
     /**
      * Markdown MIME. `finfo` reports every Markdown file as `text/plain` —
@@ -301,6 +332,18 @@ final class MimeSniffer
         if ($detected === null) {
             return self::OCTET_STREAM;
         }
+
+        // A text verdict needs text bytes. `finfo` reads a blob carrying NUL
+        // bytes as prose on one `libmagic` version and as binary on another —
+        // the verdict moved with the magic database, not with the bytes — and
+        // a caller that trusts it would let a binary payload into the archive
+        // under a text claim. A NUL byte is the marker every binary format
+        // carries and no text file does.
+        if (str_starts_with($detected, 'text/') && str_contains($prefix, "\0")) {
+            return self::OCTET_STREAM;
+        }
+
+        $detected = self::canonicalMime($detected);
 
         return $this->refineWithMagicTable($prefix, $detected) ?? $detected;
     }
