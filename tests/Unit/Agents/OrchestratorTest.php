@@ -1654,7 +1654,6 @@ it('publishes the final tool batch even when status flips to ABORTED post-batch'
     // publish-then-bail ordering kicks in, and we observe the publish.
     $agent = Agent::find($agentId);
     $handleToolCalls = new ReflectionMethod(Spora\Agents\TickPhaseRunner::class, 'handleToolCalls');
-    $handleToolCalls->setAccessible(true);
 
     $runnerProp = new ReflectionProperty($orch, 'tickPhaseRunner');
     /** @var Spora\Agents\TickPhaseRunner $runner */

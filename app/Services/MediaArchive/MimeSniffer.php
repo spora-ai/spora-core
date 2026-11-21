@@ -45,11 +45,42 @@ final class MimeSniffer
     public const OCTET_STREAM = 'application/octet-stream';
 
     /**
-     * Typst source MIME. `finfo` reports `.typ` files as `text/plain`, so the
-     * byte sniffer upgrades a `text/plain` hit to this value when the filename
-     * extension confirms Typst.
+     * Typst source MIME — the archive's spelling of it.
+     *
+     * `text/vnd.typst` is the registered name (IANA, 2025-04-01) and
+     * `text/x-typst` its deprecated alias; the rows carry the alias.
      */
     private const string TYPST_MIME = 'text/x-typst';
+
+    /**
+     * The registered spelling of {@see TYPST_MIME}.
+     *
+     * A `libmagic` that knows the Typst syntax reports it under this name
+     * (PHP 8.6 ships one that does), so the platform's verdict arrives
+     * spelled this way.
+     */
+    private const string TYPST_MIME_REGISTERED = 'text/vnd.typst';
+
+    /**
+     * Platform spellings the archive stores under its own.
+     *
+     * @var array<string, string>
+     */
+    private const PLATFORM_ALIASES = [
+        self::TYPST_MIME_REGISTERED => self::TYPST_MIME,
+    ];
+
+    /**
+     * The archive's spelling of a platform-detected MIME.
+     *
+     * The same bytes have to land under one type whichever magic database
+     * the host ships, so a verdict the platform spells differently is
+     * normalised onto the spelling the rows carry.
+     */
+    public static function canonicalMime(string $detected): string
+    {
+        return self::PLATFORM_ALIASES[$detected] ?? $detected;
+    }
 
     /**
      * Markdown MIME. `finfo` reports every Markdown file as `text/plain` —
@@ -297,20 +328,82 @@ final class MimeSniffer
             return $magicHit;
         }
 
-        $detected = $this->finfoBuffer($prefix);
-        if ($detected === null) {
+        $detected = $this->finfoRead($prefix, \FILEINFO_MIME_TYPE);
+        if ($detected === null || $this->isBinaryDespiteTextVerdict($detected, $prefix)) {
             return self::OCTET_STREAM;
         }
+
+        $detected = self::canonicalMime($detected);
 
         return $this->refineWithMagicTable($prefix, $detected) ?? $detected;
     }
 
-    private function finfoBuffer(string $prefix): ?string
+    /**
+     * Whether a text verdict rests on bytes that are not text.
+     *
+     * A NUL byte is the marker every binary format carries and no text file
+     * does — with one exception: UTF-16 and UTF-32 write a character as a
+     * code unit with a NUL half, so their text carries it too.
+     *
+     * `finfo` reads a blob carrying NUL bytes as prose on one `libmagic`
+     * version and as binary on another — the verdict moved with the magic
+     * database, not with the bytes — and a caller that trusts it would let a
+     * binary payload into the archive under a text claim. The charset
+     * verdict is the finer reading of the same pass: it names the encoding
+     * the platform read the bytes in, and it reads a payload as `binary`
+     * whatever the type verdict says.
+     */
+    private function isBinaryDespiteTextVerdict(string $detected, string $prefix): bool
+    {
+        if (!str_starts_with($detected, 'text/') || !str_contains($prefix, "\0")) {
+            return false;
+        }
+
+        $charset = $this->finfoRead($prefix, \FILEINFO_MIME_ENCODING);
+        if ($charset === null || !$this->isUnicodeCharset($charset)) {
+            return true;
+        }
+
+        return !$this->readsAsProse($prefix, $charset);
+    }
+
+    /**
+     * Whether the charset names an encoding whose text carries NUL bytes.
+     *
+     * UTF-16 and UTF-32 are the two: they write a character as a code unit
+     * with a NUL half, so their text carries the byte the guard looks for.
+     * Every other encoding writes a character as itself, and a NUL byte in
+     * it is the binary marker.
+     */
+    private function isUnicodeCharset(string $charset): bool
+    {
+        $charset = str_replace('-', '', strtolower($charset));
+
+        return str_starts_with($charset, 'utf16') || str_starts_with($charset, 'utf32');
+    }
+
+    /**
+     * Whether the bytes read as prose once the encoding is undone.
+     *
+     * The encoding alone is not enough: a payload can carry the BOM that
+     * names it, and the platform reads the BOM as an encoding whatever
+     * follows it. Prose is what the text has to look like once the encoding
+     * is undone, and a control character other than tab, newline, form feed
+     * and carriage return is not prose.
+     */
+    private function readsAsProse(string $prefix, string $charset): bool
+    {
+        $decoded = mb_convert_encoding($prefix, 'UTF-8', $charset);
+
+        return preg_match('/[\x00-\x08\x0B\x0E-\x1F]/', $decoded) !== 1;
+    }
+
+    private function finfoRead(string $prefix, int $flags): ?string
     {
         if (!function_exists('finfo_buffer') || !class_exists(finfo::class)) {
             return null;
         }
-        $ctx = $this->openFinfoContext();
+        $ctx = $this->openFinfoContext($flags);
         if ($ctx === null) {
             return null;
         }
@@ -318,13 +411,23 @@ final class MimeSniffer
         return $this->runFinfo($ctx, $prefix);
     }
 
-    private function openFinfoContext(): mixed
+    /**
+     * The finfo contexts, one per flag set.
+     *
+     * A context is bound to the flags it was opened with, so the MIME-type
+     * reading and the charset reading need one each — and `finfo_open` is
+     * expensive enough that a context is kept for the process's lifetime.
+     */
+    private function openFinfoContext(int $flags): mixed
     {
-        /** @var resource|null $ctx */
-        static $ctx = null;
-        if ($ctx === null) {
-            $ctx = @finfo_open(\FILEINFO_MIME_TYPE);
+        /** @var array<int, resource|false> $contexts */
+        static $contexts = [];
+
+        if (!array_key_exists($flags, $contexts)) {
+            $contexts[$flags] = @finfo_open($flags);
         }
+
+        $ctx = $contexts[$flags];
 
         return $ctx === false ? null : $ctx;
     }

@@ -247,7 +247,6 @@ test('Anthropic driver applies the configured timeout', function (): void {
 
     $reflection = new ReflectionClass($driver);
     $prop = $reflection->getProperty('timeout');
-    $prop->setAccessible(true);
 
     expect($prop->getValue($driver))->toBe(99);
 });

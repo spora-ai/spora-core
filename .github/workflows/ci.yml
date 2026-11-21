@@ -20,6 +20,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege for the whole workflow: no job here writes to the
+# repository. The `sonar` job declares its own permissions, because it
+# writes to the pull request.
+permissions:
+  contents: read
+
 jobs:
   test:
     # Primary test + coverage gate on PHP 8.4 (the production target).
@@ -81,6 +87,29 @@ jobs:
       - name: Run Pest (parallel)
         run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --fail-on-risky
 
+  test-86:
+    # PHP 8.6 compatibility check: same suite, no coverage. The lock file
+    # has to install on 8.6 for this job to get as far as the suite, so a
+    # dependency that caps its PHP range is a red build here.
+    name: Pest (PHP 8.6)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.6'
+          extensions: pdo_mysql, zip
+          coverage: none
+          tools: composer
+
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run Pest (parallel)
+        run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --fail-on-risky
+
   test-mysql:
     # MySQL 9.7 compatibility gate. No coverage here — SonarCloud consumes clover from the SQLite `test` job. `continue-on-error: true` is set until the SQLite-specific migration tests (`PRAGMA`/`sqlite_master`) are ported.
     continue-on-error: true
@@ -93,7 +122,13 @@ jobs:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: spora_root
         ports: ['3306:3306']
-        # Bump default max_connections=151 — Pest's ~18 parallel workers exhaust it (SQLSTATE[08004] 1040). The entrypoint prepends `mysqld` to a bare flag.
+        # Headroom, not a necessity: the suite used to open a connection per test
+        # that stayed open until the cycle collector got round to it, and the
+        # pile-up walked into the server's limit (SQLSTATE[08004] 1040). The
+        # harness now collects what a test leaves behind, so one connection is
+        # open at a time — and the limit is back where a default would do. It
+        # stays raised for the day the job runs in parallel again. The
+        # entrypoint prepends `mysqld` to a bare flag.
         command: --max-connections=500
         options: >-
           --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=1024m
@@ -152,7 +187,9 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
-        # Same max_connections=151 reason as `test-mysql`. The entrypoint prepends `mariadbd`; the wait step uses `mysqladmin` (shipped in the mariadb:12.3 image).
+        # Same headroom, and the same reason, as `test-mysql`. The entrypoint
+        # prepends `mariadbd`; the wait step uses `mysqladmin` (shipped in the
+        # mariadb:12.3 image).
         command: --max-connections=500
     env:
       SPORA_TEST_DB_DRIVER:   mariadb

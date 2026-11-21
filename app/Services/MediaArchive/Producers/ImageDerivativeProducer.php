@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services\MediaArchive\Producers;
 
+use Intervention\Image\Decoders\BinaryImageDecoder;
 use Intervention\Image\ImageManager;
 use Intervention\Image\Interfaces\DriverInterface;
 use Intervention\Image\Interfaces\EncodedImageInterface;
@@ -118,7 +119,13 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
 
         try {
             $manager = new ImageManager($this->resolveDriver());
-            $image = $manager->read($bytes);
+            // The binary decoder, named rather than left to the default
+            // chain. The chain asks `is_a()` whether the input already is an
+            // image, and PHP 8.6 deprecated the two-argument call it makes
+            // on a string — so a string input logs a deprecation on every
+            // decode. The input here is bytes, and the binary decoder is
+            // the one that reads bytes.
+            $image = $manager->read($bytes, [BinaryImageDecoder::class]);
         } catch (Throwable $e) {
             throw new ImageDerivativeProducerException(sprintf(
                 'ImageDerivativeProducer: failed to decode source image: %s',

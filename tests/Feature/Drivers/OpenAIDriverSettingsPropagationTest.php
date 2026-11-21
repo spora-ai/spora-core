@@ -178,7 +178,6 @@ test('OpenAI driver applies the configured timeout to the HTTP client', function
 
     $reflection = new ReflectionClass($driver);
     $prop = $reflection->getProperty('timeout');
-    $prop->setAccessible(true);
 
     expect($prop->getValue($driver))->toBe(42);
 });

@@ -179,6 +179,40 @@ describe('MimeSniffer::sniffFromBytes', function (): void {
         // also have nothing to say, so the sniffer must not lie.
         expect(makeSniffer()->sniffFromBytes($bytes))->toBe(MimeSniffer::OCTET_STREAM);
     });
+
+    it('does not read a blob carrying NUL bytes as text', function (): void {
+        // `finfo` reads this as prose on one `libmagic` version and as binary
+        // on another — the verdict moved with the magic database, not with
+        // the bytes. A NUL byte is the marker every binary format carries
+        // and no text file does, so the sniffer refuses the text verdict
+        // itself rather than trusting the platform's reading of it: a
+        // payload that lands under a text claim is a payload the upload
+        // gate lets through.
+        expect(makeSniffer()->sniffFromBytes("hello world\n\0"))->toBe(MimeSniffer::OCTET_STREAM);
+    });
+
+    it('keeps a UTF-16 document as text', function (): void {
+        // UTF-16 writes an ASCII character as a code unit with a NUL half,
+        // so the document carries the byte the guard looks for — and the
+        // guard would refuse the document with it. The platform reads the
+        // bytes as `utf-16le`, and that is what tells the encoding apart
+        // from a payload.
+        $utf16 = "\xFF\xFE" . "h\0e\0l\0l\0o\0\n\0";
+
+        expect(makeSniffer()->sniffFromBytes($utf16))->toBe('text/plain');
+    });
+
+    it('never reports Typst source under the registered name', function (): void {
+        // A `libmagic` that knows the Typst syntax reports it under the
+        // registered name (PHP 8.6 ships one that does). Storing that
+        // spelling would split the type in two: the rows carry the alias,
+        // and a producer that matches on the source type would no longer
+        // find them.
+        $sniffer = makeSniffer();
+
+        expect($sniffer->sniffFromBytes("#let x = 1\n", 'source.typ'))->not->toBe('text/vnd.typst');
+        expect($sniffer->sniffFromBytes("#let x = 1\n", 'source.typ'))->toBe('text/x-typst');
+    });
 });
 
 describe('MimeSniffer::sniffFromExtension', function (): void {
@@ -242,5 +276,18 @@ describe('MimeSniffer::sniffFromExtension', function (): void {
 describe('MimeSniffer constants', function (): void {
     it('exposes OCTET_STREAM as the canonical fallback', function (): void {
         expect(MimeSniffer::OCTET_STREAM)->toBe('application/octet-stream');
+    });
+});
+
+describe('MimeSniffer::canonicalMime', function (): void {
+    it('stores the registered Typst name under the spelling the rows carry', function (): void {
+        // `text/vnd.typst` is the registered name (IANA, 2025-04-01) and
+        // `text/x-typst` its deprecated alias; the rows carry the alias.
+        expect(MimeSniffer::canonicalMime('text/vnd.typst'))->toBe('text/x-typst');
+    });
+
+    it('leaves every other verdict alone', function (): void {
+        expect(MimeSniffer::canonicalMime('text/plain'))->toBe('text/plain');
+        expect(MimeSniffer::canonicalMime('image/png'))->toBe('image/png');
     });
 });
