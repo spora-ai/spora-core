@@ -116,7 +116,13 @@ jobs:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: spora_root
         ports: ['3306:3306']
-        # Bump default max_connections=151 — Pest's ~18 parallel workers exhaust it (SQLSTATE[08004] 1040). The entrypoint prepends `mysqld` to a bare flag.
+        # Headroom, not a necessity: the suite used to open a connection per test
+        # that stayed open until the cycle collector got round to it, and the
+        # pile-up walked into the server's limit (SQLSTATE[08004] 1040). The
+        # harness now collects what a test leaves behind, so one connection is
+        # open at a time — and the limit is back where a default would do. It
+        # stays raised for the day the job runs in parallel again. The
+        # entrypoint prepends `mysqld` to a bare flag.
         command: --max-connections=500
         options: >-
           --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=1024m
@@ -175,7 +181,9 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
-        # Same max_connections=151 reason as `test-mysql`. The entrypoint prepends `mariadbd`; the wait step uses `mysqladmin` (shipped in the mariadb:12.3 image).
+        # Same headroom, and the same reason, as `test-mysql`. The entrypoint
+        # prepends `mariadbd`; the wait step uses `mysqladmin` (shipped in the
+        # mariadb:12.3 image).
         command: --max-connections=500
     env:
       SPORA_TEST_DB_DRIVER:   mariadb

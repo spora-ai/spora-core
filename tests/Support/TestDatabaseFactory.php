@@ -58,6 +58,7 @@ final class TestDatabaseFactory
             Database::resetBootState();
             Database::setSchemaInstallSkipped(false);
             (new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:'])))->boot();
+            self::collectDroppedCapsule();
             return;
         }
 
@@ -81,6 +82,8 @@ final class TestDatabaseFactory
 
         (new Database(self::buildConfigForDriver()))->boot();
 
+        self::collectDroppedCapsule();
+
         // The shared engine keeps every row a previous test wrote, and
         // `settings` has a unique index on (group_key, setting_key). A test
         // that writes a key a previous test already wrote collides on it, and a
@@ -95,6 +98,34 @@ final class TestDatabaseFactory
         }
 
         self::$workerSchemaInstalled = true;
+    }
+
+    /**
+     * Free the connection the previous test left behind.
+     *
+     * **The capsule goes, and the connection does not.** Resetting the boot
+     * state drops the capsule, and the capsule is freed — but the *manager* it
+     * created outlives it, and the manager holds the connection, so the socket
+     * stays open on the server. The manager and the connection hold each
+     * other, so the pair is a reference cycle: only the cycle collector breaks
+     * it, and the collector runs on its own schedule.
+     *
+     * Every test therefore opened a connection the collector had not got
+     * round to yet, and the server's `max_connections` was reached long
+     * before it did. The MySQL and MariaDB jobs failed with SQLSTATE[08004] —
+     * too many connections — and how many were open at the time depended on
+     * when the collector happened to run.
+     *
+     * Collecting here makes the number of open connections the number of live
+     * connections rather than a function of the collector's schedule.
+     *
+     * **The container's own connection is untouched.** It holds the `PDO`
+     * rather than the manager, and the collector frees the manager, not the
+     * `PDO` the container still references.
+     */
+    private static function collectDroppedCapsule(): void
+    {
+        gc_collect_cycles();
     }
 
     /** Per-test fresh-DB boot — slower than `boot()` (DROP + re-install). Use only when the test issues DDL mid-test. */
