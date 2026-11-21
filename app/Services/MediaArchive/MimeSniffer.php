@@ -328,18 +328,8 @@ final class MimeSniffer
             return $magicHit;
         }
 
-        $detected = $this->finfoBuffer($prefix);
-        if ($detected === null) {
-            return self::OCTET_STREAM;
-        }
-
-        // A text verdict needs text bytes. `finfo` reads a blob carrying NUL
-        // bytes as prose on one `libmagic` version and as binary on another —
-        // the verdict moved with the magic database, not with the bytes — and
-        // a caller that trusts it would let a binary payload into the archive
-        // under a text claim. A NUL byte is the marker every binary format
-        // carries and no text file does.
-        if (str_starts_with($detected, 'text/') && str_contains($prefix, "\0")) {
+        $detected = $this->finfoRead($prefix, \FILEINFO_MIME_TYPE);
+        if ($detected === null || $this->isBinaryDespiteTextVerdict($detected, $prefix)) {
             return self::OCTET_STREAM;
         }
 
@@ -348,12 +338,53 @@ final class MimeSniffer
         return $this->refineWithMagicTable($prefix, $detected) ?? $detected;
     }
 
-    private function finfoBuffer(string $prefix): ?string
+    /**
+     * Whether a text verdict rests on bytes that are not text.
+     *
+     * A NUL byte is the marker every binary format carries and no text file
+     * does — with one exception: UTF-16 and UTF-32 write a character as a
+     * code unit with a NUL half, so their text carries it too.
+     *
+     * `finfo` reads a blob carrying NUL bytes as prose on one `libmagic`
+     * version and as binary on another — the verdict moved with the magic
+     * database, not with the bytes — and a caller that trusts it would let a
+     * binary payload into the archive under a text claim. The charset
+     * verdict is the finer reading of the same pass: it names the encoding
+     * the platform read the bytes in, and it reads a payload as `binary`
+     * whatever the type verdict says.
+     */
+    private function isBinaryDespiteTextVerdict(string $detected, string $prefix): bool
+    {
+        if (!str_starts_with($detected, 'text/') || !str_contains($prefix, "\0")) {
+            return false;
+        }
+
+        $charset = $this->finfoRead($prefix, \FILEINFO_MIME_ENCODING);
+
+        return $charset === null || !$this->isUnicodeCharset($charset);
+    }
+
+    /**
+     * Whether the charset names an encoding whose text carries NUL bytes.
+     *
+     * UTF-16 and UTF-32 are the two: they write a character as a code unit
+     * with a NUL half, so their text carries the byte the guard looks for.
+     * Every other encoding writes a character as itself, and a NUL byte in
+     * it is the binary marker.
+     */
+    private function isUnicodeCharset(string $charset): bool
+    {
+        $charset = str_replace('-', '', strtolower($charset));
+
+        return str_starts_with($charset, 'utf16') || str_starts_with($charset, 'utf32');
+    }
+
+    private function finfoRead(string $prefix, int $flags): ?string
     {
         if (!function_exists('finfo_buffer') || !class_exists(finfo::class)) {
             return null;
         }
-        $ctx = $this->openFinfoContext();
+        $ctx = $this->openFinfoContext($flags);
         if ($ctx === null) {
             return null;
         }
@@ -361,13 +392,23 @@ final class MimeSniffer
         return $this->runFinfo($ctx, $prefix);
     }
 
-    private function openFinfoContext(): mixed
+    /**
+     * The finfo contexts, one per flag set.
+     *
+     * A context is bound to the flags it was opened with, so the MIME-type
+     * reading and the charset reading need one each — and `finfo_open` is
+     * expensive enough that a context is kept for the process's lifetime.
+     */
+    private function openFinfoContext(int $flags): mixed
     {
-        /** @var resource|null $ctx */
-        static $ctx = null;
-        if ($ctx === null) {
-            $ctx = @finfo_open(\FILEINFO_MIME_TYPE);
+        /** @var array<int, resource|false> $contexts */
+        static $contexts = [];
+
+        if (!array_key_exists($flags, $contexts)) {
+            $contexts[$flags] = @finfo_open($flags);
         }
+
+        $ctx = $contexts[$flags];
 
         return $ctx === false ? null : $ctx;
     }

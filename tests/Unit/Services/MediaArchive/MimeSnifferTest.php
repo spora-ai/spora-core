@@ -191,6 +191,17 @@ describe('MimeSniffer::sniffFromBytes', function (): void {
         expect(makeSniffer()->sniffFromBytes("hello world\n\0"))->toBe(MimeSniffer::OCTET_STREAM);
     });
 
+    it('keeps a UTF-16 document as text', function (): void {
+        // UTF-16 writes an ASCII character as a code unit with a NUL half,
+        // so the document carries the byte the guard looks for — and the
+        // guard would refuse the document with it. The platform reads the
+        // bytes as `utf-16le`, and that is what tells the encoding apart
+        // from a payload.
+        $utf16 = "\xFF\xFE" . "h\0e\0l\0l\0o\0\n\0";
+
+        expect(makeSniffer()->sniffFromBytes($utf16))->toBe('text/plain');
+    });
+
     it('never reports Typst source under the registered name', function (): void {
         // A `libmagic` that knows the Typst syntax reports it under the
         // registered name (PHP 8.6 ships one that does). Storing that
