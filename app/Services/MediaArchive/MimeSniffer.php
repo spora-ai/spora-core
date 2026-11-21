@@ -360,8 +360,11 @@ final class MimeSniffer
         }
 
         $charset = $this->finfoRead($prefix, \FILEINFO_MIME_ENCODING);
+        if ($charset === null || !$this->isUnicodeCharset($charset)) {
+            return true;
+        }
 
-        return $charset === null || !$this->isUnicodeCharset($charset);
+        return !$this->readsAsProse($prefix, $charset);
     }
 
     /**
@@ -377,6 +380,22 @@ final class MimeSniffer
         $charset = str_replace('-', '', strtolower($charset));
 
         return str_starts_with($charset, 'utf16') || str_starts_with($charset, 'utf32');
+    }
+
+    /**
+     * Whether the bytes read as prose once the encoding is undone.
+     *
+     * The encoding alone is not enough: a payload can carry the BOM that
+     * names it, and the platform reads the BOM as an encoding whatever
+     * follows it. Prose is what the text has to look like once the encoding
+     * is undone, and a control character other than tab, newline, form feed
+     * and carriage return is not prose.
+     */
+    private function readsAsProse(string $prefix, string $charset): bool
+    {
+        $decoded = mb_convert_encoding($prefix, 'UTF-8', $charset);
+
+        return preg_match('/[\x00-\x08\x0B\x0E-\x1F]/', $decoded) !== 1;
     }
 
     private function finfoRead(string $prefix, int $flags): ?string
