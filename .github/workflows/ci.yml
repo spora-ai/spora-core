@@ -20,6 +20,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege for the whole workflow: no job here writes to the
+# repository. The `sonar` job declares its own permissions, because it
+# writes to the pull request.
+permissions:
+  contents: read
+
 jobs:
   test:
     # Primary test + coverage gate on PHP 8.4 (the production target).
