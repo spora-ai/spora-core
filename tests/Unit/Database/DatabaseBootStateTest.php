@@ -38,6 +38,10 @@ it('keeps the connection the container holds', function (): void {
 
     // The container captured the `PDO` itself, not the manager — so the
     // collector frees the manager and the `PDO` the container still
-    // references stays open and usable.
-    expect($pdo)->not->toBeNull();
+    // references stays open and usable. A query through it is what says
+    // "usable"; the handle being non-null says nothing.
+    $statement = $pdo->query('SELECT 1');
+
+    expect($statement)->toBeInstanceOf(PDOStatement::class);
+    expect($statement->fetchColumn())->toBe(1);
 });
