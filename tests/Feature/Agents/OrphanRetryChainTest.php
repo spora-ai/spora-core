@@ -55,6 +55,17 @@ function orphanReaper(
 }
 
 /**
+ * An orchestrator that can reset a task without reaching a driver.
+ */
+function orphanOrchestrator(): Orchestrator
+{
+    $factory = Mockery::mock(DriverFactory::class);
+    $factory->allows('makeFromAgent')->andThrow(new RuntimeException('the driver is not reached here'));
+
+    return new Orchestrator($factory);
+}
+
+/**
  * A worker that claims whatever retry is due.
  *
  * The orchestrator is real: the point of these tests is the row the
@@ -69,11 +80,8 @@ function orphanWorker(): WorkerQueueProcessor
     $mercure = Mockery::mock(MercurePublisherInterface::class);
     $mercure->shouldIgnoreMissing();
 
-    $factory = Mockery::mock(DriverFactory::class);
-    $factory->allows('makeFromAgent')->andThrow(new RuntimeException('the driver is not reached here'));
-
     return new WorkerQueueProcessor(
-        orchestrator: new Orchestrator($factory),
+        orchestrator: orphanOrchestrator(),
         logger: new NullLogger(),
         mercure: $mercure,
         notificationService: $notification,
@@ -190,6 +198,34 @@ it('the worker claims the retry the reaper armed', function (): void {
         ->and($task->retry_of_task_id)->toBeNull()
         ->and((int) $task->retry_count)->toBe(1)
         ->and($task->error_code)->toBeNull();
+});
+
+it('lets the operator retry by hand while a retry is scheduled', function (): void {
+    // The countdown banner carries a "Retry Now" button, and an operator
+    // who cannot wait is not held by the delay the agent asked for. The
+    // manual retry takes the task's place: the scheduled attempt is
+    // dropped, and the budget continues from where it was — the manual
+    // attempt is the next one the agent's policy counts.
+    [$agentId, $userId] = orphanSeedAgent(maxRetries: 3, retryAfterMinutes: 6);
+    $task = orphanStaleTask($agentId, $userId);
+
+    orphanReaper(new RetryScheduler())->reapStaleTasks(new BufferedOutput(), 60);
+
+    $task->refresh();
+    expect((string) $task->status)->toBe('FAILED')
+        ->and($task->retry_after)->not->toBeNull()
+        ->and((int) $task->retry_count)->toBe(1);
+
+    orphanOrchestrator()->retry((int) $task->id);
+
+    $task->refresh();
+
+    expect((string) $task->status)->toBe('QUEUED')
+        ->and($task->retry_after)->toBeNull()
+        ->and($task->retry_of_task_id)->toBeNull()
+        ->and($task->error_code)->toBeNull()
+        // The budget is not reset: the manual attempt is the second one.
+        ->and((int) $task->retry_count)->toBe(1);
 });
 
 it('the payload carries the agent budget for a row in a retry chain', function (): void {
