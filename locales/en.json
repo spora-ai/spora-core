@@ -216,6 +216,7 @@
     "Media get_media(%s)": "Media get_media(%s)",
     "Media get_public_url(%s)": "Media get_public_url(%s)",
     "Media get_source(%s)": "Media get_source(%s)",
+    "Media inspect_image(%s)": "Media inspect_image(%s)",
     "Media library search": "Media library search",
     "Media list_derivatives(%s)": "Media list_derivatives(%s)",
     "Media list_derivatives(%s, format=%s)": "Media list_derivatives(%s, format=%s)",

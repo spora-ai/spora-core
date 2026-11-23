@@ -11,7 +11,8 @@ use Spora\Tools\Schema\ToolParameterSchemaBuilder;
  *
  * `asset_id` is bound to every per-asset op — `get_media`,
  * `get_public_url`, `get_embed_code`, `get_source`, `list_derivatives`,
- * `create_derivative`, `file_asset` — while the `search` op ignores it.
+ * `create_derivative`, `file_asset`, `inspect_image` — while the `search`
+ * op ignores it.
  * The filter must drop `asset_id` from `required[]` when only `search`
  * is allowed (e.g. the agent enabled the read-only search but not the
  * per-asset lookups).
@@ -23,13 +24,13 @@ it('declares `asset_id` as required for the per-asset ops only', function (): vo
     $schema = ToolParameterSchemaBuilder::build(MediaTool::class);
 
     expect($schema['__required_when']['asset_id'] ?? null)
-        ->toBe(['get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'file_asset']);
+        ->toBe(['get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'file_asset', 'inspect_image']);
 });
 
 it('keeps `asset_id` required when any per-asset op is allowed', function (): void {
     $schema = ToolParameterSchemaBuilder::build(MediaTool::class);
 
-    foreach (['get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'file_asset'] as $op) {
+    foreach (['get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'file_asset', 'inspect_image'] as $op) {
         $filtered = OperationSchemaFilter::filter($schema, [$op], 'action');
         expect($filtered['required'])->toContain('asset_id');
     }
@@ -56,7 +57,7 @@ it('keeps `asset_id` required when search is allowed alongside any per-asset op'
 
     $mixed = OperationSchemaFilter::filter(
         $schema,
-        ['search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'file_asset'],
+        ['search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'file_asset', 'inspect_image'],
         'action',
     );
     expect($mixed['required'])->toContain('asset_id', 'action');

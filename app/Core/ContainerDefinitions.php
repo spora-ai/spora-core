@@ -228,6 +228,7 @@ use Spora\Tools\HttpTimeoutResolver;
 use Spora\Tools\MediaCreateHandler;
 use Spora\Tools\MediaDerivativeHandler;
 use Spora\Tools\MediaFolderHandler;
+use Spora\Tools\MediaInspectImageHandler;
 use Spora\Tools\MediaSourceReader;
 use Spora\Tools\MediaTool;
 use Spora\Tools\PrincipalInfoTool;
@@ -1789,6 +1790,8 @@ final class ContainerDefinitions
 
             MediaCreateHandler::class => \DI\autowire(),
 
+            MediaInspectImageHandler::class => \DI\autowire(),
+
             MediaTool::class => static function (ContainerInterface $c): MediaTool {
                 $derivatives = $c->get(MediaDerivativeService::class);
                 return new MediaTool(
@@ -1803,6 +1806,8 @@ final class ContainerDefinitions
                     $c->get(MediaActiveTypesPolicy::class),
                     $c->get(Config::class),
                     $c->get(ToolConfigService::class),
+                    $c->get(DriverFactory::class),
+                    $c->get(MediaInspectImageHandler::class),
                 );
             },
 

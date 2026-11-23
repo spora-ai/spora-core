@@ -39,7 +39,7 @@ function documentEmbedTool(string $id, string $mime, string $mediaType): array
             'byte_size'  => 12_400,
         ]);
 
-    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
 
     return [$tool, $agentId, $asset->id, $restore];
 }

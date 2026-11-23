@@ -180,7 +180,7 @@ it('defaults the mime hint to text/markdown when none is given', function (): vo
 
 it('round-trips the returned asset_id through get_media under scope: agent', function (): void {
     $agentId = seedMediaToolAgent();
-    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
 
     try {
         $created = $tool->execute(

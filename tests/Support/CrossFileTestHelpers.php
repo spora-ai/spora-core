@@ -309,6 +309,7 @@ if (!function_exists('seedMediaAsset')) {
         ?string $pluginSlug = null,
         ?string $mime = 'image/png',
         ?string $idOverride = null,
+        ?string $payload = null,
     ): Spora\Models\MediaAsset {
         $id = $idOverride ?? testGenerateUuidV4();
 
@@ -325,6 +326,7 @@ if (!function_exists('seedMediaAsset')) {
             'asset_token'                   => bin2hex(random_bytes(16)),
             'public_access_token'           => $publicToken,
             'filename'                      => 'sample.png',
+            'payload'                       => $payload,
             'migrated_from_inline_data_url' => false,
         ]);
     }
@@ -350,6 +352,23 @@ if (!function_exists('makeMediaToolAdminAuth')) {
     }
 }
 
+if (!function_exists('mediaToolScopeConfig')) {
+    /**
+     * A `ToolConfigService` that pins the media tool's `scope`.
+     *
+     * The setting's default is `principal` now, and a test that means to
+     * exercise the agent-scoped branch has to say so rather than lean on a
+     * default that is no longer the one it was written against.
+     */
+    function mediaToolScopeConfig(string $scope): Spora\Services\ToolConfigService
+    {
+        $config = Mockery::mock(Spora\Services\ToolConfigService::class);
+        $config->allows('getEffectiveSettings')->andReturn(['scope' => $scope]);
+
+        return $config;
+    }
+}
+
 if (!function_exists('makeMediaToolWithRealArchive')) {
     /**
      * Build a MediaTool wired to a real MediaArchiveService so the test
@@ -361,6 +380,7 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
         ?Spora\Services\ToolConfigService $toolConfigService = null,
         ?Spora\Core\Config $config = null,
         ?Spora\Services\MediaArchive\MediaActiveTypesPolicy $activeTypes = null,
+        ?Spora\Drivers\DriverFactory $driverFactory = null,
     ): array {
         $activeTypes ??= new Spora\Services\MediaArchive\MediaActiveTypesPolicy(new Spora\Core\Config());
         // Reuse the same builder that MediaArchiveServiceTest uses so we get a
@@ -397,6 +417,7 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
             $activeTypes,
             $config ?? new Spora\Core\Config(),
             $toolConfigService,
+            $driverFactory,
         );
 
         return [

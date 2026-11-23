@@ -220,6 +220,7 @@
   "Media get_media(%s)": "Medien get_media(%s)",
   "Media get_public_url(%s)": "Medien get_public_url(%s)",
   "Media get_source(%s)": "Medien get_source(%s)",
+  "Media inspect_image(%s)": "Medien inspect_image(%s)",
   "Media library search": "Suche in der Mediathek",
   "Media list_derivatives(%s)": "Medien list_derivatives(%s)",
   "Media list_derivatives(%s, format=%s)": "Medien list_derivatives(%s, format=%s)",
