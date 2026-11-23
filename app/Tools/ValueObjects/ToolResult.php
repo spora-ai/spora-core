@@ -27,14 +27,28 @@ final readonly class ToolResult
          * @var array<string, mixed>|null
          */
         public ?array  $data = null,
+
+        /**
+         * Archive assets this result points at.
+         *
+         * Each is rendered into the LLM context as an image block on the
+         * tool-result turn, so the model sees the asset itself rather than a
+         * reference to it. The bytes are read from storage when the request is
+         * built; the reference is what gets persisted.
+         *
+         * @var list<array{media_id: string, kind: string}>
+         */
+        public array   $attachments = [],
     ) {}
 
     /**
      * Build a successful ToolResult with the given content and optional data.
+     *
+     * @param list<array{media_id: string, kind: string}> $attachments
      */
-    public static function ok(string $content, ?array $data = null): self
+    public static function ok(string $content, ?array $data = null, array $attachments = []): self
     {
-        return new self(true, $content, $data);
+        return new self(true, $content, $data, $attachments);
     }
 
     /**

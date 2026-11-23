@@ -167,14 +167,11 @@ final class ApprovedToolExecutor
             return;
         }
 
-        $this->orchestrator->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
-            context: new HistoryMessageContext(
-                toolCallId: $providerCallId,
-                toolName: $toolName,
-            ),
+        $this->orchestrator->appendToolResult(
+            $task->id,
+            $result,
+            $providerCallId,
+            $toolName,
         );
     }
 

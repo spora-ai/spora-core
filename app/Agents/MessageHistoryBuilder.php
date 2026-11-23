@@ -10,12 +10,17 @@ use Spora\Models\MediaAsset;
 use Spora\Models\MediaDerivative;
 use Spora\Models\TaskHistory;
 use Spora\Services\MediaArchive\MediaDerivativeService;
+use Spora\Services\MediaArchive\MediaImageBlocks;
 
 /**
  * Replays {@see TaskHistory} rows into the OpenAI-compatible message list sent
  * to the LLM each tick. Rows with `role=attachment` are never sent as such
  * (providers reject the role) — they fold into the adjacent `user` row,
  * with the operator's typed prompt preserved as a leading text block.
+ *
+ * A `role=tool` row that carries image attachments contributes two messages:
+ * the tool result, and a sibling `user` row with the images. A provider's
+ * tool result takes text only, so the image cannot live inside it.
  *
  * Pairing is order-symmetric: {@see consumeAttachmentPair()} handles the
  * reverse-order case and {@see consumeUserAttachmentPair()} the production
@@ -86,6 +91,12 @@ final class MessageHistoryBuilder
         $pending   = $compactions->summaries();
         $rowsArray = $rows->values()->all();
 
+        // The images a tool result carries ride on a user turn that follows
+        // the whole run of tool results. A provider accepts a tool result
+        // only directly after the assistant turn that asked for it, so a
+        // user turn between two results of the same batch is a 400.
+        $toolImages = [];
+
         $i = 0;
         while ($i < count($rowsArray)) {
             $row = $rowsArray[$i];
@@ -107,9 +118,27 @@ final class MessageHistoryBuilder
                 array_shift($pending);
             }
 
-            $message = $this->turnMessage($row, $pair, $compactions);
-            if ($message !== null) {
-                $messages[] = $message;
+            $turnMessages = $this->turnMessage($row, $pair, $compactions);
+
+            if ($row->role === 'tool') {
+                // The tool result goes out now; the image turn waits for the
+                // run of tool results to end.
+                $toolResult = array_shift($turnMessages);
+                if ($toolResult !== null) {
+                    $messages[] = $toolResult;
+                }
+                foreach ($turnMessages as $imageTurn) {
+                    $toolImages[] = $imageTurn;
+                }
+            } else {
+                foreach ($toolImages as $imageTurn) {
+                    $messages[] = $imageTurn;
+                }
+                $toolImages = [];
+
+                foreach ($turnMessages as $message) {
+                    $messages[] = $message;
+                }
             }
 
             $i = $pair['nextIndex'] ?? ($i + 1);
@@ -121,42 +150,50 @@ final class MessageHistoryBuilder
             $messages[] = $this->summaryMessage($summary['row']);
         }
 
+        foreach ($toolImages as $imageTurn) {
+            $messages[] = $imageTurn;
+        }
+
         return $messages;
     }
 
     /**
-     * What one turn contributes to the message list, or `null` when a summary
-     * already stands in for it.
+     * What one turn contributes to the message list — an empty list when a
+     * summary already stands in for it.
      *
      * A summary's range is expressed in raw row sequences, so it can cover
      * one half of a pair and not the other — the halves are checked
      * separately and the uncovered one is sent on its own.
      *
      * @param  array{row: TaskHistory, nextIndex: int, first: int, last: int, halves: list<TaskHistory>}|null  $pair
-     * @return array<string, mixed>|null
+     * @return list<array<string, mixed>>
      */
-    private function turnMessage(TaskHistory $row, ?array $pair, ActiveCompactions $compactions): ?array
+    private function turnMessage(TaskHistory $row, ?array $pair, ActiveCompactions $compactions): array
     {
         $coversFirst = $compactions->covers($pair['first'] ?? (int) $row->sequence);
         $coversLast  = $compactions->covers($pair['last'] ?? (int) $row->sequence);
 
-        $message = null;
-
         if ($pair === null) {
-            $message = $coversFirst ? null : $this->messageFromHistoryRow($row);
-        } elseif (!$coversFirst && !$coversLast) {
-            $message = $this->messageFromHistoryRow($pair['row']);
-        } elseif (!$coversFirst) {
-            // Only the second half is covered: send the first half alone —
-            // dropping the merged row would lose it.
-            $message = $this->messageFromHistoryRow($pair['halves'][0]);
-        } elseif (!$coversLast) {
-            // Only the first half is covered: send the second half alone,
-            // not the merged row — that would repeat what the summary has.
-            $message = $this->messageFromHistoryRow($pair['halves'][1]);
+            return $coversFirst ? [] : $this->messageFromHistoryRow($row);
         }
 
-        return $message;
+        if (!$coversFirst && !$coversLast) {
+            return $this->messageFromHistoryRow($pair['row']);
+        }
+
+        if (!$coversFirst) {
+            // Only the second half is covered: send the first half alone —
+            // dropping the merged row would lose it.
+            return $this->messageFromHistoryRow($pair['halves'][0]);
+        }
+
+        if (!$coversLast) {
+            // Only the first half is covered: send the second half alone,
+            // not the merged row — that would repeat what the summary has.
+            return $this->messageFromHistoryRow($pair['halves'][1]);
+        }
+
+        return [];
     }
 
     /**
@@ -241,15 +278,22 @@ final class MessageHistoryBuilder
     }
 
     /**
+     * The messages one row contributes.
+     *
      * `attachment` has no valid wire role, so it must never fall through to a
      * literal `{role: 'attachment'}` — every provider rejects that with a 400.
      *
-     * @return array<string, mixed>
+     * A tool row that carries an image attachment contributes two: the tool
+     * result, and the user turn that carries the image. The image turn is
+     * always the second entry, so {@see applySummaryCompaction()} can hold
+     * it back until the run of tool results ends.
+     *
+     * @return list<array<string, mixed>>
      */
     private function messageFromHistoryRow(TaskHistory $row): array
     {
         if ($row->role === 'attachment') {
-            return $this->attachmentMessage($row);
+            return [$this->attachmentMessage($row)];
         }
 
         $content = $row->content;
@@ -263,13 +307,18 @@ final class MessageHistoryBuilder
         ];
 
         if ($row->role === 'tool') {
-            $message = [
-                'role' => 'tool',
-                'tool_call_id' => $row->tool_call_id,
-                'name' => $row->tool_name,
-                'content' => $row->content,
+            return [
+                [
+                    'role' => 'tool',
+                    'tool_call_id' => $row->tool_call_id,
+                    'name' => $row->tool_name,
+                    'content' => $row->content,
+                ],
+                ...$this->toolImageTurn($row),
             ];
-        } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
+        }
+
+        if ($row->role === 'assistant' && $row->tool_call_payload !== null) {
             $message = [
                 'role'    => 'assistant',
                 'content' => $content,
@@ -282,7 +331,90 @@ final class MessageHistoryBuilder
             }
         }
 
-        return $message;
+        return [$message];
+    }
+
+    /**
+     * The user turn that carries the images a tool result points at.
+     *
+     * A provider's tool result carries text only, so the image rides on a
+     * sibling user turn. The identity text block leads it: the model gets
+     * the asset_id back, so the turn is never image-only and the asset can
+     * be chained onward.
+     *
+     * A driver that reports it cannot take images drops the block, the same
+     * way the attachment path does — a provider that cannot read an image
+     * block rejects the request. A missing driver is not a refusal: the tool
+     * that produced the attachment already checked the agent's LLM.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function toolImageTurn(TaskHistory $row): array
+    {
+        $assets = $this->toolImageAssets($row);
+        if ($assets === []) {
+            return [];
+        }
+
+        if ($this->driver !== null && !$this->driver->supportsImageInput()) {
+            return [];
+        }
+
+        $identities = [];
+        $images     = [];
+
+        foreach ($assets as $asset) {
+            $image = MediaImageBlocks::forAsset($asset, $this->basePath());
+            if ($image === null) {
+                continue;
+            }
+            $identities[] = AttachmentRowRenderer::attachmentMetadataBlock($asset);
+            $images[]     = $image;
+        }
+
+        if ($images === []) {
+            return [];
+        }
+
+        return [
+            [
+                'role'    => 'user',
+                'content' => array_merge($identities, $images),
+            ],
+        ];
+    }
+
+    /**
+     * The assets a tool row's image attachments name.
+     *
+     * @return list<MediaAsset>
+     */
+    private function toolImageAssets(TaskHistory $row): array
+    {
+        if (!is_array($row->attachments)) {
+            return [];
+        }
+
+        $assets = [];
+
+        foreach ($row->attachments as $attachment) {
+            if (!is_array($attachment)) {
+                continue;
+            }
+            if (($attachment['kind'] ?? 'text') !== 'image') {
+                continue;
+            }
+            $mediaId = $attachment['media_id'] ?? null;
+            if (!is_string($mediaId) || $mediaId === '') {
+                continue;
+            }
+            $asset = MediaAsset::query()->find($mediaId);
+            if ($asset instanceof MediaAsset) {
+                $assets[] = $asset;
+            }
+        }
+
+        return $assets;
     }
 
     /**
@@ -297,7 +429,7 @@ final class MessageHistoryBuilder
     {
         $renderer = new AttachmentRowRenderer(
             $this->driver,
-            defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3),
+            $this->basePath(),
         );
 
         $rendered = $renderer->render($row);
@@ -312,6 +444,14 @@ final class MessageHistoryBuilder
             'role'    => 'user',
             'content' => $renderer->fallbackText($row->content),
         ];
+    }
+
+    /**
+     * Where the archive's asset files live.
+     */
+    private function basePath(): string
+    {
+        return defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);
     }
 
     /**
@@ -352,16 +492,12 @@ final class MessageHistoryBuilder
  * Renders a {@see TaskHistory} `attachment` row into the internal
  * `content` array for the merged `user` message. Internal to
  * {@see MessageHistoryBuilder} — instantiated by {@see MessageHistoryBuilder::attachmentMessage()}.
+ *
+ * The identity block it builds is shared with the tool-result image path:
+ * both put the asset_id in front of the model.
  */
 final class AttachmentRowRenderer
 {
-    /**
-     * Hard cap on inline image bytes. A 4K photo can exceed 20 MiB
-     * after MIME decode; without a cap, a single oversized attachment
-     * blows up the LLM context window and the request payload.
-     */
-    private const MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024;
-
     /**
      * Hard cap on inline text bytes, applied to BOTH inline branches:
      * the `md` derivative and the raw source text.
@@ -402,18 +538,10 @@ final class AttachmentRowRenderer
      * arithmetic above describes.
      *
      * Image blocks are not counted: they are separately capped per asset
-     * ({@see MAX_INLINE_IMAGE_BYTES}) and cost far fewer tokens per byte.
+     * ({@see MediaImageBlocks::MAX_IMAGE_BYTES}) and cost far fewer tokens
+     * per byte.
      */
     private const MAX_INLINE_ROW_TEXT_BYTES = 512 * 1024;
-
-    /**
-     * The ceiling on the image bytes one row forwards.
-     *
-     * The per-asset cap bounds one image; this bounds the row. An image
-     * block is a base64 copy of the asset, so a row of images costs the
-     * worker its own bytes before the provider request is even built.
-     */
-    private const MAX_INLINE_ROW_IMAGE_BYTES = 32 * 1024 * 1024;
 
     /**
      * Leading bytes we sample to confirm the asset really is text
@@ -455,7 +583,7 @@ final class AttachmentRowRenderer
     public function __construct(
         private readonly ?LLMDriverInterface $driver,
         private readonly string $basePath,
-        private readonly int $maxRowImageBytes = self::MAX_INLINE_ROW_IMAGE_BYTES,
+        private readonly int $maxRowImageBytes = MediaImageBlocks::MAX_ROW_BYTES,
     ) {}
 
     /**
@@ -509,7 +637,7 @@ final class AttachmentRowRenderer
      * forbidding.
      *
      * The row's image bytes are capped as a whole
-     * ({@see MAX_INLINE_ROW_IMAGE_BYTES}), because the per-asset cap bounds
+     * ({@see MediaImageBlocks::MAX_ROW_BYTES}), because the per-asset cap bounds
      * one image and not the row.
      *
      * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>}
@@ -533,7 +661,7 @@ final class AttachmentRowRenderer
             if ($asset === null) {
                 continue;
             }
-            $metadataBlocks[] = $this->attachmentMetadataBlock($asset);
+            $metadataBlocks[] = self::attachmentMetadataBlock($asset);
             if ($attachment['kind'] === 'image') {
                 $image = $this->buildImageBlock($asset, $supportsImages, $imageBytes);
                 if ($image === null) {
@@ -684,23 +812,16 @@ final class AttachmentRowRenderer
 
         // An image that does not fit is never read off disk — the same order
         // the text branch uses.
-        $bytes = $supportsImages && $fits ? $this->loadAssetBytes($asset) : null;
-
-        if ($bytes === null
-            || strlen($bytes) > self::MAX_INLINE_IMAGE_BYTES
-            || $imageBytes + strlen($bytes) > $this->maxRowImageBytes
-        ) {
+        if (!$supportsImages || !$fits) {
             return null;
         }
 
-        return [
-            [
-                'type'      => 'image',
-                'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
-                'base64'    => base64_encode($bytes),
-            ],
-            strlen($bytes),
-        ];
+        $rendered = MediaImageBlocks::renderAsset($asset, $this->basePath);
+        if ($rendered === null || $imageBytes + $rendered['bytes'] > $this->maxRowImageBytes) {
+            return null;
+        }
+
+        return [$rendered['block'], $rendered['bytes']];
     }
 
     /**
@@ -911,7 +1032,7 @@ final class AttachmentRowRenderer
      *
      * @return array<string, mixed>
      */
-    private function attachmentMetadataBlock(MediaAsset $asset): array
+    public static function attachmentMetadataBlock(MediaAsset $asset): array
     {
         $sizeLabel = $asset->byte_size !== null
             ? ' (' . self::humanByteSize((int) $asset->byte_size) . ')'
@@ -941,18 +1062,6 @@ final class AttachmentRowRenderer
 
     private function loadAssetBytes(MediaAsset $asset): ?string
     {
-        if ($asset->storage_mode === 'data_url') {
-            return is_string($asset->payload) ? $asset->payload : null;
-        }
-        if ($asset->storage_mode === 'local' && $asset->asset_token !== null && $asset->asset_token !== '') {
-            $paths = new \Spora\Core\Paths($this->basePath);
-            $path = $paths->storage('assets') . '/' . $asset->asset_token;
-            $ext  = \Spora\Services\MediaArchive\MediaArchiveService::extensionForMime($asset->mime_type);
-            if ($ext !== null) {
-                $path .= '.' . $ext;
-            }
-            return is_file($path) ? (string) file_get_contents($path) : null;
-        }
-        return null;
+        return MediaImageBlocks::loadBytes($asset, $this->basePath);
     }
 }

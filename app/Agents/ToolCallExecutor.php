@@ -278,14 +278,11 @@ final class ToolCallExecutor
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
 
-            $this->orchestrator->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: $scrubbed,
-                context: new HistoryMessageContext(
-                    toolCallId: $toolCall->providerCallId,
-                    toolName: $toolCall->toolName,
-                ),
+            $this->orchestrator->appendToolResult(
+                $task->id,
+                $result,
+                $toolCall->providerCallId,
+                $toolCall->toolName,
             );
 
             if (!$result->success) {
@@ -321,14 +318,11 @@ final class ToolCallExecutor
         ToolResult    $result,
         array         $arguments,
     ): void {
-        $this->orchestrator->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
-            context: new HistoryMessageContext(
-                toolCallId: (string) $toolCallRecord->provider_call_id,
-                toolName: (string) $toolCallRecord->tool_name,
-            ),
+        $this->orchestrator->appendToolResult(
+            $task->id,
+            $result,
+            (string) $toolCallRecord->provider_call_id,
+            (string) $toolCallRecord->tool_name,
         );
 
         if (!$result->success) {
@@ -492,14 +486,11 @@ final class ToolCallExecutor
                 'result_content' => $scrubbed,
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
-            $this->orchestrator->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: $scrubbed,
-                context: new HistoryMessageContext(
-                    toolCallId: $toolCall->providerCallId,
-                    toolName: $toolCall->toolName,
-                ),
+            $this->orchestrator->appendToolResult(
+                $task->id,
+                $result,
+                $toolCall->providerCallId,
+                $toolCall->toolName,
             );
         });
     }
@@ -528,14 +519,11 @@ final class ToolCallExecutor
                 'result_data'    => $result->data,
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
-            $this->orchestrator->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: $scrubbed,
-                context: new HistoryMessageContext(
-                    toolCallId: $toolCall->providerCallId,
-                    toolName: $toolCall->toolName,
-                ),
+            $this->orchestrator->appendToolResult(
+                $task->id,
+                $result,
+                $toolCall->providerCallId,
+                $toolCall->toolName,
             );
         });
     }
