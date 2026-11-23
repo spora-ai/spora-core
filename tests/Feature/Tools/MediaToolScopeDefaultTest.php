@@ -31,9 +31,9 @@ use Spora\Tools\MediaTool;
  *
  * The tool's own fallback answers two different questions with two
  * different scopes. An absent setting is the operator's silence and takes
- * the shipped default; an unrecognised one is a wrong value and takes the
- * narrowest scope, so a setting nobody can read cannot widen what the
- * agent sees.
+ * the shipped default; a wrong one — an unrecognised string, a value of a
+ * type the setting never holds — takes the narrowest scope, so a setting
+ * nobody can read cannot widen what the agent sees.
  */
 
 /**
@@ -215,4 +215,56 @@ describe('the media tool scope fallback', function (): void {
             $restore();
         }
     });
+
+    it('answers with the agent scope when the stored scope is not a string', function (mixed $stored): void {
+        // A stored scope of a type the setting never holds — a boolean, a
+        // number, an array — is a wrong setting in the same way a typo is,
+        // and it must not widen the reach either: the narrowest scope
+        // answers. The caller's own asset stays reachable and the
+        // sibling's does not.
+        //
+        // The value goes in through the real cascade, so the test proves
+        // the hole is reachable rather than hypothetical: nothing on the
+        // write path checks a select setting against its options, and the
+        // cascade leaves a present value alone — a value that is set is
+        // not a value that was cleared.
+        $userId       = 51508;
+        $callerAgent  = scopeDefaultAgent($userId);
+        $siblingAgent = scopeDefaultAgent($userId);
+        $ownAsset     = seedMediaAsset(agentId: $callerAgent, userId: $userId);
+        $siblingAsset = seedMediaAsset(agentId: $siblingAgent, userId: $userId);
+
+        $toolConfig = scopeDefaultToolConfig();
+        $toolConfig->putAgentOverride(MediaTool::class, $callerAgent, ['scope' => $stored]);
+
+        expect($toolConfig->getEffectiveSettings(MediaTool::class, $callerAgent, $userId)['scope'])
+            ->toBe($stored);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            $toolConfig,
+        );
+        try {
+            $own = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $ownAsset->id],
+                agentId: $callerAgent,
+                context: scopeDefaultContext($userId),
+            );
+            $sibling = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $siblingAsset->id],
+                agentId: $callerAgent,
+                context: scopeDefaultContext($userId),
+            );
+
+            expect($own->success)->toBeTrue();
+            expect($sibling->success)->toBeFalse();
+            expect($sibling->content)->toContain('Media asset not found');
+        } finally {
+            $restore();
+        }
+    })->with([
+        'a boolean' => [false],
+        'a number'  => [0],
+        'an array'  => [[]],
+    ]);
 });

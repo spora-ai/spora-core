@@ -146,7 +146,8 @@ use Spora\Tools\ValueObjects\ToolResult;
  *     without a DB migration; the listing narrows to the caller user's
  *     own rows.
  *   - A stored value that is none of these reads as `agent`: a setting
- *     that cannot be understood must not widen what the agent sees.
+ *     that cannot be understood — a typo, a value of a type the setting
+ *     never holds — must not widen what the agent sees.
  *   - Admins (`AuthService::isAdmin()`) bypass the scope check on the
  *     per-asset ops.
  */
@@ -866,16 +867,18 @@ final class MediaTool extends AbstractTool
     {
         $settings = $this->toolConfigService?->getEffectiveSettings(self::class, $agentId, $userId) ?? [];
 
-        // Two fallbacks, two answers. An absent setting means the operator
-        // never expressed one, so it takes the shipped default
-        // (`principal`). An unrecognised one means the stored value is
-        // wrong — a typo, a hand-edited row, a value from a retired enum —
-        // and a broken setting must not widen the reach, so it takes the
-        // narrowest scope instead.
-        $scope = is_string($settings['scope'] ?? null) ? $settings['scope'] : 'principal';
+        // Two questions, two answers. An absent setting — or the null the
+        // cascade stores for "cleared, inherit" — is the operator's silence,
+        // so it takes the shipped default (`principal`). A value nobody can
+        // read (a boolean, a number, an array) is a wrong setting, and a
+        // wrong setting must not widen the reach, so it takes the narrowest
+        // scope.
+        $raw   = $settings['scope'] ?? null;
+        $scope = is_string($raw) ? $raw : ($raw === null ? 'principal' : 'agent');
 
         // Legacy 'user' is a runtime alias for 'principal' — see the
-        // class-level docblock.
+        // class-level docblock. An unrecognised string is a wrong setting
+        // too, and takes the narrowest scope as well.
         return in_array($scope, ['agent', 'principal', 'user'], true) ? $scope : 'agent';
     }
 
