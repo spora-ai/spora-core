@@ -98,8 +98,8 @@ final class MediaInspectImageHandler
         if ($mime === 'image/svg+xml') {
             return ToolResult::fail(sprintf(
                 '`inspect_image` does not read SVG (asset %s): an SVG is a script-capable document, not a raster '
-                . 'image. Render it to PNG with `create_derivative(asset_id: %s, format: "png")` and inspect that.',
-                $asset->id,
+                . 'image, and no registered derivative producer rasterises one. The asset has to be converted to a '
+                . 'raster image (PNG, JPEG, WebP or GIF) outside Spora, or by the operator, before it can be inspected.',
                 $asset->id,
             ));
         }

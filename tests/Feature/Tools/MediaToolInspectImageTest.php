@@ -240,7 +240,12 @@ describe('MediaTool::inspect_image', function (): void {
 
             expect($result->success)->toBeFalse();
             expect($result->content)->toContain('does not read SVG')
-                ->and($result->content)->toContain('script-capable');
+                ->and($result->content)->toContain('script-capable')
+                // The remedy has to be one the platform can perform: no
+                // registered derivative producer rasterises an SVG, so a
+                // message that names `create_derivative` sends the model
+                // into a call that cannot succeed.
+                ->and($result->content)->not->toContain('create_derivative');
         } finally {
             $restore();
         }
