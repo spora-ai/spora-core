@@ -138,9 +138,12 @@ use Spora\Tools\ValueObjects\ToolResult;
  *     principal, or which the owner of a personal principal uploaded
  *     themselves. `search` lists the rows the principal's agents hold.
  *   - `agent`: `search` filters by `agent_id`, the per-asset ops require
- *     `asset->agent_id === $agentId`. An agent that already had the tool
- *     enabled keeps this, because enabling a tool materialises the setting
- *     default into the agent's override row.
+ *     `asset->agent_id === $agentId`. An agent that was enabled before
+ *     the default moved keeps this: migration 0105 materialises
+ *     `scope: 'agent'` into the override row of every agent that had
+ *     the tool enabled and no scope of its own, so the reach it had
+ *     survives the change. An agent enabled from now on gets
+ *     `principal`.
  *   - `user` (legacy): the per-asset ops treat it as an alias for
  *     `principal` so existing `agent_tool_settings` rows keep working
  *     without a DB migration; the listing narrows to the caller user's

@@ -23,11 +23,12 @@ use Spora\Tools\MediaTool;
  * what run.
  *
  * The blast radius is narrow on purpose. Enabling a tool materialises the
- * schema default into the agent's override row, so an agent that already
- * had the `media` tool enabled keeps the value it was given and the default
- * change does not reach it. That is the property that makes the change safe
- * for an existing installation — and the reason the diagnostic scope
- * failure exists.
+ * schema default into the agent's override row — but only when nothing
+ * above the agent layer supplies a value, so an agent that already had the
+ * `media` tool enabled can end up with no stored scope at all. Migration
+ * 0105 materialises `scope: 'agent'` for exactly those agents, and that is
+ * what keeps the change safe for an existing installation — and the reason
+ * the diagnostic scope failure exists.
  *
  * The tool's own fallback answers two different questions with two
  * different scopes. An absent setting is the operator's silence and takes
@@ -104,10 +105,11 @@ describe('the media tool scope default', function (): void {
         expect($effective['scope'])->toBe('principal');
     });
 
-    it('stays agent for an agent that already had the tool enabled before the change', function (): void {
-        // What the pre-change `enableTool()` wrote: the schema default of
-        // the day, materialised into the agent's override row. The default
-        // change does not reach it, so the agent keeps its reach.
+    it('stays agent for an agent that holds a scope of its own', function (): void {
+        // The scope the agent's own row holds is the scope it runs with,
+        // whatever the shipped default says — the row is the top layer of
+        // the cascade. Migration 0105 is what covers the agents whose row
+        // holds no scope at all.
         $userId     = 51503;
         $agentId    = scopeDefaultAgent($userId);
         $toolConfig = scopeDefaultToolConfig();
