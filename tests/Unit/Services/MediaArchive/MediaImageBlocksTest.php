@@ -84,12 +84,12 @@ describe('MediaImageBlocks', function () {
         $png = mediaImageBlockPng();
         $asset = makeDataUrlImageAsset('44444444-4444-4444-8444-444444444444', $png);
 
-        $block = MediaImageBlocks::forAsset($asset, BASE_PATH);
+        $rendered = MediaImageBlocks::renderAsset($asset, BASE_PATH);
 
-        expect($block)->not->toBeNull();
-        expect($block['type'])->toBe('image');
-        expect($block['mediaType'])->toBe('image/png');
-        expect(base64_decode((string) $block['base64'], strict: true))->toBe($png);
+        expect($rendered)->not->toBeNull();
+        expect($rendered['block']['type'])->toBe('image');
+        expect($rendered['block']['mediaType'])->toBe('image/png');
+        expect(base64_decode((string) $rendered['block']['base64'], strict: true))->toBe($png);
     });
 
     it('returns null for an asset whose bytes are not on hand', function (): void {
@@ -106,7 +106,7 @@ describe('MediaImageBlocks', function () {
             'filename'     => 'pixel.png',
         ]);
 
-        expect(MediaImageBlocks::forAsset($asset, BASE_PATH))->toBeNull();
+        expect(MediaImageBlocks::renderAsset($asset, BASE_PATH))->toBeNull();
     });
 
     it('returns null for a local asset whose file is gone', function (): void {
@@ -117,7 +117,7 @@ describe('MediaImageBlocks', function () {
             1024,
         );
 
-        expect(MediaImageBlocks::forAsset($asset, BASE_PATH))->toBeNull();
+        expect(MediaImageBlocks::renderAsset($asset, BASE_PATH))->toBeNull();
 
         removeImageBlockStorageDir($dir);
     });
@@ -138,7 +138,7 @@ describe('MediaImageBlocks', function () {
             strlen($oversize),
         );
 
-        expect(MediaImageBlocks::forAsset($asset, BASE_PATH))->toBeNull();
+        expect(MediaImageBlocks::renderAsset($asset, BASE_PATH))->toBeNull();
 
         removeImageBlockStorageDir($dir);
     });
@@ -157,10 +157,11 @@ describe('MediaImageBlocks', function () {
             strlen($atCap),
         );
 
-        expect(MediaImageBlocks::forAsset($asset, BASE_PATH))->not->toBeNull();
+        expect(MediaImageBlocks::renderAsset($asset, BASE_PATH))->not->toBeNull();
 
         removeImageBlockStorageDir($dir);
     });
+
     it('returns null when the file cannot be read', function (): void {
         // A file that is there but unreadable: the read fails, and the
         // failure must read as "no bytes" rather than as a zero-byte
@@ -182,13 +183,13 @@ describe('MediaImageBlocks', function () {
         set_error_handler(static fn(): bool => true, E_WARNING);
         try {
             $bytes = MediaImageBlocks::loadBytes($asset, BASE_PATH);
-            $block = MediaImageBlocks::forAsset($asset, BASE_PATH);
+            $rendered = MediaImageBlocks::renderAsset($asset, BASE_PATH);
         } finally {
             restore_error_handler();
         }
 
         expect($bytes)->toBeNull();
-        expect($block)->toBeNull();
+        expect($rendered)->toBeNull();
 
         chmod($path, 0o644);
         removeImageBlockStorageDir($dir);

@@ -48,6 +48,7 @@ final class MessageHistoryBuilder
 {
     public function __construct(
         private readonly ?LLMDriverInterface $driver = null,
+        private readonly int $maxRowImageBytes = MediaImageBlocks::MAX_ROW_BYTES,
     ) {}
 
     /**
@@ -347,6 +348,12 @@ final class MessageHistoryBuilder
      * block rejects the request. A missing driver is not a refusal: the tool
      * that produced the attachment already checked the agent's LLM.
      *
+     * The row's image bytes are capped as a whole
+     * ({@see MediaImageBlocks::MAX_ROW_BYTES}), the same budget the
+     * attachment path spends: the per-asset cap bounds one image, not the
+     * row. An image that does not fit is dropped — the tool result text
+     * still reaches the model.
+     *
      * @return list<array<string, mixed>>
      */
     private function toolImageTurn(TaskHistory $row): array
@@ -362,14 +369,21 @@ final class MessageHistoryBuilder
 
         $identities = [];
         $images     = [];
+        $imageBytes = 0;
 
         foreach ($assets as $asset) {
-            $image = MediaImageBlocks::forAsset($asset, $this->basePath());
-            if ($image === null) {
+            $rendered = MediaImageBlocks::renderForRow(
+                $asset,
+                $this->basePath(),
+                $imageBytes,
+                $this->maxRowImageBytes,
+            );
+            if ($rendered === null) {
                 continue;
             }
             $identities[] = AttachmentRowRenderer::attachmentMetadataBlock($asset);
-            $images[]     = $image;
+            $images[]     = $rendered['block'];
+            $imageBytes  += $rendered['bytes'];
         }
 
         if ($images === []) {
@@ -667,9 +681,8 @@ final class AttachmentRowRenderer
                 if ($image === null) {
                     continue;
                 }
-                [$imageBlock, $bytes] = $image;
-                $imageBlocks[] = $imageBlock;
-                $imageBytes    += $bytes;
+                $imageBlocks[] = $image['block'];
+                $imageBytes    += $image['bytes'];
                 continue;
             }
             [$block, $inlined] = $this->buildTextBlock($asset, $derivatives[$asset->id] ?? null, $remaining);
@@ -795,33 +808,15 @@ final class AttachmentRowRenderer
      * no room in the row's image budget, or a payload over the per-asset
      * cap — so the caller can drop it without branching.
      *
-     * The recorded size decides whether the image fits the row's budget,
-     * so an image that does not fit is never read off disk — the same
-     * order the text branch uses. An asset whose size was not recorded is
-     * measured after it is loaded, and the loaded bytes are measured
-     * again, because the recorded size can be stale.
-     *
-     * @return array{0: array<string, mixed>, 1: int}|null
+     * @return array{block: array<string, mixed>, bytes: int}|null
      */
     private function buildImageBlock(MediaAsset $asset, bool $supportsImages, int $imageBytes): ?array
     {
-        $size = (int) ($asset->byte_size ?? 0);
-        $fits = $size > 0
-            ? $imageBytes + $size <= $this->maxRowImageBytes
-            : $imageBytes < $this->maxRowImageBytes;
-
-        // An image that does not fit is never read off disk — the same order
-        // the text branch uses.
-        if (!$supportsImages || !$fits) {
+        if (!$supportsImages) {
             return null;
         }
 
-        $rendered = MediaImageBlocks::renderAsset($asset, $this->basePath);
-        if ($rendered === null || $imageBytes + $rendered['bytes'] > $this->maxRowImageBytes) {
-            return null;
-        }
-
-        return [$rendered['block'], $rendered['bytes']];
+        return MediaImageBlocks::renderForRow($asset, $this->basePath, $imageBytes, $this->maxRowImageBytes);
     }
 
     /**

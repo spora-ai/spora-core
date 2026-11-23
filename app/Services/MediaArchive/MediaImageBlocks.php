@@ -34,22 +34,6 @@ final class MediaImageBlocks
     public const MAX_ROW_BYTES = 32 * 1024 * 1024;
 
     /**
-     * The image block for the asset, or null when it cannot be rendered.
-     *
-     * Null covers the assets whose bytes are not on hand — an external
-     * asset, a local file that is gone — and the ones over
-     * {@see MAX_IMAGE_BYTES}.
-     *
-     * @return array<string, mixed>|null
-     */
-    public static function forAsset(MediaAsset $asset, string $basePath): ?array
-    {
-        $rendered = self::renderAsset($asset, $basePath);
-
-        return $rendered === null ? null : $rendered['block'];
-    }
-
-    /**
      * The image block and the raw bytes it spent.
      *
      * The byte count travels with the block so a caller that budgets a
@@ -72,6 +56,45 @@ final class MediaImageBlocks
             ],
             'bytes' => strlen($bytes),
         ];
+    }
+
+    /**
+     * The image block an asset contributes to a row, and the bytes it spent.
+     *
+     * Null when the asset cannot be rendered or does not fit the row's
+     * remaining budget — the per-asset cap and the row cap are both
+     * enforced here, so every path that puts an image in a row asks this
+     * one method and the two cannot drift.
+     *
+     * The recorded size decides whether the asset fits before it is read,
+     * so an image that cannot fit is never loaded off disk; the loaded
+     * bytes are measured again, because the recorded size can be stale.
+     *
+     * @param  int  $rowBytes     The image bytes the row has already spent.
+     * @param  int  $maxRowBytes  The ceiling on the image bytes one row forwards.
+     * @return array{block: array<string, mixed>, bytes: int}|null
+     */
+    public static function renderForRow(
+        MediaAsset $asset,
+        string $basePath,
+        int $rowBytes,
+        int $maxRowBytes = self::MAX_ROW_BYTES,
+    ): ?array {
+        $size = (int) ($asset->byte_size ?? 0);
+        $fits = $size > 0
+            ? $rowBytes + $size <= $maxRowBytes
+            : $rowBytes < $maxRowBytes;
+
+        if (!$fits) {
+            return null;
+        }
+
+        $rendered = self::renderAsset($asset, $basePath);
+        if ($rendered === null || $rowBytes + $rendered['bytes'] > $maxRowBytes) {
+            return null;
+        }
+
+        return $rendered;
     }
 
     /**

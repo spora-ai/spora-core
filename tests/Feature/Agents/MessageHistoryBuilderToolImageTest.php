@@ -69,6 +69,24 @@ function toolImagePng(): string
 }
 
 /**
+ * An archive asset whose bytes are on hand inline.
+ */
+function toolImageAsset(string $uuid, string $payload): MediaAsset
+{
+    return MediaAsset::create([
+        'id'           => $uuid,
+        'asset_url'    => "/api/v1/assets/{$uuid}.png",
+        'storage_mode' => 'data_url',
+        'media_type'   => 'image',
+        'mime_type'    => 'image/png',
+        'byte_size'    => strlen($payload),
+        'user_id'      => 1,
+        'payload'      => $payload,
+        'filename'     => 'pixel.png',
+    ]);
+}
+
+/**
  * The transcript a tool call leaves behind: the assistant turn that asked
  * for it, and the tool result.
  *
@@ -280,5 +298,64 @@ describe('the tool-result image channel', function (): void {
         expect($messages)->toHaveCount(2);
         expect($messages[1]['role'])->toBe('tool');
         expect($messages[1]['content'])->toBe('The image is attached.');
+    });
+
+    it('keeps the images that fit the row budget and drops the ones that do not', function (): void {
+        // The row's image bytes are capped as a whole, the same budget the
+        // attachment path spends: the per-asset cap bounds one image, not
+        // the row. An image that does not fit is dropped — the tool result
+        // text still reaches the model.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $first  = toolImageAsset('56789012-3456-4789-0123-456789012345', $png);
+        $second = toolImageAsset('67890123-4567-4890-1234-567890123456', $png);
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $first->id, 'kind' => 'image'],
+            ['media_id' => $second->id, 'kind' => 'image'],
+        ]);
+
+        // One image fits, the second does not.
+        $messages = (new MessageHistoryBuilder(null, maxRowImageBytes: strlen($png) + 1))->build($task->id);
+
+        expect($messages)->toHaveCount(3);
+
+        // The tool result survives the drop.
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toBe('The image is attached.');
+
+        $blocks = $messages[2]['content'];
+        expect($blocks)->toBeArray();
+        expect(array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image')))
+            ->toHaveCount(1);
+
+        // The identity block belongs to the image that was kept.
+        $identities = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'text'));
+        expect($identities)->toHaveCount(1);
+        expect($identities[0]['text'])->toContain($first->id);
+    });
+
+    it('keeps every image when the row budget has room for all of them', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $first  = toolImageAsset('78901234-5678-4901-2345-678901234567', $png);
+        $second = toolImageAsset('89012345-6789-4012-3456-789012345678', $png);
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $first->id, 'kind' => 'image'],
+            ['media_id' => $second->id, 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder(null, maxRowImageBytes: 2 * strlen($png)))->build($task->id);
+
+        expect($messages)->toHaveCount(3);
+        $blocks = $messages[2]['content'];
+        expect($blocks)->toBeArray();
+        expect(array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image')))
+            ->toHaveCount(2);
     });
 });
