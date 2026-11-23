@@ -8,8 +8,12 @@ define('BASE_PATH', __DIR__);
 
 require_once BASE_PATH . '/vendor/autoload.php';
 
-if (!defined('Larastan\Larastan\LARAVEL_VERSION')) {
-    define('Larastan\Larastan\LARAVEL_VERSION', '13.0.0');
+// Larastan reads the Laravel version as an unqualified constant, so the
+// definition has to be global. A namespaced one is invisible to the classes
+// in a sub-namespace: `Larastan\Larastan\Methods` resolves the name against
+// its own namespace and then the global one, never the parent's.
+if (!defined('LARAVEL_VERSION')) {
+    define('LARAVEL_VERSION', '13.0.0');
 }
 
 if (!function_exists('config_path')) {
