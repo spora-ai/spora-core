@@ -6,9 +6,7 @@ use Spora\I18n\CatalogLoader;
 use Spora\I18n\LocaleResolver;
 
 afterEach(function (): void {
-    foreach (glob(sys_get_temp_dir() . '/spora-i18n-*') ?: [] as $dir) {
-        removeLocaleDir($dir);
-    }
+    removeLocaleFixtures();
 });
 
 /** A resolver whose catalogues are exactly the locales named in `$locales`. */

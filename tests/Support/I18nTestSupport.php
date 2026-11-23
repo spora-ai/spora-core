@@ -35,6 +35,10 @@ if (!function_exists('makeLocaleDir')) {
             throw new RuntimeException("Could not create the locale fixture directory {$dir}.");
         }
 
+        // Registered before the catalogues are written: a half-built
+        // directory has to be cleaned up too.
+        $GLOBALS['__locale_fixtures'][] = $dir;
+
         foreach ($catalogues as $locale => $messages) {
             $path = $dir . '/' . $locale . '.json';
 
@@ -52,16 +56,67 @@ if (!function_exists('makeLocaleDir')) {
     }
 }
 
+if (!function_exists('localeFixtureRegistry')) {
+    /**
+     * The fixture directories this process created.
+     *
+     * The system temp directory is shared by every parallel Pest worker on
+     * the machine, so a directory is only ours to remove when this process
+     * is the one that made it.
+     *
+     * @return list<string>
+     */
+    function localeFixtureRegistry(): array
+    {
+        return $GLOBALS['__locale_fixtures'] ?? [];
+    }
+}
+
+if (!function_exists('removeLocaleFixtures')) {
+    /**
+     * Remove only the fixtures this process created — another worker's are
+     * not ours to delete.
+     */
+    function removeLocaleFixtures(): void
+    {
+        foreach (localeFixtureRegistry() as $dir) {
+            removeLocaleDir($dir);
+        }
+        $GLOBALS['__locale_fixtures'] = [];
+    }
+}
+
 if (!function_exists('removeLocaleDir')) {
+    /**
+     * Remove a fixture directory and the files in it.
+     *
+     * An entry that is not a file is left alone: the shared temp directory
+     * holds trees that are not ours to dismantle — the plugin fixture keeps
+     * a copy of the plugin in a subdirectory — and unlinking a directory
+     * warns instead of removing it.
+     */
     function removeLocaleDir(string $dir): void
     {
         if (!is_dir($dir)) {
             return;
         }
 
+        $complete = true;
+
         foreach ((array) glob($dir . '/*') as $file) {
+            if (!is_file((string) $file)) {
+                $complete = false;
+
+                continue;
+            }
+
             unlink((string) $file);
         }
-        rmdir($dir);
+
+        // A directory that still holds a subdirectory cannot go, and rmdir()
+        // warns when it tries.
+        if ($complete) {
+            rmdir($dir);
+        }
     }
 }
