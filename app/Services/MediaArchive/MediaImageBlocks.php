@@ -94,7 +94,16 @@ final class MediaImageBlocks
             if ($ext !== null) {
                 $path .= '.' . $ext;
             }
-            return is_file($path) ? (string) file_get_contents($path) : null;
+            if (!is_file($path)) {
+                return null;
+            }
+
+            // A failed read is not an empty file: `file_get_contents()`
+            // returns false, and casting that to a string would hand the
+            // caller a zero-byte image that reads as a successful load.
+            $contents = file_get_contents($path);
+
+            return $contents === false ? null : $contents;
         }
         return null;
     }

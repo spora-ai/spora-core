@@ -161,4 +161,36 @@ describe('MediaImageBlocks', function () {
 
         removeImageBlockStorageDir($dir);
     });
+    it('returns null when the file cannot be read', function (): void {
+        // A file that is there but unreadable: the read fails, and the
+        // failure must read as "no bytes" rather than as a zero-byte
+        // image that looks like a successful load.
+        $dir = makeImageBlockStorageDir();
+        $paths = new Paths(BASE_PATH);
+        $token = 'dddddddddddddddddddddddddddddddd';
+
+        $path = $paths->storage('assets') . '/' . $token . '.png';
+        file_put_contents($path, mediaImageBlockPng());
+        chmod($path, 0o000);
+
+        $asset = makeLocalImageAsset(
+            '99999999-9999-4999-8999-999999999999',
+            $token,
+            1024,
+        );
+
+        set_error_handler(static fn(): bool => true, E_WARNING);
+        try {
+            $bytes = MediaImageBlocks::loadBytes($asset, BASE_PATH);
+            $block = MediaImageBlocks::forAsset($asset, BASE_PATH);
+        } finally {
+            restore_error_handler();
+        }
+
+        expect($bytes)->toBeNull();
+        expect($block)->toBeNull();
+
+        chmod($path, 0o644);
+        removeImageBlockStorageDir($dir);
+    });
 });
