@@ -173,6 +173,7 @@ describe('MediaImageBlocks', function () {
         $path = $paths->storage('assets') . '/' . $token . '.png';
         file_put_contents($path, mediaImageBlockPng());
         chmod($path, 0o000);
+        clearstatcache(true, $path);
 
         $asset = makeLocalImageAsset(
             '99999999-9999-4999-8999-999999999999',
@@ -180,18 +181,33 @@ describe('MediaImageBlocks', function () {
             1024,
         );
 
-        set_error_handler(static fn(): bool => true, E_WARNING);
         try {
-            $bytes = MediaImageBlocks::loadBytes($asset, BASE_PATH);
-            $rendered = MediaImageBlocks::renderAsset($asset, BASE_PATH);
+            if (is_readable($path)) {
+                // A process that holds CAP_DAC_OVERRIDE or
+                // CAP_DAC_READ_SEARCH reads a 0000 file anyway — Linux
+                // permits that bypass on purpose — so this environment
+                // cannot express the failure the test is about. Asserting
+                // it would fail for the wrong reason.
+                $this->markTestSkipped(
+                    'This process can read a file with no permissions, so the unreadable read cannot be exercised here.',
+                );
+            }
+
+            set_error_handler(static fn(): bool => true, E_WARNING);
+            try {
+                $bytes = MediaImageBlocks::loadBytes($asset, BASE_PATH);
+                $rendered = MediaImageBlocks::renderAsset($asset, BASE_PATH);
+            } finally {
+                restore_error_handler();
+            }
+
+            expect($bytes)->toBeNull();
+            expect($rendered)->toBeNull();
         } finally {
-            restore_error_handler();
+            // The permissions come back before the cleanup: a file the
+            // cleanup cannot open would be left behind.
+            chmod($path, 0o644);
+            removeImageBlockStorageDir($dir);
         }
-
-        expect($bytes)->toBeNull();
-        expect($rendered)->toBeNull();
-
-        chmod($path, 0o644);
-        removeImageBlockStorageDir($dir);
     });
 });
