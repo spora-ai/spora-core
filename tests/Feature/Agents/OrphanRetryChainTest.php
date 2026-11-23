@@ -9,11 +9,16 @@ use Monolog\Handler\TestHandler;
 use Monolog\Logger as MonologLogger;
 use Psr\Log\NullLogger;
 use Spora\Agents\ErrorClassifier;
+use Spora\Agents\Orchestrator;
 use Spora\Agents\RetryScheduler;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
+use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Console\Worker\WorkerReaper;
+use Spora\Core\Paths;
+use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
 use Spora\Models\Task;
+use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\TaskResourceBuilder;
 use Symfony\Component\Console\Output\BufferedOutput;
@@ -47,6 +52,41 @@ function orphanReaper(
     $notification->shouldIgnoreMissing();
 
     return new WorkerReaper(new NullLogger(), $notification, null, $scheduler, $mode);
+}
+
+/**
+ * An orchestrator that can reset a task without reaching a driver.
+ */
+function orphanOrchestrator(): Orchestrator
+{
+    $factory = Mockery::mock(DriverFactory::class);
+    $factory->allows('makeFromAgent')->andThrow(new RuntimeException('the driver is not reached here'));
+
+    return new Orchestrator($factory);
+}
+
+/**
+ * A worker that claims whatever retry is due.
+ *
+ * The orchestrator is real: the point of these tests is the row the
+ * scheduler armed and what the worker does with it, and a mock would
+ * answer "the worker called retry()" without showing what the row became.
+ */
+function orphanWorker(): WorkerQueueProcessor
+{
+    $notification = Mockery::mock(NotificationService::class);
+    $notification->shouldIgnoreMissing();
+
+    $mercure = Mockery::mock(MercurePublisherInterface::class);
+    $mercure->shouldIgnoreMissing();
+
+    return new WorkerQueueProcessor(
+        orchestrator: orphanOrchestrator(),
+        logger: new NullLogger(),
+        mercure: $mercure,
+        notificationService: $notification,
+        paths: new Paths(BASE_PATH),
+    );
 }
 
 /**
@@ -124,6 +164,88 @@ it('arms the retry an orphaned task is owed', function (): void {
         ->and((int) $task->retry_count)->toBe(1)
         ->and((int) $task->retry_of_task_id)->toBe((int) $task->id)
         ->and($task->retry_after)->not->toBeNull();
+});
+
+it('the worker claims the retry the reaper armed', function (): void {
+    // The whole chain, end to end: the worker vanished, the reaper flipped
+    // the row and armed the retry on it, and the worker picks that row up
+    // once the wait has elapsed. The two halves were covered separately,
+    // and the link between them — the reaper's retry claimed by the
+    // worker — was not.
+    [$agentId, $userId] = orphanSeedAgent();
+    $task = orphanStaleTask($agentId, $userId);
+
+    orphanReaper(new RetryScheduler())->reapStaleTasks(new BufferedOutput(), 60);
+
+    $task->refresh();
+    expect((string) $task->status)->toBe('FAILED')
+        ->and($task->retry_after)->not->toBeNull();
+
+    // The wait has elapsed.
+    Capsule::table('tasks')->where('id', $task->id)->update([
+        'retry_after' => gmdate(ORPHAN_DT, time() - 60),
+    ]);
+
+    orphanWorker()->processRetryQueue();
+
+    $task->refresh();
+
+    // The row is back in the queue with its markers cleared — so the main
+    // QUEUED loop claims it and the run happens in place, with the
+    // conversation history the failed attempt left behind.
+    expect((string) $task->status)->toBe('QUEUED')
+        ->and($task->retry_after)->toBeNull()
+        ->and($task->retry_of_task_id)->toBeNull()
+        ->and((int) $task->retry_count)->toBe(1)
+        ->and($task->error_code)->toBeNull();
+});
+
+it('lets the operator retry by hand while a retry is scheduled', function (): void {
+    // The countdown banner carries a "Retry Now" button, and an operator
+    // who cannot wait is not held by the delay the agent asked for. The
+    // manual retry takes the task's place: the scheduled attempt is
+    // dropped, and the budget continues from where it was — the manual
+    // attempt is the next one the agent's policy counts.
+    [$agentId, $userId] = orphanSeedAgent(maxRetries: 3, retryAfterMinutes: 6);
+    $task = orphanStaleTask($agentId, $userId);
+
+    orphanReaper(new RetryScheduler())->reapStaleTasks(new BufferedOutput(), 60);
+
+    $task->refresh();
+    expect((string) $task->status)->toBe('FAILED')
+        ->and($task->retry_after)->not->toBeNull()
+        ->and((int) $task->retry_count)->toBe(1);
+
+    orphanOrchestrator()->retry((int) $task->id);
+
+    $task->refresh();
+
+    expect((string) $task->status)->toBe('QUEUED')
+        ->and($task->retry_after)->toBeNull()
+        ->and($task->retry_of_task_id)->toBeNull()
+        ->and($task->error_code)->toBeNull()
+        // The budget is not reset: the manual attempt is the second one.
+        ->and((int) $task->retry_count)->toBe(1);
+});
+
+it('the payload carries the agent budget for a row in a retry chain', function (): void {
+    // The chain marker and the budget used to be alternatives: a row that
+    // carried the marker carried no budget at all. A browser that cannot
+    // see the budget cannot tell a scheduled retry from an exhausted one —
+    // and it told the operator to click Retry while the retry was already
+    // on its way.
+    [$agentId, $userId] = orphanSeedAgent(maxRetries: 3, retryAfterMinutes: 6);
+    $task = orphanStaleTask($agentId, $userId);
+
+    orphanReaper(new RetryScheduler())->reapStaleTasks(new BufferedOutput(), 60);
+
+    $task->refresh();
+    $resource = (new TaskResourceBuilder())->taskListResource($task);
+
+    expect($resource['retry_of_task_id'])->toBe((int) $task->id)
+        ->and($resource['retry_count'])->toBe(1)
+        ->and($resource['max_retries'])->toBe(3)
+        ->and($resource['retry_after_minutes'])->toBe(6);
 });
 
 it('does not arm a retry in client-worker mode', function (): void {

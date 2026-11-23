@@ -139,10 +139,18 @@ class NotificationService implements NotificationServiceInterface
 
     public function notifyTaskOrphaned(Task $task): void
     {
+        // The reaper arms the retry before it announces the failure, so a
+        // row that already carries `retry_after` has a retry on its way —
+        // and telling the operator to retry it by hand would offer a
+        // second way back for a task that is already coming back.
+        $retryScheduled = $task->retry_after !== null;
+
         $rows = $this->fanOutForTask($task, [
             'type'  => 'task_orphaned',
             'title' => 'Task interrupted',
-            'body'  => 'The task was interrupted and has been stopped. You can retry it manually.',
+            'body'  => $retryScheduled
+                ? 'The task was interrupted. A retry attempt is scheduled automatically.'
+                : 'The task was interrupted and has been stopped. You can retry it manually.',
             'data'  => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
         ]);
 

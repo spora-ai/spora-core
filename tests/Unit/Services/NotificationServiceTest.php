@@ -257,6 +257,33 @@ describe('NotificationService::notifyTaskOrphaned', function (): void {
         expect($notif)->not->toBeNull();
         expect($mercure->userEvents[0]['data']['type'])->toBe('task_orphaned');
     });
+
+    it('does not send the operator to a manual retry when a retry is already scheduled', function (): void {
+        // The reaper arms the retry before it announces the failure, so the
+        // row carries `retry_after` by the time the notification is built.
+        // Telling the operator to retry the task by hand offered a second
+        // way back for a task that was already coming back.
+        [$service, , $userId] = makeNotificationServiceWithUser();
+        $task = makeTaskForUser($userId);
+        $task->retry_after = Carbon::now()->addMinutes(5);
+        $task->save();
+
+        $service->notifyTaskOrphaned($task);
+
+        $notif = Notification::where('user_id', $userId)->where('type', 'task_orphaned')->first();
+        expect($notif->body)->toContain('scheduled automatically')
+            ->and($notif->body)->not->toContain('manually');
+    });
+
+    it('offers the manual retry when nothing is scheduled', function (): void {
+        [$service, , $userId] = makeNotificationServiceWithUser();
+        $task = makeTaskForUser($userId);
+
+        $service->notifyTaskOrphaned($task);
+
+        $notif = Notification::where('user_id', $userId)->where('type', 'task_orphaned')->first();
+        expect($notif->body)->toContain('You can retry it manually.');
+    });
 });
 
 describe('NotificationService::notifyScheduledRunCompleted', function (): void {
