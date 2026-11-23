@@ -145,6 +145,8 @@ use Spora\Tools\ValueObjects\ToolResult;
  *     `principal` so existing `agent_tool_settings` rows keep working
  *     without a DB migration; the listing narrows to the caller user's
  *     own rows.
+ *   - A stored value that is none of these reads as `agent`: a setting
+ *     that cannot be understood must not widen what the agent sees.
  *   - Admins (`AuthService::isAdmin()`) bypass the scope check on the
  *     per-asset ops.
  */
@@ -863,17 +865,18 @@ final class MediaTool extends AbstractTool
     private function resolveScope(int $agentId, ?int $userId): string
     {
         $settings = $this->toolConfigService?->getEffectiveSettings(self::class, $agentId, $userId) ?? [];
+
+        // Two fallbacks, two answers. An absent setting means the operator
+        // never expressed one, so it takes the shipped default
+        // (`principal`). An unrecognised one means the stored value is
+        // wrong — a typo, a hand-edited row, a value from a retired enum —
+        // and a broken setting must not widen the reach, so it takes the
+        // narrowest scope instead.
         $scope = is_string($settings['scope'] ?? null) ? $settings['scope'] : 'principal';
 
-        // The schema default is layer 1 of the settings cascade, so `scope`
-        // is always present in the live path and these fallbacks only run
-        // when the tool was built without a ToolConfigService at all. They
-        // therefore answer with the schema default, not with a value of
-        // their own.
-        //
         // Legacy 'user' is a runtime alias for 'principal' — see the
         // class-level docblock.
-        return in_array($scope, ['agent', 'principal', 'user'], true) ? $scope : 'principal';
+        return in_array($scope, ['agent', 'principal', 'user'], true) ? $scope : 'agent';
     }
 
     /**

@@ -6,8 +6,10 @@ use Psr\Log\NullLogger;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+use Spora\Models\Principal;
 use Spora\Services\AgentToolSettingsService;
 use Spora\Services\LLMConfigService;
+use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\MediaTool;
 
@@ -26,6 +28,12 @@ use Spora\Tools\MediaTool;
  * change does not reach it. That is the property that makes the change safe
  * for an existing installation — and the reason the diagnostic scope
  * failure exists.
+ *
+ * The tool's own fallback answers two different questions with two
+ * different scopes. An absent setting is the operator's silence and takes
+ * the shipped default; an unrecognised one is a wrong value and takes the
+ * narrowest scope, so a setting nobody can read cannot widen what the
+ * agent sees.
  */
 
 /**
@@ -38,6 +46,19 @@ function scopeDefaultAgent(int $userId): int
         'name'         => 'Scope default agent ' . bin2hex(random_bytes(3)),
         'is_active'    => true,
     ])->id;
+}
+
+/**
+ * The context of a call made by an agent of `$userId`'s principal.
+ */
+function scopeDefaultContext(int $userId): PrincipalContext
+{
+    return new PrincipalContext(
+        principalId: createUserPrincipalPublic($userId),
+        type: Principal::TYPE_USER,
+        ownerUserId: $userId,
+        runnerUserId: $userId,
+    );
 }
 
 function scopeDefaultToolConfig(): ToolConfigService
@@ -118,11 +139,11 @@ describe('the media tool scope default', function (): void {
     });
 
     it('falls back to the principal scope when the tool has no settings service', function (): void {
-        // A tool built without a ToolConfigService has no cascade, so the
-        // schema default is the only answer it has — and the schema default
-        // is `principal`. The asset belongs to the calling agent, so the
-        // agent scope would show it; the principal scope does not, because
-        // the call carries no principal context to resolve.
+        // An absent setting is the operator's silence, not a wrong value,
+        // so it takes the shipped default: `principal`. The asset belongs
+        // to the calling agent, so the agent scope would show it; the
+        // principal scope does not, because the call carries no principal
+        // context to resolve.
         $agentId = scopeDefaultAgent(51505);
         $asset   = seedMediaAsset(agentId: $agentId, userId: 99);
 
@@ -131,5 +152,67 @@ describe('the media tool scope default', function (): void {
 
         expect($result->success)->toBeFalse();
         expect($result->content)->toContain('Media asset not found');
+    });
+});
+
+describe('the media tool scope fallback', function (): void {
+    it('answers with the principal scope when the setting is absent', function (): void {
+        // No cascade and no stored value: the operator expressed no
+        // opinion, so the shipped default answers — and it is the wider
+        // scope, so the sibling agent's asset is reachable.
+        $userId       = 51506;
+        $callerAgent  = scopeDefaultAgent($userId);
+        $siblingAgent = scopeDefaultAgent($userId);
+        $asset        = seedMediaAsset(agentId: $siblingAgent, userId: $userId);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $callerAgent,
+                context: scopeDefaultContext($userId),
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->data['id'])->toBe($asset->id);
+        } finally {
+            $restore();
+        }
+    });
+
+    it('answers with the agent scope when the setting is unrecognised', function (): void {
+        // A stored scope nobody can read — a typo, a hand-edited row, a
+        // value from a retired enum — is a wrong setting, and a wrong
+        // setting must not widen the reach: the narrowest scope answers.
+        // The caller's own asset stays reachable and the sibling's does
+        // not, which is the agent scope exactly.
+        $userId       = 51507;
+        $callerAgent  = scopeDefaultAgent($userId);
+        $siblingAgent = scopeDefaultAgent($userId);
+        $ownAsset     = seedMediaAsset(agentId: $callerAgent, userId: $userId);
+        $siblingAsset = seedMediaAsset(agentId: $siblingAgent, userId: $userId);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            mediaToolScopeConfig('prinicpal'),
+        );
+        try {
+            $own = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $ownAsset->id],
+                agentId: $callerAgent,
+                context: scopeDefaultContext($userId),
+            );
+            $sibling = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $siblingAsset->id],
+                agentId: $callerAgent,
+                context: scopeDefaultContext($userId),
+            );
+
+            expect($own->success)->toBeTrue();
+            expect($sibling->success)->toBeFalse();
+            expect($sibling->content)->toContain('Media asset not found');
+        } finally {
+            $restore();
+        }
     });
 });
