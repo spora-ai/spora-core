@@ -41,8 +41,8 @@ final class TaskResourceBuilder
      *     error_message?: string,
      *     retry_of_task_id?: int,
      *     retry_count?: int,
-     *     max_retries?: int,
-     *     retry_after_minutes?: int,
+     *     max_retries: int,
+     *     retry_after_minutes: int,
      *     retry_after: string|null,
      *     tool_calls: list<array<string, mixed>>,
      *     history: list<array<string, mixed>>,
@@ -99,10 +99,15 @@ final class TaskResourceBuilder
         if ($task->retry_of_task_id !== null) {
             $resource['retry_of_task_id'] = $task->retry_of_task_id;
             $resource['retry_count'] = $task->retry_count;
-        } else {
-            $resource['max_retries'] = $task->agent->max_retries ?? 0;
-            $resource['retry_after_minutes'] = $task->agent->retry_after_minutes ?? 0;
         }
+
+        // The agent's policy travels with every task, chain row or not. A
+        // browser that cannot see the budget cannot tell a scheduled retry
+        // from an exhausted one — and it told the operator to click Retry
+        // while the retry was already on its way, because a chain row
+        // carried no budget at all.
+        $resource['max_retries'] = $task->agent->max_retries ?? 0;
+        $resource['retry_after_minutes'] = $task->agent->retry_after_minutes ?? 0;
 
         // Always present, null when nothing is pending. The browser decides
         // whether to promise an automatic retry from this key, and a key the
@@ -145,8 +150,8 @@ final class TaskResourceBuilder
      *     error_message?: string,
      *     retry_of_task_id?: int,
      *     retry_count?: int,
-     *     max_retries?: int,
-     *     retry_after_minutes?: int,
+     *     max_retries: int,
+     *     retry_after_minutes: int,
      *     retry_after: string|null
      * }
      */
@@ -171,8 +176,8 @@ final class TaskResourceBuilder
      *     error_message?: string,
      *     retry_of_task_id?: int,
      *     retry_count?: int,
-     *     max_retries?: int,
-     *     retry_after_minutes?: int,
+     *     max_retries: int,
+     *     retry_after_minutes: int,
      *     retry_after: string|null,
      *     tool_calls: list<array<string, mixed>>,
      *     history: list<array<string, mixed>>,
