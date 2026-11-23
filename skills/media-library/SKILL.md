@@ -263,7 +263,7 @@ The `scope` setting (default `principal`) is operator-configured, NOT an LLM par
 - `scope=agent` narrows to what the calling agent produced itself; assets owned by other agents are hidden.
 - Admins (`AuthService::isAdmin()`) bypass scope and see all rows.
 
-**An agent that was enabled before the default moved keeps `scope=agent`.** A migration materialises `scope=agent` into the override row of every agent that already had the tool enabled and no scope of its own, so the reach it had survives the change; an agent that enables the tool from now on gets `principal`. So when `inspect_image` says an asset is not visible, ask the operator to set the media tool's **Library scope** to `principal` on that agent; it is a one-field change on the agent's Tools tab.
+**An agent that was enabled before the default moved keeps the reach it had.** Where no layer of the settings cascade — the agent's own row, the shared group, the global layer, the principal layer — supplied a scope, a migration materialises `scope=agent` into the agent's own override row, so the reach it had survives the change; where a scope was set deliberately, at any of those levels, that scope is left exactly as it is, because writing `agent` over it would narrow the reach the operator asked for. An agent that enables the tool from now on gets `principal`. So when `inspect_image` says an asset is not visible, ask the operator to set the media tool's **Library scope** to `principal` on that agent; it is a one-field change on the agent's Tools tab.
 
 ## `create_derivative` idempotency
 
