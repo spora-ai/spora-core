@@ -514,3 +514,63 @@ describe('the tool-result image channel', function (): void {
         expect(toolCallPairingFaults($messages))->toBe([]);
     });
 });
+
+describe('an image the operator removed from the Media Archive', function (): void {
+    it('tells the model the image is gone rather than leaving the claim standing', function (): void {
+        // The tool result says "you can see it now". The operator deletes
+        // the asset from the Media Archive, and the row — which is what the
+        // provider sees on the next tick — still claims the image is there.
+        // The image block is dropped silently, so without a note the model
+        // reads a claim the payload no longer supports.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        writeToolImageTranscript($task, [['media_id' => '99999999-9999-4999-8999-999999999999', 'kind' => 'image']]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        // The tool result and nothing else: the image turn went with the
+        // image, and no message was added or reordered.
+        expect($messages)->toHaveCount(2);
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toStartWith('The image is attached.');
+        expect($messages[1]['content'])->toContain('removed from the Media Archive');
+        expect($messages[1]['content'])->toContain('no longer visible');
+    });
+
+    it('leaves the tool result byte-identical when every declared image still resolves', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $asset = toolImageAsset('11111111-1111-4111-8111-111111111111', toolImagePng());
+
+        writeToolImageTranscript($task, [['media_id' => $asset->id, 'kind' => 'image']]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect($messages[1])->toBe([
+            'role' => 'tool',
+            'tool_call_id' => 'call_1',
+            'name' => 'media',
+            'content' => 'The image is attached.',
+        ]);
+    });
+
+    it('names the count when several images are gone', function (): void {
+        // One sentence per row: several missing assets are one fact.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        writeToolImageTranscript($task, [
+            ['media_id' => '22222222-2222-4222-8222-222222222222', 'kind' => 'image'],
+            ['media_id' => '33333333-3333-4333-8333-333333333333', 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect($messages)->toHaveCount(2);
+        expect($messages[1]['content'])->toContain(
+            '2 images referenced by this message were removed from the Media Archive',
+        );
+        expect(substr_count((string) $messages[1]['content'], 'removed from the Media Archive'))->toBe(1);
+    });
+});

@@ -46,6 +46,27 @@ use Spora\Services\MediaArchive\MediaImageBlocks;
  */
 final class MessageHistoryBuilder
 {
+    /**
+     * The note appended to a message whose image attachment no longer
+     * resolves.
+     *
+     * A tool result that says "you can see it now" outlives the asset it
+     * points at: the operator can delete that asset from the Media Archive
+     * at any time, and the row — which is what the provider sees on the
+     * next tick — still claims the image is there. The image block is
+     * dropped silently in that case, so without this note the model reads
+     * a claim the payload no longer supports.
+     *
+     * One sentence per row: several missing assets are one fact, not
+     * several, so the plural variant names the count instead of repeating
+     * the sentence.
+     */
+    private const MISSING_ASSET_NOTE = 'Note: the image referenced by this message was removed from the Media Archive '
+        . 'and is no longer visible in this conversation.';
+
+    private const MISSING_ASSETS_NOTE = 'Note: the %d images referenced by this message were removed from the Media '
+        . 'Archive and are no longer visible in this conversation.';
+
     public function __construct(
         private readonly ?LLMDriverInterface $driver = null,
         private readonly int $maxRowImageBytes = MediaImageBlocks::MAX_ROW_BYTES,
@@ -308,14 +329,16 @@ final class MessageHistoryBuilder
         ];
 
         if ($row->role === 'tool') {
+            $images = $this->toolImageAssets($row);
+
             return [
                 [
                     'role' => 'tool',
                     'tool_call_id' => $row->tool_call_id,
                     'name' => $row->tool_name,
-                    'content' => $row->content,
+                    'content' => $this->withMissingAssetNote($row->content, $images['missing']),
                 ],
-                ...$this->toolImageTurn($row),
+                ...$this->toolImageTurn($images['assets']),
             ];
         }
 
@@ -354,11 +377,11 @@ final class MessageHistoryBuilder
      * row. An image that does not fit is dropped — the tool result text
      * still reaches the model.
      *
+     * @param  list<MediaAsset>  $assets  The declared images that still resolve.
      * @return list<array<string, mixed>>
      */
-    private function toolImageTurn(TaskHistory $row): array
+    private function toolImageTurn(array $assets): array
     {
-        $assets = $this->toolImageAssets($row);
         if ($assets === []) {
             return [];
         }
@@ -399,17 +422,22 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * The assets a tool row's image attachments name.
+     * The assets a tool row's image attachments name, and how many of the
+     * declared ones no longer exist.
      *
-     * @return list<MediaAsset>
+     * Resolved once per row: the builder runs on every tick, and the tool
+     * result and the image turn need the same answer.
+     *
+     * @return array{assets: list<MediaAsset>, missing: int}
      */
     private function toolImageAssets(TaskHistory $row): array
     {
         if (!is_array($row->attachments)) {
-            return [];
+            return ['assets' => [], 'missing' => 0];
         }
 
-        $assets = [];
+        $assets  = [];
+        $missing = 0;
 
         foreach ($row->attachments as $attachment) {
             if (!is_array($attachment)) {
@@ -425,10 +453,12 @@ final class MessageHistoryBuilder
             $asset = MediaAsset::query()->find($mediaId);
             if ($asset instanceof MediaAsset) {
                 $assets[] = $asset;
+                continue;
             }
+            $missing++;
         }
 
-        return $assets;
+        return ['assets' => $assets, 'missing' => $missing];
     }
 
     /**
@@ -446,18 +476,43 @@ final class MessageHistoryBuilder
             $this->basePath(),
         );
 
-        $rendered = $renderer->render($row);
-        if ($rendered !== null) {
-            return [
-                'role'    => 'user',
-                'content' => $rendered,
-            ];
-        }
+        $rendered = $renderer->renderRow($row);
+        $content  = $rendered['content'] ?? $renderer->fallbackText($row->content);
 
         return [
             'role'    => 'user',
-            'content' => $renderer->fallbackText($row->content),
+            'content' => $this->withMissingAssetNote($content, $rendered['missingImages']),
         ];
+    }
+
+    /**
+     * Tell the model that an image it was shown is gone.
+     *
+     * The note rides on the message that made the claim, not as a message of
+     * its own: the message count and the order are the provider's contract,
+     * and an extra turn would reorder a tool batch. The operator's own text
+     * is left exactly as it was — the note is additional.
+     *
+     * @param  list<array<string, mixed>>|string|null  $content
+     * @return list<array<string, mixed>>|string|null
+     */
+    private function withMissingAssetNote(array|string|null $content, int $missing): array|string|null
+    {
+        if ($missing === 0) {
+            return $content;
+        }
+
+        $note = $missing === 1
+            ? self::MISSING_ASSET_NOTE
+            : sprintf(self::MISSING_ASSETS_NOTE, $missing);
+
+        if (is_array($content)) {
+            return [...$content, ['type' => 'text', 'text' => $note]];
+        }
+
+        $base = (string) $content;
+
+        return $base === '' ? $note : $base . "\n\n" . $note;
     }
 
     /**
@@ -601,22 +656,33 @@ final class AttachmentRowRenderer
     ) {}
 
     /**
-     * Null when no resolvable blocks exist (legacy rows, all-refs-missing,
-     * or attachments whose assets cannot be resolved). Callers fall back
-     * to {@see fallbackText()} in that case.
+     * The rendered blocks, and how many of the row's declared image
+     * attachments no longer resolve.
      *
-     * @return list<array<string, mixed>>|null
+     * The content is null when no resolvable blocks exist (legacy rows,
+     * all-refs-missing, or attachments whose assets cannot be resolved);
+     * callers fall back to {@see fallbackText()} in that case.
+     *
+     * The count is what lets the caller tell the model that an image it was
+     * shown is gone: the block simply does not appear, and without the count
+     * that omission is indistinguishable from an image that was never
+     * attached.
+     *
+     * @return array{content: list<array<string, mixed>>|null, missingImages: int}
      */
-    public function render(TaskHistory $row): ?array
+    public function renderRow(TaskHistory $row): array
     {
         $blocks = $this->collectAttachmentBlocks($row);
         $prompt = is_string($row->content) ? trim($row->content) : '';
 
-        if ($blocks['text'] === [] && $blocks['image'] === [] && $blocks['metadata'] === []) {
-            return null;
-        }
+        $content = $blocks['text'] === [] && $blocks['image'] === [] && $blocks['metadata'] === []
+            ? null
+            : $this->buildAttachmentContent($blocks, $prompt);
 
-        return $this->buildAttachmentContent($blocks, $prompt);
+        return [
+            'content'       => $content,
+            'missingImages' => $blocks['missingImages'],
+        ];
     }
 
     /**
@@ -654,18 +720,19 @@ final class AttachmentRowRenderer
      * ({@see MediaImageBlocks::MAX_ROW_BYTES}), because the per-asset cap bounds
      * one image and not the row.
      *
-     * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>}
+     * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>, missingImages: int}
      */
     private function collectAttachmentBlocks(TaskHistory $row): array
     {
         if (!is_array($row->attachments)) {
-            return ['text' => [], 'image' => [], 'metadata' => []];
+            return ['text' => [], 'image' => [], 'metadata' => [], 'missingImages' => 0];
         }
 
         $supportsImages = $this->driver !== null && $this->driver->supportsImageInput();
         $textBlocks     = [];
         $imageBlocks    = [];
         $metadataBlocks = [];
+        $missingImages  = 0;
         $derivatives    = $this->resolveTextDerivatives($row->attachments);
         $remaining      = self::MAX_INLINE_ROW_TEXT_BYTES;
         $imageBytes     = 0;
@@ -673,6 +740,9 @@ final class AttachmentRowRenderer
         foreach ($this->uniqueAttachments($row->attachments) as $attachment) {
             $asset = $this->resolveAttachmentAsset($attachment['media_id']);
             if ($asset === null) {
+                if ($attachment['kind'] === 'image') {
+                    $missingImages++;
+                }
                 continue;
             }
             $metadataBlocks[] = self::attachmentMetadataBlock($asset);
@@ -690,7 +760,12 @@ final class AttachmentRowRenderer
             $remaining    = max(0, $remaining - $inlined);
         }
 
-        return ['text' => $textBlocks, 'image' => $imageBlocks, 'metadata' => $metadataBlocks];
+        return [
+            'text'          => $textBlocks,
+            'image'         => $imageBlocks,
+            'metadata'      => $metadataBlocks,
+            'missingImages' => $missingImages,
+        ];
     }
 
     /**
@@ -971,7 +1046,7 @@ final class AttachmentRowRenderer
      * attachment layout is wider than a single text body); image
      * blocks follow.
      *
-     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>} $blocks
+     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>, missingImages: int} $blocks
      * @return list<array<string, mixed>>
      */
     private function buildAttachmentContent(array $blocks, string $prompt): array
