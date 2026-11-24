@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\QueryException;
-use Illuminate\Database\Schema\Blueprint;
 use Psr\Log\NullLogger;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
@@ -100,6 +99,39 @@ function mediaScopeMigrationRuntimeWithGroupCascade(): ToolConfigService
             principalService: new PrincipalService(new PrincipalResolver()),
             groupCascadeEnabled: true,
         ),
+    );
+}
+
+/**
+ * Refuse the writes to a table, and record the statements that were refused.
+ *
+ * The refusal is raised where the driver raises one — the statement never
+ * reaches the server — so the migration meets the same `QueryException` a
+ * database refusal produces, on every engine. A refusal the database
+ * makes itself is not portable here: the schema change it takes (a unique
+ * index over the settings blob) is rejected outright by MySQL, and on
+ * MySQL and MariaDB the DDL is committed rather than rolled back, so it
+ * outlives the test.
+ *
+ * @param  list<string> $refused  Filled with the statements that were refused.
+ */
+function refuseWritesTo(string $table, array &$refused): void
+{
+    Capsule::connection()->beforeExecuting(
+        static function (string $query, array $bindings) use ($table, &$refused): void {
+            if (!str_contains($query, $table) || preg_match('/^\s*(insert|update|delete)\b/i', $query) !== 1) {
+                return;
+            }
+
+            $refused[] = $query;
+
+            throw new QueryException(
+                Capsule::connection()->getName(),
+                $query,
+                $bindings,
+                new PDOException(sprintf('the write to %s was refused', $table)),
+            );
+        },
     );
 }
 
@@ -360,25 +392,13 @@ it('materialises when the group-cascade state cannot be read', function (): void
     expect($this->toolConfig->getRawAgentOverride(MediaTool::class, $agentId)['scope'])->toBe('agent');
 });
 
-describe('a write the database refuses', function (): void {
-    beforeEach(function (): void {
-        // DDL mid-test → a database of its own, because a schema change
-        // inside the suite's transaction is not portable.
-        TestDatabaseFactory::freshDatabase();
-    });
-
+describe('a write the connection refuses', function (): void {
     it('stops the migration instead of leaving the agent widened', function (): void {
         $blocked = mediaScopeMigrationAgent($this->userId, 'Media scope unwritable');
         mediaScopeMigrationEnable($blocked);
 
-        // A row that already holds the blob the migration writes, under a
-        // unique index over the column: the migration's own insert now
-        // collides. Any write the database refuses would stand in here.
-        $holder = mediaScopeMigrationAgent($this->userId, 'Media scope holder');
-        Capsule::connection()->statement(
-            'CREATE UNIQUE INDEX uq_media_scope_settings ON agent_tool_overrides (settings)',
-        );
-        $this->toolConfig->putAgentOverride(MediaTool::class, $holder, ['scope' => 'agent']);
+        $refused = [];
+        refuseWritesTo('agent_tool_overrides', $refused);
 
         $thrown = null;
         try {
@@ -387,8 +407,13 @@ describe('a write the database refuses', function (): void {
             $thrown = $e;
         }
 
-        // The migration does not report success.
+        // The migration does not report success, and the scope write is the
+        // write that was refused: a refusal of anything else would leave
+        // the agent untouched for a reason that has nothing to do with the
+        // scope.
         expect($thrown)->toBeInstanceOf(QueryException::class)
+            ->and($refused)->toHaveCount(1)
+            ->and($refused[0] ?? '')->toContain('agent_tool_overrides')
             // And it left nothing behind: no scope stored, and no marker
             // claiming the agent was dealt with.
             ->and($this->toolConfig->getRawAgentOverride(MediaTool::class, $blocked))->toBe([])
@@ -400,16 +425,8 @@ describe('a write the database refuses', function (): void {
         $agentId = mediaScopeMigrationAgent($this->userId, 'Media scope unmarked');
         mediaScopeMigrationEnable($agentId);
 
-        // A marker table the insert cannot satisfy: `prior_settings` is
-        // NOT NULL and the row this agent gets carries no prior settings.
-        // The scope is written first, so without a transaction the row
-        // would survive without the marker `down()` needs to undo it.
-        Capsule::schema()->dropIfExists('media_scope_materialisations');
-        Capsule::schema()->create('media_scope_materialisations', static function (Blueprint $table): void {
-            $table->unsignedBigInteger('agent_id')->primary();
-            $table->text('prior_settings');
-            $table->timestamp('created_at')->nullable();
-        });
+        $refused = [];
+        refuseWritesTo('media_scope_materialisations', $refused);
 
         $thrown = null;
         try {
@@ -418,10 +435,13 @@ describe('a write the database refuses', function (): void {
             $thrown = $e;
         }
 
-        // The scope write was rolled back with the marker write.
-        expect($this->toolConfig->getRawAgentOverride(MediaTool::class, $agentId))->toBe([])
-            ->and((int) Capsule::table('agent_tool_overrides')->where('agent_id', $agentId)->count())->toBe(0)
-            // And the failure is not swallowed.
-            ->and($thrown)->toBeInstanceOf(QueryException::class);
+        // The marker write is the one that was refused, so the scope write
+        // had already gone through — and the scope write was rolled back
+        // with it.
+        expect($thrown)->toBeInstanceOf(QueryException::class)
+            ->and($refused)->toHaveCount(1)
+            ->and($refused[0] ?? '')->toContain('media_scope_materialisations')
+            ->and($this->toolConfig->getRawAgentOverride(MediaTool::class, $agentId))->toBe([])
+            ->and((int) Capsule::table('agent_tool_overrides')->where('agent_id', $agentId)->count())->toBe(0);
     });
 });
