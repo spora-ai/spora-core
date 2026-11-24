@@ -595,6 +595,7 @@ final class ContainerDefinitions
                     $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : null,
                     $c->has(MediaAssetResolver::class) ? $c->get(MediaAssetResolver::class) : null,
                     $c->has(PrincipalResolver::class) ? $c->get(PrincipalResolver::class) : null,
+                    $c->get(DerivativePayloadStore::class),
                 );
             },
 

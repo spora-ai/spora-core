@@ -156,16 +156,22 @@ final class MediaArchiveService
 
     private readonly PrincipalResolver $principalResolver;
 
+    private readonly DerivativePayloadStore $payloads;
+
     public function __construct(
         private readonly MediaArchiveIngestPipeline $ingestPipeline,
         private readonly MediaDerivativeService $derivatives,
         ?PrincipalService $principalService = null,
         ?MediaAssetResolver $resolver = null,
         ?PrincipalResolver $principalResolver = null,
+        ?DerivativePayloadStore $payloads = null,
     ) {
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
         $this->resolver = $resolver ?? new MediaAssetResolver(new PrincipalResolver());
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+        $this->payloads = $payloads ?? new DerivativePayloadStore(
+            defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3),
+        );
     }
 
     /**
@@ -311,6 +317,14 @@ final class MediaArchiveService
         // away and orphan the derivative assets. See
         // {@see MediaDerivativeService::deleteWithDerivatives()}.
         $this->derivatives->deleteWithDerivatives($asset);
+        // The parent's own bytes, after the derivatives are gone. A `local`
+        // row's file sits on disk with no other row pointing at it once the
+        // row goes, so it has to go with the row — otherwise the archive
+        // keeps the bytes of an asset the operator deleted, for ever.
+        // `remove()` is a no-op for a `data_url` row (the bytes live in the
+        // column the row delete drops) and for an `external` one (no
+        // Spora-side file at all).
+        $this->payloads->remove($asset);
         $asset->delete();
     }
 

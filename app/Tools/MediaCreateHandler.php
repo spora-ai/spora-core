@@ -191,14 +191,9 @@ final readonly class MediaCreateHandler
             return $this->created($asset);
         }
 
-        // `delete()` also removes the bytes in `data_url` mode; a `local`-mode
-        // row would leave its file on disk with no row pointing at it. Not
-        // reachable under the shipped defaults — `MAX_CONTENT_BYTES` equals the
-        // default `asset_store.auto_threshold_bytes` and `AutoAssetStore`
-        // compares `<=`, so a payload at the cap stays inline — but an operator
-        // who lowers the threshold or forces `local` would accumulate one
-        // orphaned file per rejected call. The fix belongs in
-        // `MediaArchiveService::delete()`, which has the same gap everywhere.
+        // `delete()` takes the bytes with the row: a `local`-mode row's file
+        // is unlinked, not just its row dropped, so a rejected call leaves
+        // nothing behind on disk.
         $this->archive->delete($asset->id);
 
         return ToolResult::fail(sprintf(
