@@ -82,6 +82,15 @@ use Spora\Tools\MediaTool;
  * mistake this migration exists to avoid. The marker also records
  * whether the row existed at all, so a row this migration created is
  * deleted again rather than left behind holding empty settings.
+ *
+ * **A read that fails and a write that fails are not the same.** A
+ * settings blob this migration cannot read leaves the agent exactly as
+ * it is: writing over unreadable settings would destroy what the
+ * operator stored, and an operator can still set the scope by hand. A
+ * scope that cannot be *written* is the opposite case — the agent falls
+ * back to the new default, and the widening would be invisible. That
+ * failure stops the migration, so the operator sees a failed install
+ * rather than a quietly widened agent.
  */
 return new class extends Migration {
     /** The tool whose `scope` setting this migration freezes. */
@@ -110,7 +119,7 @@ return new class extends Migration {
 
         foreach ($this->agentsWithMediaTool() as $agentId) {
             try {
-                $this->materialise($toolConfig, $principals, $resolver, $agentId);
+                $prior = $this->resolveEligible($toolConfig, $principals, $resolver, $agentId);
             } catch (Throwable $e) {
                 // A settings blob this migration cannot read is left alone:
                 // writing over it would destroy settings the operator
@@ -121,7 +130,21 @@ return new class extends Migration {
                     $agentId,
                     $e->getMessage(),
                 ));
+
+                continue;
             }
+
+            if ($prior === null) {
+                continue;
+            }
+
+            // A scope that cannot be stored is not left behind quietly.
+            // The agent would fall back to the new default — the widening
+            // this migration exists to prevent — and nothing would say so.
+            // The failure stops the migration instead: the operator gets a
+            // failed install, and the marker table lets the re-run resume
+            // where this one stopped.
+            $this->persist($toolConfig, $agentId, $prior);
         }
     }
 
@@ -163,29 +186,31 @@ return new class extends Migration {
     }
 
     /**
-     * Materialise the pre-change scope for one agent, when nothing else
-     * supplies a scope.
+     * The agent's override row as it stands before this migration writes
+     * to it, or null when the agent needs no scope of its own.
+     *
+     * @return array{settings: array<string, mixed>, existed: bool}|null
      */
-    private function materialise(
+    private function resolveEligible(
         ToolConfigService $toolConfig,
         PrincipalService $principals,
         PrincipalResolver $resolver,
         int $agentId,
-    ): void {
+    ): ?array {
         if ($this->alreadyMaterialised($agentId)) {
-            return;
+            return null;
         }
 
         // The agent's own row is the top layer of every resolution below,
         // so a scope it holds is reported as supplied — and a scope it
         // does not hold leaves the layer below to answer.
         if ($this->scopeSupplied($toolConfig, $agentId, null)) {
-            return;
+            return null;
         }
 
         foreach ($this->governingPrincipalIds($agentId, $principals, $resolver) as $principalId) {
             if ($this->scopeSupplied($toolConfig, $agentId, $principalId)) {
-                return;
+                return null;
             }
         }
 
@@ -193,12 +218,22 @@ return new class extends Migration {
         // row exists whether or not it did before, and the marker has to
         // tell those two apart: `down()` deletes a row this migration
         // created and restores one that held other settings.
-        $prior   = $toolConfig->getRawAgentOverride(self::TOOL_CLASS, $agentId);
-        $existed = $this->overrideRowExists($agentId);
+        return [
+            'settings' => $toolConfig->getRawAgentOverride(self::TOOL_CLASS, $agentId),
+            'existed'  => $this->overrideRowExists($agentId),
+        ];
+    }
 
+    /**
+     * Store the scope and the marker that records it.
+     *
+     * @param array{settings: array<string, mixed>, existed: bool} $prior
+     */
+    private function persist(ToolConfigService $toolConfig, int $agentId, array $prior): void
+    {
         $toolConfig->putAgentOverride(self::TOOL_CLASS, $agentId, ['scope' => self::PRE_UPGRADE_SCOPE]);
 
-        $this->record($agentId, $prior, $existed);
+        $this->record($agentId, $prior['settings'], $prior['existed']);
     }
 
     /**

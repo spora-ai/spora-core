@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Database\QueryException;
 use Psr\Log\NullLogger;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
@@ -260,4 +261,41 @@ it('keeps a row that existed before the migration', function (): void {
     // apart.
     expect((int) Capsule::table('agent_tool_overrides')->where('agent_id', $agentId)->count())->toBe(1)
         ->and($this->toolConfig->getRawAgentOverride(MediaTool::class, $agentId))->toBe([]);
+});
+
+describe('a write the database refuses', function (): void {
+    beforeEach(function (): void {
+        // DDL mid-test → a database of its own, because a schema change
+        // inside the suite's transaction is not portable.
+        TestDatabaseFactory::freshDatabase();
+    });
+
+    it('stops the migration instead of leaving the agent widened', function (): void {
+        $blocked = mediaScopeMigrationAgent($this->userId, 'Media scope unwritable');
+        mediaScopeMigrationEnable($blocked);
+
+        // A row that already holds the blob the migration writes, under a
+        // unique index over the column: the migration's own insert now
+        // collides. Any write the database refuses would stand in here.
+        $holder = mediaScopeMigrationAgent($this->userId, 'Media scope holder');
+        Capsule::connection()->statement(
+            'CREATE UNIQUE INDEX uq_media_scope_settings ON agent_tool_overrides (settings)',
+        );
+        $this->toolConfig->putAgentOverride(MediaTool::class, $holder, ['scope' => 'agent']);
+
+        $thrown = null;
+        try {
+            $this->migration->up();
+        } catch (Throwable $e) {
+            $thrown = $e;
+        }
+
+        // The migration does not report success.
+        expect($thrown)->toBeInstanceOf(QueryException::class)
+            // And it left nothing behind: no scope stored, and no marker
+            // claiming the agent was dealt with.
+            ->and($this->toolConfig->getRawAgentOverride(MediaTool::class, $blocked))->toBe([])
+            ->and((int) Capsule::table('agent_tool_overrides')->where('agent_id', $blocked)->count())->toBe(0)
+            ->and((int) Capsule::table('media_scope_materialisations')->where('agent_id', $blocked)->count())->toBe(0);
+    });
 });
