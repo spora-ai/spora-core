@@ -10,6 +10,9 @@ use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
 use Spora\Models\Principal;
 use Spora\Services\PrincipalContext;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
+use Spora\Services\ToolConfigOverrides;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\MediaTool;
 
@@ -38,6 +41,14 @@ beforeEach(function (): void {
     );
 
     $this->migration = require __DIR__ . '/../../../database/migrations/0105_materialise_the_media_scope_for_pre_existing_agents.php';
+});
+
+afterEach(function (): void {
+    // The group-cascade toggle is read from the process environment, and
+    // the env vars are process-level — they outlive the test that set them.
+    putenv('SPORA_TOOLS_GROUP_CASCADE_ENABLED');
+    putenv('SPORA_CONFIG_PATH');
+    unset($_ENV['SPORA_TOOLS_GROUP_CASCADE_ENABLED'], $_ENV['SPORA_CONFIG_PATH']);
 });
 
 /**
@@ -72,6 +83,23 @@ function mediaScopeMigrationContext(int $userId): PrincipalContext
         type: Principal::TYPE_USER,
         ownerUserId: $userId,
         runnerUserId: $userId,
+    );
+}
+
+/**
+ * The runtime's own view of the settings cascade, with the group cascade
+ * turned on — the shape an install reaches when the operator enables it.
+ */
+function mediaScopeMigrationRuntimeWithGroupCascade(): ToolConfigService
+{
+    return new ToolConfigService(
+        new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+        new NullLogger(),
+        [MediaTool::class],
+        new ToolConfigOverrides(
+            principalService: new PrincipalService(new PrincipalResolver()),
+            groupCascadeEnabled: true,
+        ),
     );
 }
 
@@ -262,6 +290,74 @@ it('keeps a row that existed before the migration', function (): void {
     // apart.
     expect((int) Capsule::table('agent_tool_overrides')->where('agent_id', $agentId)->count())->toBe(1)
         ->and($this->toolConfig->getRawAgentOverride(MediaTool::class, $agentId))->toBe([]);
+});
+
+it('materialises an agent whose group principal holds a scope, because the runtime does not read it', function (): void {
+    $agentId = mediaScopeMigrationAgent($this->userId, 'Media scope group off');
+    mediaScopeMigrationEnable($agentId);
+
+    $groupPrincipalId = $this->makeGroupPrincipal($this->userId, 'Media scope group off');
+    $this->toolConfig->putPrincipalSettings(MediaTool::class, $groupPrincipalId, ['scope' => 'principal']);
+
+    // The runtime's own view, with the group cascade off — the shipped
+    // default. The cascade consults the user-principal alone, so the
+    // group's scope is not part of the resolution at all.
+    expect($this->toolConfig->getEffectiveSettingsWithSource(MediaTool::class, $agentId, $this->userId)['scope']['source'])
+        ->toBe('default');
+
+    $this->migration->up();
+
+    // The group scope governs nothing, so the agent is materialised
+    // rather than left on the new default.
+    expect($this->toolConfig->getRawAgentOverride(MediaTool::class, $agentId)['scope'])->toBe('agent');
+});
+
+it('leaves an agent alone when the group cascade is on, because the group scope then governs', function (): void {
+    putenv('SPORA_TOOLS_GROUP_CASCADE_ENABLED=true');
+    $_ENV['SPORA_TOOLS_GROUP_CASCADE_ENABLED'] = 'true';
+
+    $agentId = mediaScopeMigrationAgent($this->userId, 'Media scope group on');
+    mediaScopeMigrationEnable($agentId);
+
+    $groupPrincipalId = $this->makeGroupPrincipal($this->userId, 'Media scope group on');
+    $this->toolConfig->putPrincipalSettings(MediaTool::class, $groupPrincipalId, ['scope' => 'principal']);
+
+    // The runtime with the cascade on: the group's scope is consulted,
+    // and it is the group that answers.
+    expect(mediaScopeMigrationRuntimeWithGroupCascade()
+        ->getEffectiveSettingsWithSource(MediaTool::class, $agentId, $this->userId)['scope']['source'])
+        ->toBe('group');
+
+    $this->migration->up();
+
+    // The group scope governs, so the agent's own row must not shadow it.
+    expect($this->toolConfig->getRawAgentOverride(MediaTool::class, $agentId))->toBe([]);
+});
+
+it('materialises when the group-cascade state cannot be read', function (): void {
+    $agentId = mediaScopeMigrationAgent($this->userId, 'Media scope unknown cascade');
+    mediaScopeMigrationEnable($agentId);
+
+    $groupPrincipalId = $this->makeGroupPrincipal($this->userId, 'Media scope unknown cascade');
+    $this->toolConfig->putPrincipalSettings(MediaTool::class, $groupPrincipalId, ['scope' => 'principal']);
+
+    // A config file the app cannot read: the state of the toggle is then
+    // unknowable, and unknowable must not be read as "the group scope
+    // governs".
+    $broken = tempnam(sys_get_temp_dir(), 'spora-config-');
+    file_put_contents($broken, "<?php\nthrow new RuntimeException('unreadable');\n");
+    putenv('SPORA_CONFIG_PATH=' . $broken);
+    $_ENV['SPORA_CONFIG_PATH'] = $broken;
+
+    try {
+        $this->migration->up();
+    } finally {
+        putenv('SPORA_CONFIG_PATH');
+        unset($_ENV['SPORA_CONFIG_PATH']);
+        @unlink($broken);
+    }
+
+    expect($this->toolConfig->getRawAgentOverride(MediaTool::class, $agentId)['scope'])->toBe('agent');
 });
 
 describe('a write the database refuses', function (): void {

@@ -6,6 +6,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Psr\Log\NullLogger;
+use Spora\Core\ConfigFactory;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Models\Principal;
@@ -13,6 +14,8 @@ use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ToolConfigService;
+use Spora\Settings\SettingsRegistry;
+use Spora\Settings\SettingsRepository;
 use Spora\Tools\MediaTool;
 
 /**
@@ -50,7 +53,7 @@ use Spora\Tools\MediaTool;
  *   1. the `media` tool is enabled for it;
  *   2. its own override row holds no scope of its own;
  *   3. no other layer supplies one — not the shared group, not the
- *      global layer, not a principal layer.
+ *      global layer, and no principal layer the runtime consults.
  *
  * Clause 3 is what keeps a deliberate choice intact. A global (or
  * principal, or shared group) scope governs today and keeps governing;
@@ -59,15 +62,41 @@ use Spora\Tools\MediaTool;
  * where nothing supplies a scope is the schema default the only thing
  * in play — and there the pre-change answer was `agent`.
  *
+ * **A principal layer counts only when the runtime reads it.** The
+ * runtime resolves the principal scope through the settings cascade,
+ * and that cascade consults a group principal only while the group
+ * cascade is on ({@see \Spora\Services\ToolConfigPrincipalCascade}).
+ * With the cascade off — the shipped default — the runtime reads the
+ * user-principal alone, so a group principal's scope governs nothing.
+ * Counting it anyway would suppress the materialisation and leave the
+ * agent on the new default: the exact widening this migration exists to
+ * prevent. The toggle is read through the same
+ * {@see \Spora\Core\Config} the container builds, and a state that
+ * cannot be read counts as "off" — a scope that governs nothing must
+ * not stop an agent from being materialised.
+ *
  * **How the effective scope is determined.** Through the live cascade,
  * read with {@see ToolConfigService::getEffectiveSettingsWithSource()},
  * which reports which layer supplied each value. The migration does not
  * re-implement the cascade: a resolution that drifts from the runtime
  * would materialise the wrong scope, and the drift would be invisible.
  * Every principal that could govern the agent is resolved — the
- * principal that owns it, and every principal its owner can act for —
- * because a layer that supplies a scope must never be shadowed, and a
- * superset of the governing layers is the safe direction.
+ * principal that owns it, and every principal its owner user can act
+ * for — because a layer that supplies a scope must never be shadowed.
+ *
+ * **A read that fails and a write that fails are not the same.** A
+ * settings blob this migration cannot read leaves the agent exactly as
+ * it is: writing over unreadable settings would destroy what the
+ * operator stored, and an operator can still set the scope by hand. A
+ * scope that cannot be *written* is the opposite case — the agent falls
+ * back to the new default, and the widening would be invisible. That
+ * failure stops the migration, so the operator sees a failed install
+ * rather than a quietly widened agent.
+ *
+ * **The override and its marker are written together.** `down()` walks
+ * the marker table, so an override without its marker is a row the
+ * rollback cannot restore. One transaction per agent makes the pair
+ * all-or-nothing.
  *
  * **Idempotency.** An agent that already holds a scope is left alone,
  * so a second run finds nothing to do; the marker table records the
@@ -82,20 +111,6 @@ use Spora\Tools\MediaTool;
  * mistake this migration exists to avoid. The marker also records
  * whether the row existed at all, so a row this migration created is
  * deleted again rather than left behind holding empty settings.
- *
- * **The override and its marker are written together.** `down()` walks
- * the marker table, so an override without its marker is a row the
- * rollback cannot restore. One transaction per agent makes the pair
- * all-or-nothing.
- *
- * **A read that fails and a write that fails are not the same.** A
- * settings blob this migration cannot read leaves the agent exactly as
- * it is: writing over unreadable settings would destroy what the
- * operator stored, and an operator can still set the scope by hand. A
- * scope that cannot be *written* is the opposite case — the agent falls
- * back to the new default, and the widening would be invisible. That
- * failure stops the migration, so the operator sees a failed install
- * rather than a quietly widened agent.
  */
 return new class extends Migration {
     /** The tool whose `scope` setting this migration freezes. */
@@ -106,6 +121,12 @@ return new class extends Migration {
 
     /** The rows this migration wrote, so `down()` can undo exactly those. */
     private const MARKER_TABLE = 'media_scope_materialisations';
+
+    /**
+     * The setting that decides whether the runtime consults a group
+     * principal's scope at all.
+     */
+    private const GROUP_CASCADE_SETTING = 'SPORA_TOOLS_GROUP_CASCADE_ENABLED';
 
     private const DATETIME_FORMAT = 'Y-m-d H:i:s';
 
@@ -122,9 +143,13 @@ return new class extends Migration {
         $resolver   = new PrincipalResolver();
         $principals = new PrincipalService($resolver);
 
+        // Read once: the toggle is the same for every agent, and a
+        // migration that asked per agent could see two different answers.
+        $groupCascadeEnabled = $this->groupCascadeEnabled();
+
         foreach ($this->agentsWithMediaTool() as $agentId) {
             try {
-                $prior = $this->resolveEligible($toolConfig, $principals, $resolver, $agentId);
+                $prior = $this->resolveEligible($toolConfig, $principals, $resolver, $groupCascadeEnabled, $agentId);
             } catch (Throwable $e) {
                 // A settings blob this migration cannot read is left alone:
                 // writing over it would destroy settings the operator
@@ -200,6 +225,7 @@ return new class extends Migration {
         ToolConfigService $toolConfig,
         PrincipalService $principals,
         PrincipalResolver $resolver,
+        bool $groupCascadeEnabled,
         int $agentId,
     ): ?array {
         if ($this->alreadyMaterialised($agentId)) {
@@ -213,7 +239,7 @@ return new class extends Migration {
             return null;
         }
 
-        foreach ($this->governingPrincipalIds($agentId, $principals, $resolver) as $principalId) {
+        foreach ($this->governingPrincipalIds($agentId, $principals, $resolver, $groupCascadeEnabled) as $principalId) {
             if ($this->scopeSupplied($toolConfig, $agentId, $principalId)) {
                 return null;
             }
@@ -263,10 +289,9 @@ return new class extends Migration {
     {
         $context = null;
         if ($principalId !== null) {
-            $type = Capsule::table('principals')->where('id', $principalId)->value('type');
             $context = new PrincipalContext(
                 principalId: $principalId,
-                type: is_string($type) ? $type : Principal::TYPE_USER,
+                type: $this->principalType($principalId),
                 ownerUserId: null,
                 runnerUserId: null,
             );
@@ -291,13 +316,12 @@ return new class extends Migration {
     /**
      * The principals whose settings can govern this agent's scope.
      *
-     * A superset of what the runtime consults: the principal that owns
-     * the agent, plus every principal its owner user can act for. The
-     * runtime resolves the owner user — and, with the group cascade on,
-     * the owner's group principals — while the principal that owns the
-     * agent is the row a group-scoped operator setting lives in. A
-     * superset is the safe direction: a layer that supplies a scope
-     * must never be shadowed by the agent's own row.
+     * The principal that owns the agent, plus every principal its owner
+     * user can act for — the set the runtime's cascade resolves for that
+     * owner. A group principal is in the set only while the group
+     * cascade is on: with the cascade off the runtime reads the
+     * user-principal alone, so a group principal's scope governs nothing
+     * and counting it would leave the agent on the new default.
      *
      * @return list<int>
      */
@@ -305,6 +329,7 @@ return new class extends Migration {
         int $agentId,
         PrincipalService $principals,
         PrincipalResolver $resolver,
+        bool $groupCascadeEnabled,
     ): array {
         $principalId = Capsule::table('agents')->where('id', $agentId)->value('principal_id');
         if ($principalId === null) {
@@ -318,7 +343,59 @@ return new class extends Migration {
             $ids = array_merge($ids, $principals->principalIdsForUser($ownerUserId));
         }
 
-        return array_values(array_unique($ids));
+        $ids = array_values(array_unique($ids));
+
+        if ($groupCascadeEnabled) {
+            return $ids;
+        }
+
+        return array_values(array_filter(
+            $ids,
+            fn(int $id): bool => $this->principalType($id) !== Principal::TYPE_GROUP,
+        ));
+    }
+
+    /**
+     * The type of a principal, defaulting to the user type for a row
+     * that is not there: a principal nobody can read holds no scope, so
+     * the type it would have had does not matter.
+     */
+    private function principalType(int $principalId): string
+    {
+        $type = Capsule::table('principals')->where('id', $principalId)->value('type');
+
+        return is_string($type) ? $type : Principal::TYPE_USER;
+    }
+
+    /**
+     * Whether the runtime consults a group principal's scope.
+     *
+     * Read through the same {@see \Spora\Core\Config} the container
+     * builds — the registry defaults, `config.php`, the environment and
+     * the stored settings — so the answer is the one the runtime will
+     * use. The database layer is applied here as well, because the
+     * migration runs before the kernel applies it.
+     *
+     * A state that cannot be read counts as "off". A group scope that
+     * governs nothing must not stop an agent from being materialised:
+     * leaving the agent unmaterialised is what widens it.
+     */
+    private function groupCascadeEnabled(): bool
+    {
+        try {
+            $paths    = new Paths($this->basePath());
+            $registry = new SettingsRegistry($paths);
+            $config   = (new ConfigFactory($registry, $paths))->create();
+
+            $config->applySettingsOverlay(
+                new SettingsRepository($this->securityManager(), $registry),
+                $registry,
+            );
+
+            return $config->getBool(self::GROUP_CASCADE_SETTING);
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**
