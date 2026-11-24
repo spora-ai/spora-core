@@ -127,6 +127,66 @@ function writeToolImageTranscript(
     TaskHistory::create($row);
 }
 
+/**
+ * The transcript a batch of tool calls leaves behind: the assistant turn
+ * that asked for all of them, and one tool result per call.
+ *
+ * @param  list<list<array{media_id: string, kind: string}>|null>  $attachmentsPerResult
+ */
+function writeToolImageBatchTranscript(
+    \Spora\Models\Task $task,
+    array $attachmentsPerResult,
+): void {
+    $calls = [];
+
+    foreach (array_keys($attachmentsPerResult) as $index) {
+        $calls[] = [
+            'id'       => 'call_' . ($index + 1),
+            'type'     => 'function',
+            'function' => ['name' => 'media', 'arguments' => '{}'],
+        ];
+    }
+
+    TaskHistory::create([
+        'task_id'           => $task->id,
+        'sequence'          => 0,
+        'role'              => 'assistant',
+        'content'           => null,
+        'tool_call_payload' => json_encode($calls),
+    ]);
+
+    foreach ($attachmentsPerResult as $index => $attachments) {
+        $row = [
+            'task_id'      => $task->id,
+            'sequence'     => $index + 1,
+            'role'         => 'tool',
+            'tool_call_id' => 'call_' . ($index + 1),
+            'tool_name'    => 'media',
+            'content'      => 'The image is attached.',
+        ];
+
+        if ($attachments !== null) {
+            $row['attachments'] = $attachments;
+        }
+
+        TaskHistory::create($row);
+    }
+}
+
+/**
+ * An assistant turn after a run of tool results, so the image turn has a
+ * non-tool row to be flushed in front of.
+ */
+function writeTrailingAssistantRow(\Spora\Models\Task $task, int $sequence): void
+{
+    TaskHistory::create([
+        'task_id' => $task->id,
+        'sequence' => $sequence,
+        'role' => 'assistant',
+        'content' => 'Looking at the image now.',
+    ]);
+}
+
 describe('the tool-result image channel', function (): void {
     it('turns a tool row with an image attachment into the tool message plus a user message carrying the image', function (): void {
         $agentId = seedToolImageAgent();
@@ -357,5 +417,100 @@ describe('the tool-result image channel', function (): void {
         expect($blocks)->toBeArray();
         expect(array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image')))
             ->toHaveCount(2);
+    });
+
+    it('holds the image turn back until the run of tool results ends', function (): void {
+        // A provider accepts a tool result only directly after the
+        // assistant turn that asked for it, so a user turn between two
+        // results of one batch is a 400.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $asset = toolImageAsset('90123456-7890-4123-8234-567890123456', $png);
+
+        writeToolImageBatchTranscript($task, [
+            [['media_id' => $asset->id, 'kind' => 'image']],
+            null,
+        ]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect(array_column($messages, 'role'))->toBe(['assistant', 'tool', 'tool', 'user']);
+        expect(toolCallPairingFaults($messages))->toBe([]);
+
+        // The image turn is the last one, and it carries the image.
+        $blocks = $messages[3]['content'];
+        expect($blocks)->toBeArray();
+        expect($blocks[1]['type'])->toBe('image');
+        expect(base64_decode((string) $blocks[1]['base64'], strict: true))->toBe($png);
+    });
+
+    it('holds the image turn back when the second result of the batch carries it', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $asset = toolImageAsset('01234567-8901-4234-8234-567890123456', $png);
+
+        writeToolImageBatchTranscript($task, [
+            null,
+            [['media_id' => $asset->id, 'kind' => 'image']],
+        ]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect(array_column($messages, 'role'))->toBe(['assistant', 'tool', 'tool', 'user']);
+        expect(toolCallPairingFaults($messages))->toBe([]);
+
+        $blocks = $messages[3]['content'];
+        expect($blocks)->toBeArray();
+        expect($blocks[1]['type'])->toBe('image');
+        expect(base64_decode((string) $blocks[1]['base64'], strict: true))->toBe($png);
+    });
+
+    it('holds the image turn back when a later result of a longer run carries it', function (): void {
+        // The image is on the second of three results, so the turn it rides
+        // on has to wait for the third as well.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $asset = toolImageAsset('21234567-8901-4234-8234-567890123456', $png);
+
+        writeToolImageBatchTranscript($task, [
+            null,
+            [['media_id' => $asset->id, 'kind' => 'image']],
+            null,
+        ]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect(array_column($messages, 'role'))->toBe(['assistant', 'tool', 'tool', 'tool', 'user']);
+        expect(toolCallPairingFaults($messages))->toBe([]);
+
+        $blocks = $messages[4]['content'];
+        expect($blocks)->toBeArray();
+        expect($blocks[1]['type'])->toBe('image');
+        expect(base64_decode((string) $blocks[1]['base64'], strict: true))->toBe($png);
+    });
+
+    it('flushes the image turn in front of the assistant row that follows the batch', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $asset = toolImageAsset('11234567-8901-4234-8234-567890123456', $png);
+
+        writeToolImageBatchTranscript($task, [
+            [['media_id' => $asset->id, 'kind' => 'image']],
+            null,
+        ]);
+        writeTrailingAssistantRow($task, 3);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect(array_column($messages, 'role'))->toBe(['assistant', 'tool', 'tool', 'user', 'assistant']);
+        expect(toolCallPairingFaults($messages))->toBe([]);
     });
 });
