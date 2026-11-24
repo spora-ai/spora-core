@@ -6,6 +6,7 @@ namespace Spora\Services\MediaArchive;
 
 use Spora\Core\Paths;
 use Spora\Models\MediaAsset;
+use Spora\Services\LocalAssetStore;
 
 /**
  * The image block an archive asset renders into, and the byte caps that
@@ -112,11 +113,13 @@ final class MediaImageBlocks
         }
         if ($asset->storage_mode === 'local' && $asset->asset_token !== null && $asset->asset_token !== '') {
             $paths = new Paths($basePath);
-            $path = $paths->storage('assets') . '/' . $asset->asset_token;
-            $ext  = MediaArchiveService::extensionForMime($asset->mime_type);
-            if ($ext !== null) {
-                $path .= '.' . $ext;
-            }
+            // The writer's rule, not a MIME-only guess: the archive stores a
+            // local asset under the suffix its own `filename` produced (an
+            // upload named `photo.jpeg` lands as `<token>.jpeg`, because the
+            // filename wins over the MIME map's `jpg`), so the reader has to
+            // ask the same question the writer did.
+            $path = $paths->storage('assets') . '/' . $asset->asset_token
+                . '.' . LocalAssetStore::storedExtension($asset->mime_type, $asset->filename);
             if (!is_file($path)) {
                 return null;
             }

@@ -122,6 +122,40 @@ describe('MediaImageBlocks', function () {
         removeImageBlockStorageDir($dir);
     });
 
+    it('reads a local asset stored under the suffix its own filename produced', function (): void {
+        // The archive stores a local asset under the suffix its `filename`
+        // produced, and the filename wins over the MIME map: an upload named
+        // `photo.jpeg` lands as `<token>.jpeg`, not `<token>.jpg`. A reader
+        // that derives the suffix from the MIME alone looks for a file that
+        // was never written.
+        $dir = makeImageBlockStorageDir();
+        $paths = new Paths(BASE_PATH);
+        $token = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        $jpeg = mediaImageBlockPng();
+
+        file_put_contents($paths->storage('assets') . '/' . $token . '.jpeg', $jpeg);
+
+        $asset = MediaAsset::create([
+            'id'           => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            'asset_url'    => '/api/v1/assets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jpg',
+            'storage_mode' => 'local',
+            'asset_token'  => $token,
+            'media_type'   => 'image',
+            'mime_type'    => 'image/jpeg',
+            'byte_size'    => strlen($jpeg),
+            'user_id'      => 1,
+            'filename'     => 'Gemini_Generated_Image_lt65axlt65axlt65.jpeg',
+        ]);
+
+        expect(MediaImageBlocks::loadBytes($asset, BASE_PATH))->toBe($jpeg);
+
+        $rendered = MediaImageBlocks::renderAsset($asset, BASE_PATH);
+        expect($rendered)->not->toBeNull();
+        expect($rendered['block']['mediaType'])->toBe('image/jpeg');
+
+        removeImageBlockStorageDir($dir);
+    });
+
     it('refuses an image over the per-asset cap', function (): void {
         // The cap is on the bytes that are loaded, so the body has to be
         // really there — a recorded size alone must not pass.

@@ -279,6 +279,53 @@ describe('MediaTool::inspect_image', function (): void {
         }
     });
 
+    it('reads a local asset stored under the suffix its own filename produced', function (): void {
+        // The archive stores a local asset under the suffix its `filename`
+        // produced, and the filename wins over the MIME map: an upload named
+        // `photo.jpeg` lands as `<token>.jpeg`, not `<token>.jpg`. A reader
+        // that derives the suffix from the MIME alone finds no file and
+        // reports a missing blob for an asset that is sitting on disk.
+        $agentId = inspectImageAgent('gpt-4o', true);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            mediaToolScopeConfig('agent'),
+            null,
+            null,
+            inspectImageDriverFactory(),
+        );
+        try {
+            $storage = (string) getenv('SPORA_STORAGE_DIR');
+            $dir     = $storage . '/assets';
+            mkdir($dir, 0755, true);
+            $token = bin2hex(random_bytes(16));
+            $jpeg  = "\xFF\xD8\xFF\xE0fake-jpeg";
+            file_put_contents($dir . '/' . $token . '.jpeg', $jpeg);
+
+            $asset = seedMediaAsset(agentId: $agentId, userId: 99, mime: 'image/jpeg', payload: null);
+            Illuminate\Database\Capsule\Manager::table('media_assets')
+                ->where('id', $asset->id)
+                ->update([
+                    'storage_mode' => 'local',
+                    'asset_token'  => $token,
+                    'filename'     => 'Gemini_Generated_Image_lt65axlt65axlt65.jpeg',
+                    'byte_size'    => strlen($jpeg),
+                    'payload'      => null,
+                ]);
+
+            $result = $tool->execute(
+                ['action' => 'inspect_image', 'asset_id' => $asset->id],
+                agentId: $agentId,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->attachments)->toBe([['media_id' => $asset->id, 'kind' => 'image']]);
+            expect($result->content)->not->toContain('could not be read');
+        } finally {
+            $restore();
+        }
+    });
+
     it('refuses an asset whose stored size is over the ceiling', function (): void {
         $agentId = inspectImageAgent('gpt-4o', true);
         $asset   = seedMediaAsset(agentId: $agentId, userId: 99, payload: 'bytes');
