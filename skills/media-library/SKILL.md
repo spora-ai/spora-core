@@ -46,7 +46,7 @@ The count on the first line is the number of **matches**, not the number of rows
 | `delete_folder` | true | **true** | A deleted folder; its assets fall back to the root |
 | `file_asset` | true | false | An asset filed into a folder, or back into the root |
 | `search_assets` | true | false | The assets inside one folder |
-| `inspect_image` | false | **false** | The image, attached to the result so you can look at it |
+| `inspect_image` | false | **false** | The image, on the user turn after the result so you can look at it |
 
 Fourteen of the fifteen are on by default, so a `media` call needs no prior opt-in. `inspect_image` is the exception: it ships **off**, and an operator enables it for the agent before you can call it at all. Five ops ask the operator to approve each call — `get_public_url`, `create_media`, `create_folder`, `rename_folder` and `delete_folder` — because each of them changes durable state the agent cannot undo. Every other op reads or writes a row the calling agent already owns, under the same `scope` rules as `get_media`.
 
@@ -182,7 +182,7 @@ The response is the usual asset header plus a download card, and the structured 
 
 ### Looking at an image with `inspect_image`
 
-`get_media` shows the operator an image; it does not show **you** one. `inspect_image` is the operation that puts the pixels in front of the model: the image is attached to the tool result, and you see it on your next turn.
+`get_media` shows the operator an image; it does not show **you** one. `inspect_image` is the operation that puts the pixels in front of the model: the image is attached on a user turn that follows the tool result, and you see it on your next turn.
 
 - `asset_id` (required) — the image to look at.
 - `question` (optional) — what to look for ("is the axis labelled?", "does the logo match the brand guide?"). The question is echoed back with the result, so the operator can see what you were asked.

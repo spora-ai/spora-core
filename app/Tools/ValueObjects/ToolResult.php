@@ -31,10 +31,11 @@ final readonly class ToolResult
         /**
          * Archive assets this result points at.
          *
-         * Each is rendered into the LLM context as an image block on the
-         * tool-result turn, so the model sees the asset itself rather than a
-         * reference to it. The bytes are read from storage when the request is
-         * built; the reference is what gets persisted.
+         * Each is rendered as an image content block on a user turn that
+         * follows the tool result — a provider's tool result carries text
+         * only, so the image cannot travel inside it. The bytes are read from
+         * storage when the request is built; the reference is what gets
+         * persisted.
          *
          * @var list<array{media_id: string, kind: string}>
          */

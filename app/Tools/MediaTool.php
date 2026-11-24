@@ -124,8 +124,9 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                           refuses it.
  *   - `search_assets`      — the assets inside one folder.
  *   - `inspect_image`      — send an image from the archive to the model so
- *                           it can look at it. The image rides on the tool
- *                           result, and the model sees it on its next turn.
+ *                           it can look at it. The image rides on a user turn
+ *                           that follows the tool result, so the model sees it
+ *                           on its next turn.
  *                           **Off by default**: an operator opts in per
  *                           agent, and the agent's LLM has to accept image
  *                           content blocks for the call to succeed.
@@ -268,7 +269,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'inspect_image',
-    description: 'Send an image from the media archive to the model so it can look at it, describe it, or QA it. The image is attached to this tool result — the model sees it on the next turn. Requires a vision-capable LLM, and the media tool\'s Library scope decides which images are reachable.',
+    description: 'Send an image from the media archive to the model so it can look at it, describe it, or QA it. The image is attached on a user turn that follows the tool result — the model sees it on the next turn. Requires a vision-capable LLM, and the media tool\'s Library scope decides which images are reachable.',
     enabledByDefault: false,
     requiresApprovalByDefault: false,
 )]
