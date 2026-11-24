@@ -79,7 +79,9 @@ use Spora\Tools\MediaTool;
  * held before, so the reversal restores exactly those rows and leaves
  * every other agent's scope — the operator's own — untouched. A blanket
  * removal would strip a scope the operator set on purpose, which is the
- * mistake this migration exists to avoid.
+ * mistake this migration exists to avoid. The marker also records
+ * whether the row existed at all, so a row this migration created is
+ * deleted again rather than left behind holding empty settings.
  */
 return new class extends Migration {
     /** The tool whose `scope` setting this migration freezes. */
@@ -187,11 +189,16 @@ return new class extends Migration {
             }
         }
 
-        $prior = $toolConfig->getRawAgentOverride(self::TOOL_CLASS, $agentId);
+        // Read before the write. Once `putAgentOverride()` has run the
+        // row exists whether or not it did before, and the marker has to
+        // tell those two apart: `down()` deletes a row this migration
+        // created and restores one that held other settings.
+        $prior   = $toolConfig->getRawAgentOverride(self::TOOL_CLASS, $agentId);
+        $existed = $this->overrideRowExists($agentId);
 
         $toolConfig->putAgentOverride(self::TOOL_CLASS, $agentId, ['scope' => self::PRE_UPGRADE_SCOPE]);
 
-        $this->record($agentId, $prior);
+        $this->record($agentId, $prior, $existed);
     }
 
     /**
@@ -286,19 +293,22 @@ return new class extends Migration {
         return Capsule::table(self::MARKER_TABLE)->where('agent_id', $agentId)->exists();
     }
 
+    private function overrideRowExists(int $agentId): bool
+    {
+        return Capsule::table('agent_tool_overrides')
+            ->where('agent_id', $agentId)
+            ->where('tool_class', self::TOOL_CLASS)
+            ->exists();
+    }
+
     /**
      * Record the row this migration wrote, and the settings it held
      * before, so `down()` can restore exactly that row.
      *
      * @param array<string, mixed> $prior
      */
-    private function record(int $agentId, array $prior): void
+    private function record(int $agentId, array $prior, bool $rowExisted): void
     {
-        $rowExisted = Capsule::table('agent_tool_overrides')
-            ->where('agent_id', $agentId)
-            ->where('tool_class', self::TOOL_CLASS)
-            ->exists();
-
         Capsule::table(self::MARKER_TABLE)->insert([
             'agent_id'       => $agentId,
             'prior_settings' => $rowExisted

@@ -220,8 +220,44 @@ it('takes back only the scope it wrote', function (): void {
     $this->migration->up();
     $this->migration->down();
 
-    // The row the migration wrote is gone.
+    // The row the migration wrote is gone — not merely emptied, because
+    // the agent had no row before the migration ran.
     expect($this->toolConfig->getRawAgentOverride(MediaTool::class, $materialisedAgent))->toBe([])
+        ->and((int) Capsule::table('agent_tool_overrides')->where('agent_id', $materialisedAgent)->count())->toBe(0)
         // The operator's own scope is untouched.
         ->and($this->toolConfig->getRawAgentOverride(MediaTool::class, $operatorAgent)['scope'])->toBe('agent');
+});
+
+it('leaves no override row behind for an agent that had none', function (): void {
+    $agentId = mediaScopeMigrationAgent($this->userId, 'Media scope no row');
+    mediaScopeMigrationEnable($agentId);
+
+    expect((int) Capsule::table('agent_tool_overrides')->where('agent_id', $agentId)->count())->toBe(0);
+
+    $this->migration->up();
+
+    expect((int) Capsule::table('agent_tool_overrides')->where('agent_id', $agentId)->count())->toBe(1);
+
+    $this->migration->down();
+
+    // The row this migration created is deleted again. A row that held
+    // empty settings would look the same to the reader, and would leave
+    // behind a row that did not exist before.
+    expect((int) Capsule::table('agent_tool_overrides')->where('agent_id', $agentId)->count())->toBe(0);
+});
+
+it('keeps a row that existed before the migration', function (): void {
+    $agentId = mediaScopeMigrationAgent($this->userId, 'Media scope empty row rollback');
+    mediaScopeMigrationEnable($agentId);
+
+    $this->toolConfig->putAgentOverride(MediaTool::class, $agentId, []);
+
+    $this->migration->up();
+    $this->migration->down();
+
+    // The row existed before the migration, so the rollback restores it
+    // rather than deleting it — the two cases the marker has to tell
+    // apart.
+    expect((int) Capsule::table('agent_tool_overrides')->where('agent_id', $agentId)->count())->toBe(1)
+        ->and($this->toolConfig->getRawAgentOverride(MediaTool::class, $agentId))->toBe([]);
 });
