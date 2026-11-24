@@ -83,6 +83,11 @@ use Spora\Tools\MediaTool;
  * whether the row existed at all, so a row this migration created is
  * deleted again rather than left behind holding empty settings.
  *
+ * **The override and its marker are written together.** `down()` walks
+ * the marker table, so an override without its marker is a row the
+ * rollback cannot restore. One transaction per agent makes the pair
+ * all-or-nothing.
+ *
  * **A read that fails and a write that fails are not the same.** A
  * settings blob this migration cannot read leaves the agent exactly as
  * it is: writing over unreadable settings would destroy what the
@@ -227,13 +232,19 @@ return new class extends Migration {
     /**
      * Store the scope and the marker that records it.
      *
+     * Both writes share one transaction: `down()` walks the marker
+     * table, so an override without its marker is a row the rollback
+     * cannot restore.
+     *
      * @param array{settings: array<string, mixed>, existed: bool} $prior
      */
     private function persist(ToolConfigService $toolConfig, int $agentId, array $prior): void
     {
-        $toolConfig->putAgentOverride(self::TOOL_CLASS, $agentId, ['scope' => self::PRE_UPGRADE_SCOPE]);
+        Capsule::connection()->transaction(function () use ($toolConfig, $agentId, $prior): void {
+            $toolConfig->putAgentOverride(self::TOOL_CLASS, $agentId, ['scope' => self::PRE_UPGRADE_SCOPE]);
 
-        $this->record($agentId, $prior['settings'], $prior['existed']);
+            $this->record($agentId, $prior['settings'], $prior['existed']);
+        });
     }
 
     /**

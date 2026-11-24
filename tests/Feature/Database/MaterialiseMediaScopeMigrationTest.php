@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\Schema\Blueprint;
 use Psr\Log\NullLogger;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
@@ -297,5 +298,34 @@ describe('a write the database refuses', function (): void {
             ->and($this->toolConfig->getRawAgentOverride(MediaTool::class, $blocked))->toBe([])
             ->and((int) Capsule::table('agent_tool_overrides')->where('agent_id', $blocked)->count())->toBe(0)
             ->and((int) Capsule::table('media_scope_materialisations')->where('agent_id', $blocked)->count())->toBe(0);
+    });
+
+    it('rolls the scope back when the marker cannot be written', function (): void {
+        $agentId = mediaScopeMigrationAgent($this->userId, 'Media scope unmarked');
+        mediaScopeMigrationEnable($agentId);
+
+        // A marker table the insert cannot satisfy: `prior_settings` is
+        // NOT NULL and the row this agent gets carries no prior settings.
+        // The scope is written first, so without a transaction the row
+        // would survive without the marker `down()` needs to undo it.
+        Capsule::schema()->dropIfExists('media_scope_materialisations');
+        Capsule::schema()->create('media_scope_materialisations', static function (Blueprint $table): void {
+            $table->unsignedBigInteger('agent_id')->primary();
+            $table->text('prior_settings');
+            $table->timestamp('created_at')->nullable();
+        });
+
+        $thrown = null;
+        try {
+            $this->migration->up();
+        } catch (Throwable $e) {
+            $thrown = $e;
+        }
+
+        // The scope write was rolled back with the marker write.
+        expect($this->toolConfig->getRawAgentOverride(MediaTool::class, $agentId))->toBe([])
+            ->and((int) Capsule::table('agent_tool_overrides')->where('agent_id', $agentId)->count())->toBe(0)
+            // And the failure is not swallowed.
+            ->and($thrown)->toBeInstanceOf(QueryException::class);
     });
 });
