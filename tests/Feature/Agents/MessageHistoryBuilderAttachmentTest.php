@@ -1348,6 +1348,54 @@ test('a repeated image id is rendered once', function (): void {
     expect($images)->toHaveCount(1);
 });
 
+test('the attachment row honours the builder\'s configured image budget', function (): void {
+    // The builder's limit has to reach the renderer: the tool-result path
+    // spends it, and an attachment row that ignored it would forward an
+    // image the operator's ceiling forbids.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $png = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+        strict: true,
+    );
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: $png,
+        mime: 'image/png',
+        filename: 'pixel.png',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'image']],
+    ]);
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: new MockHttpClient(),
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    $withinBudget = (new MessageHistoryBuilder($driver))->build($task->id);
+    $overBudget   = (new MessageHistoryBuilder($driver, maxRowImageBytes: 1))->build($task->id);
+
+    $imagesIn = static function (array $messages): array {
+        return array_values(array_filter(
+            $messages[0]['content'],
+            static fn(array $block): bool => $block['type'] === 'image',
+        ));
+    };
+
+    expect($imagesIn($withinBudget))->toHaveCount(1)
+        ->and($imagesIn($overBudget))->toHaveCount(0);
+});
+
 test('the row forwards no more image bytes than the budget', function (): void {
     // The per-asset cap bounds one image; the row's budget bounds the
     // row. An image that does not fit is not loaded at all.

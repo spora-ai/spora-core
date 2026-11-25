@@ -533,6 +533,7 @@ final class MessageHistoryBuilder
         $renderer = new AttachmentRowRenderer(
             $this->driver,
             $this->basePath(),
+            $this->maxRowImageBytes,
         );
 
         $rendered = $renderer->renderRow($row);
@@ -606,7 +607,7 @@ final class MessageHistoryBuilder
      */
     private function basePath(): string
     {
-        return defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);
+        return defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 2);
     }
 
     /**
