@@ -37,7 +37,7 @@ if (!function_exists('makeLocaleDir')) {
 
         // Registered before the catalogues are written: a half-built
         // directory has to be cleaned up too.
-        $GLOBALS['__locale_fixtures'][] = $dir;
+        $GLOBALS['__spora_locale_fixtures'][] = $dir;
 
         foreach ($catalogues as $locale => $messages) {
             $path = $dir . '/' . $locale . '.json';
@@ -56,33 +56,21 @@ if (!function_exists('makeLocaleDir')) {
     }
 }
 
-if (!function_exists('localeFixtureRegistry')) {
-    /**
-     * The fixture directories this process created.
-     *
-     * The system temp directory is shared by every parallel Pest worker on
-     * the machine, so a directory is only ours to remove when this process
-     * is the one that made it.
-     *
-     * @return list<string>
-     */
-    function localeFixtureRegistry(): array
-    {
-        return $GLOBALS['__locale_fixtures'] ?? [];
-    }
-}
-
 if (!function_exists('removeLocaleFixtures')) {
     /**
      * Remove only the fixtures this process created — another worker's are
      * not ours to delete.
+     *
+     * The system temp directory is shared by every parallel Pest worker on
+     * the machine, so a directory is only ours to remove when this process
+     * is the one that made it.
      */
     function removeLocaleFixtures(): void
     {
-        foreach (localeFixtureRegistry() as $dir) {
+        foreach ($GLOBALS['__spora_locale_fixtures'] ?? [] as $dir) {
             removeLocaleDir($dir);
         }
-        $GLOBALS['__locale_fixtures'] = [];
+        $GLOBALS['__spora_locale_fixtures'] = [];
     }
 }
 
@@ -90,10 +78,11 @@ if (!function_exists('removeLocaleDir')) {
     /**
      * Remove a fixture directory and the files in it.
      *
-     * An entry that is not a file is left alone: the shared temp directory
-     * holds trees that are not ours to dismantle — the plugin fixture keeps
-     * a copy of the plugin in a subdirectory — and unlinking a directory
-     * warns instead of removing it.
+     * A directory that still holds a subdirectory is left behind, and
+     * silently so: the registry only ever holds the flat trees this
+     * process created, so a subdirectory means the tree is not ours to
+     * dismantle. The leftover is the price of not touching what we did
+     * not create, and nothing sweeps it up afterwards.
      */
     function removeLocaleDir(string $dir): void
     {
