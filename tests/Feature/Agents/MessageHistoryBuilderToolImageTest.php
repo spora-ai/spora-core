@@ -442,6 +442,39 @@ describe('the tool-result image channel', function (): void {
             ->toHaveCount(2);
     });
 
+    it('drops an image the endpoint cannot take, even when the archive could', function (): void {
+        // The provider caps the image it receives **encoded**, and base64
+        // spends four bytes on every three — so a file the archive accepts
+        // can still be one the provider answers with a 400. The history is
+        // rebuilt from the stored row on every tick, so that 400 would
+        // come back for the rest of the run.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        // 1 KB of base64 takes 768 bytes of file; 769 does not fit.
+        $driver = new CappedImageDriver(1024);
+        $tooBig = toolImageAsset('12134567-8901-4234-8234-567890123456', str_repeat('x', 769));
+        $fits   = toolImageAsset('13134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $tooBig->id, 'kind' => 'image'],
+            ['media_id' => $fits->id, 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        // The tool result survives the drop.
+        expect($messages)->toHaveCount(3);
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toBe('The image is attached.');
+
+        $blocks = $messages[2]['content'];
+        expect($blocks)->toBeArray();
+        $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));
+        expect($images)->toHaveCount(1);
+        expect(base64_decode((string) $images[0]['base64'], strict: true))->toHaveLength(768);
+    });
+
     it('holds the image turn back until the run of tool results ends', function (): void {
         // A provider accepts a tool result only directly after the
         // assistant turn that asked for it, so a user turn between two

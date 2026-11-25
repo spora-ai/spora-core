@@ -6,6 +6,7 @@ use Spora\Agents\HistoryRowWriter;
 use Spora\Agents\ToolDefinitionBuilder;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\DriverFactory;
+use Spora\Drivers\EncodedImageLimits;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
@@ -42,6 +43,20 @@ function inspectImageDriverFactory(): DriverFactory
     );
 
     return new DriverFactory(new Psr\Log\NullLogger(), $llmService, 60);
+}
+
+/**
+ * The largest image the endpoint behind the test's driver accepts, in raw
+ * bytes.
+ *
+ * The provider caps the base64 the request carries, and base64 spends four
+ * bytes on every three, so the file that fits is three quarters of the
+ * number the provider states. The archive's own 20 MiB cap is the looser of
+ * the two and never the one that refuses.
+ */
+function inspectImageByteCeiling(): int
+{
+    return EncodedImageLimits::maxRawBytesFor(EncodedImageLimits::OPENAI_MAX_ENCODED_BYTES);
 }
 
 /**
@@ -342,7 +357,7 @@ describe('MediaTool::inspect_image', function (): void {
 
             expect($result->success)->toBeFalse();
             expect($result->content)->toContain('over the')
-                ->and($result->content)->toContain((string) MediaImageBlocks::MAX_IMAGE_BYTES);
+                ->and($result->content)->toContain((string) inspectImageByteCeiling());
         } finally {
             $restore();
         }
@@ -388,7 +403,7 @@ describe('MediaTool::inspect_image', function (): void {
 
             expect($result->success)->toBeFalse();
             expect($result->content)->toContain('over the')
-                ->and($result->content)->toContain((string) MediaImageBlocks::MAX_IMAGE_BYTES);
+                ->and($result->content)->toContain((string) inspectImageByteCeiling());
         } finally {
             $restore();
         }

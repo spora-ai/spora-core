@@ -149,6 +149,45 @@ test('attachment with image asset expands to a metadata prefix + image block whe
     expect($image['base64'])->not->toBe('');
 });
 
+test('an image the endpoint cannot take is dropped from the attachment row', function (): void {
+    // The provider caps the image it receives **encoded**, and base64
+    // spends four bytes on every three — so a file the archive accepts is
+    // still one the provider answers with a 400, on every rebuilt
+    // history. The image goes here instead; the operator's own text and
+    // the asset's identity still reach the model.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+
+    // 1 KB of base64 takes 768 bytes of file; 769 does not fit.
+    $payload = str_repeat('x', 769);
+    $asset   = MediaAsset::create([
+        'id'           => '14134567-8901-4234-8234-567890123456',
+        'asset_url'    => '/api/v1/assets/14134567-8901-4234-8234-567890123456.png',
+        'storage_mode' => 'data_url',
+        'media_type'   => 'image',
+        'mime_type'    => 'image/png',
+        'byte_size'    => strlen($payload),
+        'user_id'      => 1,
+        'payload'      => $payload,
+        'filename'     => 'big.png',
+    ]);
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => 'look at this',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'image']],
+    ]);
+
+    $messages = (new MessageHistoryBuilder(new CappedImageDriver(1024)))->build($task->id);
+
+    expect($messages)->toHaveCount(1);
+    expect($messages[0]['content'])->toBeArray();
+    expect(collect($messages[0]['content'])->firstWhere('type', 'image'))->toBeNull();
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+});
+
 test('attachment with image is dropped but metadata prefix still surfaces on non-vision driver', function (): void {
     $agentId = seedAttachmentAgent();
     $task = makeAttachmentTask($agentId);

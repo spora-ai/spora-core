@@ -420,8 +420,11 @@ final class MessageHistoryBuilder
      * The row's image bytes are capped as a whole
      * ({@see MediaImageBlocks::MAX_ROW_BYTES}), the same budget the
      * attachment path spends: the per-asset cap bounds one image, not the
-     * row. An image that does not fit is dropped — the tool result text
-     * still reaches the model.
+     * row. The per-asset cap is the endpoint's own ceiling on the image it
+     * receives ({@see MediaImageBlocks::maxImageBytesFor()}), so an image
+     * the provider would answer with a 400 is dropped here rather than
+     * sent on every rebuilt history. An image that does not fit is
+     * dropped — the tool result text still reaches the model.
      *
      * An image whose **bytes are not on hand** is a different thing: the
      * row is there, the file is not, and the message that claimed the
@@ -440,10 +443,11 @@ final class MessageHistoryBuilder
             return ['messages' => [], 'unreadable' => 0];
         }
 
-        $identities = [];
-        $images     = [];
-        $imageBytes = 0;
-        $unreadable = 0;
+        $identities    = [];
+        $images        = [];
+        $imageBytes    = 0;
+        $unreadable    = 0;
+        $maxImageBytes = $this->maxImageBytes();
 
         foreach ($assets as $asset) {
             $rendered = MediaImageBlocks::renderForRow(
@@ -451,6 +455,7 @@ final class MessageHistoryBuilder
                 $this->basePath(),
                 $imageBytes,
                 $this->maxRowImageBytes,
+                $maxImageBytes,
             );
             if ($rendered === null) {
                 // Dropped for size, or the bytes are gone. Only the second
@@ -611,6 +616,19 @@ final class MessageHistoryBuilder
     }
 
     /**
+     * The largest image the endpoint takes, in raw bytes.
+     *
+     * The provider caps the image it receives **encoded**, and base64
+     * spends a third more than the file does, so the file that fits is
+     * smaller than the archive's own per-asset cap on every provider that
+     * states a limit.
+     */
+    private function maxImageBytes(): int
+    {
+        return MediaImageBlocks::maxImageBytesFor($this->driver);
+    }
+
+    /**
      * Empty `arguments` become the literal `'{}'`: strict providers reject `[]`.
      * Non-array entries are dropped rather than forwarded as `tool_calls`.
      *
@@ -694,8 +712,8 @@ final class AttachmentRowRenderer
      * arithmetic above describes.
      *
      * Image blocks are not counted: they are separately capped per asset
-     * ({@see MediaImageBlocks::MAX_IMAGE_BYTES}) and cost far fewer tokens
-     * per byte.
+     * ({@see MediaImageBlocks::maxImageBytesFor()}) and cost far fewer
+     * tokens per byte.
      */
     private const MAX_INLINE_ROW_TEXT_BYTES = 512 * 1024;
 
@@ -810,7 +828,8 @@ final class AttachmentRowRenderer
      *
      * The row's image bytes are capped as a whole
      * ({@see MediaImageBlocks::MAX_ROW_BYTES}), because the per-asset cap bounds
-     * one image and not the row.
+     * one image and not the row. Each image is capped at what the endpoint
+     * accepts ({@see MediaImageBlocks::maxImageBytesFor()}).
      *
      * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>, missingImages: int, unreadableImages: int}
      */
@@ -829,6 +848,7 @@ final class AttachmentRowRenderer
         $derivatives    = $this->resolveTextDerivatives($row->attachments);
         $remaining      = self::MAX_INLINE_ROW_TEXT_BYTES;
         $imageBytes     = 0;
+        $maxImageBytes  = MediaImageBlocks::maxImageBytesFor($this->driver);
 
         foreach ($this->uniqueAttachments($row->attachments) as $attachment) {
             $asset = $this->resolveAttachmentAsset($attachment['media_id']);
@@ -848,7 +868,7 @@ final class AttachmentRowRenderer
                 continue;
             }
 
-            $image = $this->imageAttachment($asset, $supportsImages, $imageBytes);
+            $image = $this->imageAttachment($asset, $supportsImages, $imageBytes, $maxImageBytes);
 
             if ($image['block'] !== null) {
                 $imageBlocks[] = $image['block'];
@@ -876,9 +896,13 @@ final class AttachmentRowRenderer
      *
      * @return array{block: array<string, mixed>|null, bytes: int, unreadable: bool}
      */
-    private function imageAttachment(MediaAsset $asset, bool $supportsImages, int $imageBytes): array
-    {
-        $image = $this->buildImageBlock($asset, $supportsImages, $imageBytes);
+    private function imageAttachment(
+        MediaAsset $asset,
+        bool $supportsImages,
+        int $imageBytes,
+        int $maxImageBytes,
+    ): array {
+        $image = $this->buildImageBlock($asset, $supportsImages, $imageBytes, $maxImageBytes);
 
         if ($image !== null) {
             return ['block' => $image['block'], 'bytes' => $image['bytes'], 'unreadable' => false];
@@ -1008,13 +1032,23 @@ final class AttachmentRowRenderer
      *
      * @return array{block: array<string, mixed>, bytes: int}|null
      */
-    private function buildImageBlock(MediaAsset $asset, bool $supportsImages, int $imageBytes): ?array
-    {
+    private function buildImageBlock(
+        MediaAsset $asset,
+        bool $supportsImages,
+        int $imageBytes,
+        int $maxImageBytes,
+    ): ?array {
         if (!$supportsImages) {
             return null;
         }
 
-        return MediaImageBlocks::renderForRow($asset, $this->basePath, $imageBytes, $this->maxRowImageBytes);
+        return MediaImageBlocks::renderForRow(
+            $asset,
+            $this->basePath,
+            $imageBytes,
+            $this->maxRowImageBytes,
+            $maxImageBytes,
+        );
     }
 
     /**

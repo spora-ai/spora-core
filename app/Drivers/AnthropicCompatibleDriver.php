@@ -24,7 +24,7 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 #[ToolSetting(key: 'effort_levels', label: 'Effort levels', type: 'text', default: '', description: 'Comma-separated list of the reasoning-effort levels this endpoint accepts, e.g. low, medium, high. Empty = the driver\'s own set. A level the endpoint does not take is refused.')]
 #[ToolSetting(key: 'supports_effort', label: 'Supports reasoning effort', type: 'toggle', default: true, defaultAppliesWhenAbsent: true, description: 'Turn this off for an endpoint with no reasoning-effort parameter at all — the agent then has no effort picker and any effort sent is refused.')]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
-final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface
+final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface, EncodedImageLimitAwareDriverInterface
 {
     private const PROVIDER_KEY = 'anthropic_compatible';
 
@@ -127,6 +127,29 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
     public function getProviderName(): string
     {
         return 'anthropic_compatible';
+    }
+
+    /**
+     * The base64 ceiling of the endpoint this driver talks to.
+     *
+     * The Claude API takes 10 MB of base64 per image and Bedrock only
+     * 5 MB, so the same image is acceptable to one and a 400 at the
+     * other. Bedrock is recognised by its host: its Anthropic-native
+     * route is the one the driver already speaks
+     * (`{base_url}/v1/messages`).
+     */
+    public function maxEncodedImageBytes(): int
+    {
+        return $this->targetsBedrock()
+            ? EncodedImageLimits::BEDROCK_MAX_ENCODED_BYTES
+            : EncodedImageLimits::CLAUDE_API_MAX_ENCODED_BYTES;
+    }
+
+    private function targetsBedrock(): bool
+    {
+        $url = strtolower($this->baseUrl);
+
+        return str_contains($url, 'bedrock-runtime.') || str_contains($url, 'bedrock-mantle.');
     }
 
     public function complete(LLMRequest $request): LLMResponse

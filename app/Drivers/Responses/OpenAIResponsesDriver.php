@@ -8,6 +8,8 @@ use Psr\Log\LoggerInterface;
 use Spora\Drivers\AbstractCompatibleDriver;
 use Spora\Drivers\DriverOptionsAwareInterface;
 use Spora\Drivers\EffortLevel;
+use Spora\Drivers\EncodedImageLimitAwareDriverInterface;
+use Spora\Drivers\EncodedImageLimits;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
@@ -37,7 +39,7 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 #[ToolSetting(key: 'supports_effort', label: 'Supports reasoning effort', type: 'toggle', default: true, defaultAppliesWhenAbsent: true, description: 'Turn this off for an endpoint with no reasoning-effort parameter at all — the agent then has no effort picker and any effort sent is refused.')]
 #[ToolSetting(key: 'store', label: 'Store responses', type: 'toggle', default: false, description: "Store the response on the provider's servers as a retrievable object — OpenAI keeps it for at least 30 days. Spora always replays the encrypted reasoning itself, so the toggle does not decide that: it only decides the fallback for a reasoning item without encrypted content — dropped from the replay when off, sent by id alone when on, which only the provider can resolve if it kept the item. Prompts and responses still go into OpenAI's abuse-monitoring logs (up to 30 days) unless the project the API key belongs to has Zero Data Retention or Modified Abuse Monitoring enabled. Under Zero Data Retention the provider treats the store parameter as false, so there is no stored response for a reasoning id to resolve against — leave the toggle off.")]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
-final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface
+final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface, EncodedImageLimitAwareDriverInterface
 {
     private const PROVIDER_KEY = 'openai_responses';
 
@@ -126,6 +128,17 @@ final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements Dr
     public function getProviderName(): string
     {
         return 'openai_compatible';
+    }
+
+    /**
+     * The base64 ceiling of the endpoint this driver talks to.
+     *
+     * OpenAI takes 20 MB per image, on both the Chat Completions and the
+     * Responses route.
+     */
+    public function maxEncodedImageBytes(): int
+    {
+        return EncodedImageLimits::OPENAI_MAX_ENCODED_BYTES;
     }
 
     /**

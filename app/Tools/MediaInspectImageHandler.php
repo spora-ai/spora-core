@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use Spora\Drivers\DriverFactory;
+use Spora\Drivers\LLMDriverInterface;
 use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\MediaImageBlocks;
@@ -76,7 +77,8 @@ final class MediaInspectImageHandler
 
         // The capability gate runs first: an agent whose LLM cannot read an
         // image needs to hear that, not to hear that the asset is missing.
-        $refusal = $this->capabilityRefusal($driverFactory, $agentId);
+        $driver  = $this->resolveDriver($driverFactory, $agentId);
+        $refusal = $this->capabilityRefusal($driver);
         if ($refusal !== null) {
             return $refusal;
         }
@@ -88,24 +90,25 @@ final class MediaInspectImageHandler
             return $asset;
         }
 
-        return $this->attach($asset, $arguments);
+        return $this->attach($asset, $arguments, $driver);
     }
 
     /**
      * @param  array<string, mixed> $arguments
      */
-    private function attach(MediaAsset $asset, array $arguments): ToolResult
+    private function attach(MediaAsset $asset, array $arguments, ?LLMDriverInterface $driver): ToolResult
     {
-        $mime    = strtolower(trim((string) ($asset->mime_type ?? '')));
-        $refusal = $this->mimeRefusal($asset, $mime)
+        $mime     = strtolower(trim((string) ($asset->mime_type ?? '')));
+        $maxBytes = MediaImageBlocks::maxImageBytesFor($driver);
+        $refusal  = $this->mimeRefusal($asset, $mime)
             ?? $this->storageRefusal($asset)
-            ?? $this->sizeRefusal($asset);
+            ?? $this->sizeRefusal($asset, $maxBytes);
 
         if ($refusal !== null) {
             return $refusal;
         }
 
-        $image = $this->loadImage($asset);
+        $image = $this->loadImage($asset, $maxBytes);
         if ($image instanceof ToolResult) {
             return $image;
         }
@@ -189,11 +192,11 @@ final class MediaInspectImageHandler
      * rejects the obvious case without a read; the measurement after the
      * load is the one that counts.
      */
-    private function sizeRefusal(MediaAsset $asset): ?ToolResult
+    private function sizeRefusal(MediaAsset $asset, int $maxBytes): ?ToolResult
     {
         $declared = (int) ($asset->byte_size ?? 0);
-        if ($declared > MediaImageBlocks::MAX_IMAGE_BYTES) {
-            return ToolResult::fail($this->oversizedMessage($asset, $declared));
+        if ($declared > $maxBytes) {
+            return ToolResult::fail($this->oversizedMessage($asset, $declared, $maxBytes));
         }
 
         return null;
@@ -204,7 +207,7 @@ final class MediaInspectImageHandler
      *
      * @return array{bytes: string, size: int}|ToolResult
      */
-    private function loadImage(MediaAsset $asset): array|ToolResult
+    private function loadImage(MediaAsset $asset, int $maxBytes): array|ToolResult
     {
         $bytes = MediaImageBlocks::loadBytes($asset, $this->basePath());
         if ($bytes === null) {
@@ -218,11 +221,38 @@ final class MediaInspectImageHandler
         // Measured after the load, the order the attachment path uses, so a
         // stale column cannot smuggle an oversized body through.
         $size = strlen($bytes);
-        if ($size > MediaImageBlocks::MAX_IMAGE_BYTES) {
-            return ToolResult::fail($this->oversizedMessage($asset, $size));
+        if ($size > $maxBytes) {
+            return ToolResult::fail($this->oversizedMessage($asset, $size, $maxBytes));
         }
 
         return ['bytes' => $bytes, 'size' => $size];
+    }
+
+    /**
+     * The agent's driver, or null when it cannot be resolved.
+     *
+     * An agent with no driver cannot read an image, so the capability gate
+     * refuses on the same null — but the driver is resolved once here,
+     * because the size ceiling depends on which endpoint it is.
+     */
+    private function resolveDriver(?DriverFactory $driverFactory, int $agentId): ?LLMDriverInterface
+    {
+        if ($driverFactory === null) {
+            return null;
+        }
+
+        $agent = Agent::query()->find($agentId);
+        if ($agent === null) {
+            return null;
+        }
+
+        try {
+            return $driverFactory->makeFromAgent($agent);
+        } catch (Throwable) {
+            // An agent whose LLM cannot even be resolved cannot read an
+            // image either; the capability refusal says so.
+            return null;
+        }
     }
 
     /**
@@ -233,27 +263,13 @@ final class MediaInspectImageHandler
      * that gates image uploads. A stricter gate would make the archive a
      * side door around it.
      */
-    private function capabilityRefusal(?DriverFactory $driverFactory, int $agentId): ?ToolResult
+    private function capabilityRefusal(?LLMDriverInterface $driver): ?ToolResult
     {
-        $model = 'unknown';
-
-        if ($driverFactory !== null) {
-            $agent = Agent::query()->find($agentId);
-            if ($agent !== null) {
-                try {
-                    $driver = $driverFactory->makeFromAgent($agent);
-                    $model  = $driver->getModelName();
-                    if ($driver->supportsImageInput()) {
-                        return null;
-                    }
-                } catch (Throwable) {
-                    // An agent whose LLM cannot even be resolved cannot read
-                    // an image either; the message below is what it needs.
-                }
-            }
+        if ($driver !== null && $driver->supportsImageInput()) {
+            return null;
         }
 
-        return ToolResult::fail(sprintf(self::MSG_NO_IMAGE_INPUT, $model));
+        return ToolResult::fail(sprintf(self::MSG_NO_IMAGE_INPUT, $driver?->getModelName() ?? 'unknown'));
     }
 
     /**
@@ -290,14 +306,15 @@ final class MediaInspectImageHandler
         );
     }
 
-    private function oversizedMessage(MediaAsset $asset, int $size): string
+    private function oversizedMessage(MediaAsset $asset, int $size, int $maxBytes): string
     {
         return sprintf(
-            'Asset %s is %d bytes, over the %d-byte ceiling `inspect_image` reads. Render a smaller derivative '
-            . '(e.g. `create_derivative(asset_id: %s, format: "thumbnail-256")`) and inspect that instead.',
+            'Asset %s is %d bytes, over the %d-byte ceiling `inspect_image` reads for this endpoint — the image is '
+            . 'sent base64-encoded, and the provider caps that form. Render a smaller derivative (e.g. '
+            . '`create_derivative(asset_id: %s, format: "thumbnail-256")`) and inspect that instead.',
             $asset->id,
             $size,
-            MediaImageBlocks::MAX_IMAGE_BYTES,
+            $maxBytes,
             $asset->id,
         );
     }

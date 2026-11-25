@@ -28,7 +28,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 #[ToolSetting(key: 'effort_levels', label: 'Effort levels', type: 'text', default: '', description: 'Comma-separated list of the reasoning-effort levels this endpoint accepts, e.g. low, medium, high. Empty = the driver\'s own set. A level the endpoint does not take is refused.')]
 #[ToolSetting(key: 'supports_effort', label: 'Supports reasoning effort', type: 'toggle', default: true, defaultAppliesWhenAbsent: true, description: 'Turn this off for an endpoint with no reasoning-effort parameter at all — the agent then has no effort picker and any effort sent is refused.')]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
-final class OpenAICompatibleDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface
+final class OpenAICompatibleDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface, EncodedImageLimitAwareDriverInterface
 {
     private const PROVIDER_KEY = 'openai_compatible';
 
@@ -91,6 +91,17 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver implements D
     public function getProviderName(): string
     {
         return static::getName();
+    }
+
+    /**
+     * The base64 ceiling of the endpoint this driver talks to.
+     *
+     * OpenAI takes 20 MB per image, on both the Chat Completions and the
+     * Responses route.
+     */
+    public function maxEncodedImageBytes(): int
+    {
+        return EncodedImageLimits::OPENAI_MAX_ENCODED_BYTES;
     }
 
     /**
