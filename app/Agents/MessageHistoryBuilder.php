@@ -9,6 +9,7 @@ use Spora\Drivers\LLMDriverInterface;
 use Spora\Models\MediaAsset;
 use Spora\Models\MediaDerivative;
 use Spora\Models\TaskHistory;
+use Spora\Services\MediaArchive\ImageRequestBudget;
 use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\MediaArchive\MediaImageBlocks;
 
@@ -84,16 +85,29 @@ final class MessageHistoryBuilder
     private const UNREADABLE_ASSETS_NOTE = 'Note: the %d images referenced by this message can no longer be read, so '
         . 'they are no longer visible in this conversation.';
 
+    /**
+     * The image bytes one request may carry.
+     *
+     * Shared by the two paths that put an image in front of the model, so
+     * the total of a request is the same whichever path an image came
+     * from.
+     */
+    private readonly ImageRequestBudget $imageBudget;
+
     public function __construct(
         private readonly ?LLMDriverInterface $driver = null,
         private readonly int $maxRowImageBytes = MediaImageBlocks::MAX_ROW_BYTES,
-    ) {}
+    ) {
+        $this->imageBudget = MediaImageBlocks::requestBudgetFor($driver);
+    }
 
     /**
      * @return list<array<string, mixed>>  OpenAI-compatible messages, in `sequence` order.
      */
     public function build(int $taskId): array
     {
+        $this->imageBudget->reset();
+
         $rows = TaskHistory::where('task_id', $taskId)
             ->orderBy('sequence')
             ->get();
@@ -423,7 +437,9 @@ final class MessageHistoryBuilder
      * row. The per-asset cap is the endpoint's own ceiling on the image it
      * receives ({@see MediaImageBlocks::maxImageBytesFor()}), so an image
      * the provider would answer with a 400 is dropped here rather than
-     * sent on every rebuilt history. An image that does not fit is
+     * sent on every rebuilt history. Every image in the request shares one
+     * budget ({@see ImageRequestBudget}), so the request cannot add up to
+     * more than the provider accepts. An image that does not fit is
      * dropped — the tool result text still reaches the model.
      *
      * An image whose **bytes are not on hand** is a different thing: the
@@ -456,6 +472,7 @@ final class MessageHistoryBuilder
                 $imageBytes,
                 $this->maxRowImageBytes,
                 $maxImageBytes,
+                $this->imageBudget,
             );
             if ($rendered === null) {
                 // Dropped for size, or the bytes are gone. Only the second
@@ -539,6 +556,7 @@ final class MessageHistoryBuilder
             $this->driver,
             $this->basePath(),
             $this->maxRowImageBytes,
+            $this->imageBudget,
         );
 
         $rendered = $renderer->renderRow($row);
@@ -758,6 +776,7 @@ final class AttachmentRowRenderer
         private readonly ?LLMDriverInterface $driver,
         private readonly string $basePath,
         private readonly int $maxRowImageBytes = MediaImageBlocks::MAX_ROW_BYTES,
+        private readonly ?ImageRequestBudget $imageBudget = null,
     ) {}
 
     /**
@@ -829,7 +848,8 @@ final class AttachmentRowRenderer
      * The row's image bytes are capped as a whole
      * ({@see MediaImageBlocks::MAX_ROW_BYTES}), because the per-asset cap bounds
      * one image and not the row. Each image is capped at what the endpoint
-     * accepts ({@see MediaImageBlocks::maxImageBytesFor()}).
+     * accepts ({@see MediaImageBlocks::maxImageBytesFor()}), and every image
+     * of the request shares one budget ({@see ImageRequestBudget}).
      *
      * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>, missingImages: int, unreadableImages: int}
      */
@@ -1048,6 +1068,7 @@ final class AttachmentRowRenderer
             $imageBytes,
             $this->maxRowImageBytes,
             $maxImageBytes,
+            $this->imageBudget,
         );
     }
 

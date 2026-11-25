@@ -6,8 +6,8 @@ use Spora\Agents\HistoryRowWriter;
 use Spora\Agents\ToolDefinitionBuilder;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\DriverFactory;
-use Spora\Drivers\EncodedImageLimits;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Drivers\RequestLimits;
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\LLMDriverConfiguration;
@@ -56,7 +56,7 @@ function inspectImageDriverFactory(): DriverFactory
  */
 function inspectImageByteCeiling(): int
 {
-    return EncodedImageLimits::maxRawBytesFor(EncodedImageLimits::OPENAI_MAX_ENCODED_BYTES);
+    return RequestLimits::maxRawBytesFor(RequestLimits::OPENAI_MAX_IMAGE_BYTES);
 }
 
 /**

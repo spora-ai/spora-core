@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Spora\Services\MediaArchive;
 
 use Spora\Core\Paths;
-use Spora\Drivers\EncodedImageLimits;
 use Spora\Drivers\LLMDriverInterface;
+use Spora\Drivers\RequestLimits;
 use Spora\Models\MediaAsset;
 use Spora\Services\LocalAssetStore;
 
@@ -58,7 +58,22 @@ final class MediaImageBlocks
     {
         return min(
             self::MAX_IMAGE_BYTES,
-            EncodedImageLimits::maxRawBytesFor(EncodedImageLimits::maxEncodedBytesFor($driver)),
+            RequestLimits::maxRawBytesFor(RequestLimits::maxEncodedImageBytesFor($driver)),
+        );
+    }
+
+    /**
+     * The budget the images of one request share.
+     *
+     * The request carries the system prompt, the tools and the
+     * conversation text as well as the images, and only the images are
+     * sized here — so three quarters of the provider's request ceiling is
+     * the images' share, and the remaining quarter is the text's.
+     */
+    public static function requestBudgetFor(?LLMDriverInterface $driver): ImageRequestBudget
+    {
+        return new ImageRequestBudget(
+            RequestLimits::maxImageBytesForRequest(RequestLimits::maxRequestBytesFor($driver)),
         );
     }
 
@@ -95,9 +110,9 @@ final class MediaImageBlocks
      * The image block an asset contributes to a row, and the bytes it spent.
      *
      * Null when the asset cannot be rendered or does not fit the row's
-     * remaining budget — the per-asset cap and the row cap are both
-     * enforced here, so every path that puts an image in a row asks this
-     * one method and the two cannot drift.
+     * remaining budget — the per-asset cap, the row cap and the request's
+     * share are all enforced here, so every path that puts an image in a
+     * row asks this one method and they cannot drift.
      *
      * The recorded size decides whether the asset fits before it is read,
      * so an image that cannot fit is never loaded off disk; the loaded
@@ -106,6 +121,7 @@ final class MediaImageBlocks
      * @param  int  $rowBytes       The image bytes the row has already spent.
      * @param  int  $maxRowBytes    The ceiling on the image bytes one row forwards.
      * @param  int  $maxImageBytes  The ceiling on the bytes of one image.
+     * @param  ImageRequestBudget|null  $budget  What is left of the request.
      * @return array{block: array<string, mixed>, bytes: int}|null
      */
     public static function renderForRow(
@@ -114,6 +130,7 @@ final class MediaImageBlocks
         int $rowBytes,
         int $maxRowBytes = self::MAX_ROW_BYTES,
         int $maxImageBytes = self::MAX_IMAGE_BYTES,
+        ?ImageRequestBudget $budget = null,
     ): ?array {
         $size = (int) ($asset->byte_size ?? 0);
         $fits = $size > 0
@@ -126,6 +143,13 @@ final class MediaImageBlocks
 
         $rendered = self::renderAsset($asset, $basePath, $maxImageBytes);
         if ($rendered === null || $rowBytes + $rendered['bytes'] > $maxRowBytes) {
+            return null;
+        }
+
+        // The request budget is spent in encoded bytes, because that is what
+        // the provider measures — and the request fails as a whole when it
+        // carries more than it accepts.
+        if ($budget !== null && !$budget->accepts(strlen((string) $rendered['block']['base64']))) {
             return null;
         }
 

@@ -475,6 +475,77 @@ describe('the tool-result image channel', function (): void {
         expect(base64_decode((string) $images[0]['base64'], strict: true))->toHaveLength(768);
     });
 
+    it('drops an image the request has no room for', function (): void {
+        // The per-image ceiling and the row budget both leave room for
+        // two images here, but the request they travel in does not: a
+        // provider rejects the whole request when it carries more than it
+        // accepts, and the same rows fail the same way on every rebuild.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        // 1 KB of base64 takes 768 bytes of file; the request has room for
+        // 1125 bytes of base64 — one image, not two.
+        $driver = new CappedImageDriver(1024, 1500);
+        $first  = toolImageAsset('15134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+        $second = toolImageAsset('16134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $first->id, 'kind' => 'image'],
+            ['media_id' => $second->id, 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        // The tool result survives the drop.
+        expect($messages)->toHaveCount(3);
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toBe('The image is attached.');
+
+        $blocks = $messages[2]['content'];
+        expect($blocks)->toBeArray();
+        $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));
+        expect($images)->toHaveCount(1);
+    });
+
+    it('the operator\'s attachment and a tool image share the request budget', function (): void {
+        // One budget for the request, whichever path an image came from:
+        // the tool image takes it and the operator's attachment is the one
+        // that does not fit.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        $driver = new CappedImageDriver(1024, 1500);
+        $tool   = toolImageAsset('17134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+        $own    = toolImageAsset('18134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+
+        writeToolImageTranscript($task, [['media_id' => $tool->id, 'kind' => 'image']]);
+
+        TaskHistory::create([
+            'task_id'      => $task->id,
+            'sequence'     => 2,
+            'role'         => 'attachment',
+            'content'      => 'and this one',
+            'attachments'  => [['media_id' => $own->id, 'kind' => 'image']],
+        ]);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        $imageBlocks = [];
+        foreach ($messages as $message) {
+            if (!is_array($message['content'] ?? null)) {
+                continue;
+            }
+            foreach ($message['content'] as $block) {
+                if (($block['type'] ?? null) === 'image') {
+                    $imageBlocks[] = $block;
+                }
+            }
+        }
+
+        expect($imageBlocks)->toHaveCount(1);
+        expect(base64_decode((string) $imageBlocks[0]['base64'], strict: true))->toHaveLength(768);
+    });
+
     it('holds the image turn back until the run of tool results ends', function (): void {
         // A provider accepts a tool result only directly after the
         // assistant turn that asked for it, so a user turn between two
