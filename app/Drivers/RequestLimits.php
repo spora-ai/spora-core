@@ -84,6 +84,26 @@ final class RequestLimits
     public const SAFE_MAX_REQUEST_BYTES = self::BEDROCK_MAX_REQUEST_BYTES;
 
     /**
+     * The images a Claude request may carry.
+     *
+     * The API takes 100 images per request for a 200k-token model and 600
+     * for the others, but a request with more than 20 images puts a
+     * 3,000 px limit on every image in it — so the request is kept to 20
+     * images, where that rule cannot apply.
+     */
+    public const CLAUDE_API_MAX_IMAGES = 20;
+
+    /**
+     * The images an OpenAI request may carry.
+     */
+    public const OPENAI_MAX_IMAGES = 1_500;
+
+    /**
+     * The image count assumed for a driver that states none.
+     */
+    public const SAFE_MAX_IMAGES = self::CLAUDE_API_MAX_IMAGES;
+
+    /**
      * The image ceiling the endpoint behind a driver accepts.
      */
     public static function maxEncodedImageBytesFor(?LLMDriverInterface $driver): int
@@ -105,6 +125,19 @@ final class RequestLimits
         }
 
         return self::SAFE_MAX_REQUEST_BYTES;
+    }
+
+    /**
+     * The number of images the endpoint behind a driver accepts in one
+     * request.
+     */
+    public static function maxImagesFor(?LLMDriverInterface $driver): int
+    {
+        if ($driver instanceof RequestLimitAwareDriverInterface) {
+            return $driver->maxImagesPerRequest();
+        }
+
+        return self::SAFE_MAX_IMAGES;
     }
 
     /**

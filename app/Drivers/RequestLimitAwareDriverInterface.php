@@ -31,4 +31,9 @@ interface RequestLimitAwareDriverInterface
      * images of one request have to fit inside.
      */
     public function maxRequestBytes(): int;
+
+    /**
+     * The number of images this endpoint accepts in one request.
+     */
+    public function maxImagesPerRequest(): int;
 }

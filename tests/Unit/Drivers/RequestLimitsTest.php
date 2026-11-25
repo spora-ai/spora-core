@@ -42,6 +42,7 @@ it('states the Claude API ceilings for the Anthropic driver', function (): void 
 
     expect($driver->maxEncodedImageBytes())->toBe(RequestLimits::CLAUDE_API_MAX_IMAGE_BYTES);
     expect($driver->maxRequestBytes())->toBe(RequestLimits::CLAUDE_API_MAX_REQUEST_BYTES);
+    expect($driver->maxImagesPerRequest())->toBe(RequestLimits::CLAUDE_API_MAX_IMAGES);
 });
 
 it('states the Bedrock ceilings when the Anthropic driver talks to Bedrock', function (): void {
@@ -68,6 +69,7 @@ it('states the OpenAI ceilings for the Chat Completions driver', function (): vo
 
     expect($driver->maxEncodedImageBytes())->toBe(RequestLimits::OPENAI_MAX_IMAGE_BYTES);
     expect($driver->maxRequestBytes())->toBe(RequestLimits::OPENAI_MAX_REQUEST_BYTES);
+    expect($driver->maxImagesPerRequest())->toBe(RequestLimits::OPENAI_MAX_IMAGES);
 });
 
 it('states the Responses image ceiling with the data-URL prefix counted against it', function (): void {
@@ -115,6 +117,8 @@ it('assumes the strictest known ceilings for a driver that states none', functio
     expect(RequestLimits::maxEncodedImageBytesFor(null))->toBe(RequestLimits::SAFE_MAX_IMAGE_BYTES);
     expect(RequestLimits::maxRequestBytesFor($driver))->toBe(RequestLimits::SAFE_MAX_REQUEST_BYTES);
     expect(RequestLimits::maxRequestBytesFor(null))->toBe(RequestLimits::SAFE_MAX_REQUEST_BYTES);
+    expect(RequestLimits::maxImagesFor($driver))->toBe(RequestLimits::SAFE_MAX_IMAGES);
+    expect(RequestLimits::maxImagesFor(null))->toBe(RequestLimits::SAFE_MAX_IMAGES);
 });
 
 it('turns an encoded ceiling into the file that fits', function (): void {

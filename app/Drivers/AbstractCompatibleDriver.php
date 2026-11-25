@@ -35,6 +35,7 @@ abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriver
         protected readonly ?bool               $supportsEffort = null,
         protected readonly int                 $maxEncodedImageBytes = RequestLimits::SAFE_MAX_IMAGE_BYTES,
         protected readonly int                 $maxRequestBytes = RequestLimits::SAFE_MAX_REQUEST_BYTES,
+        protected readonly int                 $maxImagesPerRequest = RequestLimits::SAFE_MAX_IMAGES,
     ) {
         $this->configuredEffortLevels = $effortLevels;
     }
@@ -57,6 +58,14 @@ abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriver
     public function maxRequestBytes(): int
     {
         return $this->maxRequestBytes;
+    }
+
+    /**
+     * The number of images the endpoint takes in one request.
+     */
+    public function maxImagesPerRequest(): int
+    {
+        return $this->maxImagesPerRequest;
     }
 
     public function getModelName(): string

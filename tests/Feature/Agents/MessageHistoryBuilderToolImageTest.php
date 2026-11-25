@@ -7,6 +7,7 @@ namespace Tests\Feature\Agents;
 use Spora\Agents\MessageHistoryBuilder;
 use Spora\Core\Paths;
 use Spora\Drivers\AnthropicCompatibleDriver;
+use Spora\Drivers\RequestLimits;
 use Spora\Models\MediaAsset;
 use Spora\Models\TaskHistory;
 use Symfony\Component\HttpClient\MockHttpClient;
@@ -208,6 +209,55 @@ function writeTrailingAssistantRow(\Spora\Models\Task $task, int $sequence): voi
         'role' => 'assistant',
         'content' => 'Looking at the image now.',
     ]);
+}
+
+/**
+ * The image blocks a built request carries, over every message.
+ *
+ * @param  list<array<string, mixed>>  $messages
+ * @return list<array<string, mixed>>
+ */
+function imageBlocksIn(array $messages): array
+{
+    $blocks = [];
+
+    foreach ($messages as $message) {
+        if (!is_array($message['content'] ?? null)) {
+            continue;
+        }
+        foreach ($message['content'] as $block) {
+            if (($block['type'] ?? null) === 'image') {
+                $blocks[] = $block;
+            }
+        }
+    }
+
+    return $blocks;
+}
+
+/**
+ * The text blocks of a built request that carry a given phrase.
+ *
+ * @param  list<array<string, mixed>>  $messages
+ * @return list<string>
+ */
+function textBlocksContaining(array $messages, string $phrase): array
+{
+    $texts = [];
+
+    foreach ($messages as $message) {
+        if (!is_array($message['content'] ?? null)) {
+            continue;
+        }
+        foreach ($message['content'] as $block) {
+            $text = (string) ($block['text'] ?? '');
+            if (($block['type'] ?? null) === 'text' && str_contains($text, $phrase)) {
+                $texts[] = $text;
+            }
+        }
+    }
+
+    return $texts;
 }
 
 describe('the tool-result image channel', function (): void {
@@ -496,15 +546,80 @@ describe('the tool-result image channel', function (): void {
 
         $messages = (new MessageHistoryBuilder($driver))->build($task->id);
 
-        // The tool result survives the drop.
+        // The tool result survives the drop, and it says the image was
+        // left out — the tool result claims the image is attached.
         expect($messages)->toHaveCount(3);
         expect($messages[1]['role'])->toBe('tool');
-        expect($messages[1]['content'])->toBe('The image is attached.');
+        expect($messages[1]['content'])->toStartWith('The image is attached.');
+        expect($messages[1]['content'])->toContain('did not fit in the request');
 
         $blocks = $messages[2]['content'];
         expect($blocks)->toBeArray();
         $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));
         expect($images)->toHaveCount(1);
+    });
+
+    it('drops an image the request has no count room for', function (): void {
+        // A request with more images than the endpoint takes is refused
+        // whole, and for Claude the count is also what keeps the request
+        // out of the many-image rule.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        $driver = new CappedImageDriver(1024, 1_000_000, 1);
+        $first  = toolImageAsset('19134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+        $second = toolImageAsset('20134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $first->id, 'kind' => 'image'],
+            ['media_id' => $second->id, 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        expect($messages[1]['content'])->toContain('did not fit in the request');
+
+        $blocks = $messages[2]['content'];
+        expect($blocks)->toBeArray();
+        $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));
+        expect($images)->toHaveCount(1);
+    });
+
+    it('never carries more images than the Claude endpoint takes', function (): void {
+        // A Claude request with more than 20 image blocks is rejected when
+        // any of them is over 3,000 px on a side. The request is kept to
+        // 20 images, where that rule cannot apply — whatever size the
+        // images themselves are.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        $driver = new AnthropicCompatibleDriver(
+            apiKey: 'test',
+            model: 'claude-sonnet-5-5',
+            baseUrl: 'https://api.anthropic.com',
+            httpClient: new MockHttpClient(),
+            logger: new \Psr\Log\NullLogger(),
+            timeout: 60,
+        );
+
+        $attachments = [];
+        for ($index = 0; $index < 25; $index++) {
+            $asset = toolImageAsset(
+                sprintf('3%02d45678-1234-4234-8234-567890123456', $index),
+                toolImagePng(),
+            );
+            $attachments[] = ['media_id' => $asset->id, 'kind' => 'image'];
+        }
+
+        writeToolImageTranscript($task, $attachments);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        expect(RequestLimits::CLAUDE_API_MAX_IMAGES)->toBe(20)
+            ->and(imageBlocksIn($messages))->toHaveCount(20);
+
+        // The images that did not fit are announced, not silently dropped.
+        expect($messages[1]['content'])->toContain('did not fit in the request');
     });
 
     it('the operator\'s attachment and a tool image share the request budget', function (): void {
@@ -544,6 +659,37 @@ describe('the tool-result image channel', function (): void {
 
         expect($imageBlocks)->toHaveCount(1);
         expect(base64_decode((string) $imageBlocks[0]['base64'], strict: true))->toHaveLength(768);
+    });
+
+    it('tells the model when the operator\'s own attachment did not fit the request', function (): void {
+        // The operator attached the image and the model is told it is not
+        // in the request — the same notice the tool path gives, because the
+        // same thing happened: the request had no room.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        $driver = new CappedImageDriver(1024, 1500);
+        $tool   = toolImageAsset('24134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+        $own    = toolImageAsset('25134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+
+        writeToolImageTranscript($task, [['media_id' => $tool->id, 'kind' => 'image']]);
+
+        TaskHistory::create([
+            'task_id'      => $task->id,
+            'sequence'     => 2,
+            'role'         => 'attachment',
+            'content'      => 'and this one',
+            'attachments'  => [['media_id' => $own->id, 'kind' => 'image']],
+        ]);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        // The tool image fitted, so the tool result has nothing to announce.
+        expect($messages[1]['content'])->toBe('The image is attached.');
+
+        // The operator's attachment did not fit, and the note says so.
+        expect(textBlocksContaining($messages, 'did not fit in the request'))->toHaveCount(1);
+        expect(imageBlocksIn($messages))->toHaveCount(1);
     });
 
     it('holds the image turn back until the run of tool results ends', function (): void {

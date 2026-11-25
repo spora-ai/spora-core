@@ -74,6 +74,7 @@ final class MediaImageBlocks
     {
         return new ImageRequestBudget(
             RequestLimits::maxImageBytesForRequest(RequestLimits::maxRequestBytesFor($driver)),
+            RequestLimits::maxImagesFor($driver),
         );
     }
 
@@ -115,9 +116,11 @@ final class MediaImageBlocks
      * The image block an asset contributes to a row, and the bytes it spent.
      *
      * Null when the asset cannot be rendered or does not fit the row's
-     * remaining budget — the per-asset cap, the row cap and the request's
-     * share are all enforced here, so every path that puts an image in a
-     * row asks this one method and they cannot drift.
+     * remaining budget — the per-asset cap and the row cap are enforced
+     * here, so every path that puts an image in a row asks this one
+     * method and they cannot drift. The request's own share of the
+     * provider's ceiling is spent by the caller, which is the one that
+     * knows what the request already carries.
      *
      * The recorded size decides whether the asset fits before it is read,
      * so an image that cannot fit is never loaded off disk; the loaded
@@ -126,7 +129,6 @@ final class MediaImageBlocks
      * @param  int  $rowBytes       The image bytes the row has already spent.
      * @param  int  $maxRowBytes    The ceiling on the image bytes one row forwards.
      * @param  int  $maxImageBytes  The ceiling on the bytes of one image.
-     * @param  ImageRequestBudget|null  $budget  What is left of the request.
      * @return array{block: array<string, mixed>, bytes: int, encodedBytes: int}|null
      */
     public static function renderForRow(
@@ -135,7 +137,6 @@ final class MediaImageBlocks
         int $rowBytes,
         int $maxRowBytes = self::MAX_ROW_BYTES,
         int $maxImageBytes = self::MAX_IMAGE_BYTES,
-        ?ImageRequestBudget $budget = null,
     ): ?array {
         $size = (int) ($asset->byte_size ?? 0);
         $fits = $size > 0
@@ -148,14 +149,7 @@ final class MediaImageBlocks
 
         $rendered = self::renderAsset($asset, $basePath, $maxImageBytes);
 
-        // The row budget is spent in raw bytes — the worker's own copy of
-        // the image — and the request budget in encoded bytes, because
-        // that is what the provider measures, and a request over the limit
-        // is refused as a whole.
-        if ($rendered === null
-            || $rowBytes + $rendered['bytes'] > $maxRowBytes
-            || ($budget !== null && !$budget->accepts($rendered['encodedBytes']))
-        ) {
+        if ($rendered === null || $rowBytes + $rendered['bytes'] > $maxRowBytes) {
             return null;
         }
 

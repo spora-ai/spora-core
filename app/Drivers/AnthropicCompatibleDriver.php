@@ -63,6 +63,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
             maxRequestBytes: $bedrock
                 ? RequestLimits::BEDROCK_MAX_REQUEST_BYTES
                 : RequestLimits::CLAUDE_API_MAX_REQUEST_BYTES,
+            maxImagesPerRequest: RequestLimits::CLAUDE_API_MAX_IMAGES,
         );
         $this->requestBuilder = new AnthropicRequestBuilder(
             apiKey: $apiKey,

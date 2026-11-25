@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services\MediaArchive;
 
 /**
- * The image bytes one request may carry.
+ * The images one request may carry.
  *
  * The per-image ceiling bounds one image and the row budget bounds one
  * row, but a request is built from every row of the history: a run with
@@ -20,21 +20,34 @@ final class ImageRequestBudget
 {
     private int $spent = 0;
 
-    public function __construct(private readonly int $maxBytes) {}
+    private int $count = 0;
+
+    public function __construct(
+        private readonly int $maxBytes,
+        private readonly int $maxImages,
+    ) {}
 
     /**
      * Whether the encoded image fits what is left of the request.
      *
      * The encoded size is the one the provider measures, so it is the one
-     * the budget counts.
+     * the budget counts. The count is the other half of the ceiling: a
+     * request with more images than the endpoint takes is refused whole,
+     * and for Claude the count is also what keeps the request out of the
+     * many-image rule.
      */
     public function accepts(int $encodedBytes): bool
     {
+        if ($this->count >= $this->maxImages) {
+            return false;
+        }
+
         if ($this->spent + $encodedBytes > $this->maxBytes) {
             return false;
         }
 
         $this->spent += $encodedBytes;
+        $this->count++;
 
         return true;
     }
@@ -45,5 +58,6 @@ final class ImageRequestBudget
     public function reset(): void
     {
         $this->spent = 0;
+        $this->count = 0;
     }
 }

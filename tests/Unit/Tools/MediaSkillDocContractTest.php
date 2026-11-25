@@ -352,4 +352,16 @@ describe('the media-library skill matches the media tool', function (): void {
         expect($body)->toContain('removed from the Media Archive')
             ->and($body)->toContain('can no longer be read');
     });
+
+    it('names the note an image the request had no room for produces', function (): void {
+        // A third way an image ends: the request had no room for it, so it
+        // was never sent. The builder sends a note for it, and the skill
+        // has to name it — a model told only about the removal and the
+        // unreadable bytes would read the third note as one of the two,
+        // and would say the image was deleted when it was not.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('did not fit in the request')
+            ->and($body)->toContain('not sent');
+    });
 });

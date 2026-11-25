@@ -64,7 +64,13 @@ final class MessageHistoryBuilder
      * asset GC, or it cannot be read. The first says the operator
      * deleted it; the second does not, and claiming so would be a lie.
      *
-     * A third case produces no note at all: an image that was **dropped
+     * A third case is not a removal, but the model still has to hear
+     * about it: an image the **request had no room for** — the
+     * provider's ceiling on the encoded bytes or on the number of
+     * images was already spent — was never sent, and the message that
+     * named it is still in the request.
+     *
+     * A fourth case produces no note at all: an image that was **dropped
      * for size** — over the per-asset cap or out of the row's budget —
      * is documented behaviour, and the tool result's text still reaches
      * the model.
@@ -84,6 +90,12 @@ final class MessageHistoryBuilder
 
     private const UNREADABLE_ASSETS_NOTE = 'Note: the %d images referenced by this message can no longer be read, so '
         . 'they are no longer visible in this conversation.';
+
+    private const DROPPED_ASSET_NOTE = 'Note: the image referenced by this message did not fit in the request and was '
+        . 'not sent, so it is not visible in this conversation.';
+
+    private const DROPPED_ASSETS_NOTE = 'Note: the %d images referenced by this message did not fit in the request and '
+        . 'were not sent, so they are not visible in this conversation.';
 
     /**
      * The image bytes one request may carry.
@@ -396,6 +408,7 @@ final class MessageHistoryBuilder
                         $row->content,
                         $resolved['removed'],
                         $turn['unreadable'],
+                        $turn['dropped'],
                     ),
                 ],
                 ...$turn['messages'],
@@ -440,7 +453,9 @@ final class MessageHistoryBuilder
      * sent on every rebuilt history. Every image in the request shares one
      * budget ({@see ImageRequestBudget}), so the request cannot add up to
      * more than the provider accepts. An image that does not fit is
-     * dropped — the tool result text still reaches the model.
+     * dropped — the tool result text still reaches the model, and the note
+     * says the image was left out, because the tool result says it was
+     * attached.
      *
      * An image whose **bytes are not on hand** is a different thing: the
      * row is there, the file is not, and the message that claimed the
@@ -448,7 +463,7 @@ final class MessageHistoryBuilder
      * the caller can write that note.
      *
      * @param  list<MediaAsset>  $assets  The declared images that still resolve.
-     * @return array{messages: list<array<string, mixed>>, unreadable: int}
+     * @return array{messages: list<array<string, mixed>>, unreadable: int, dropped: int}
      */
     private function toolImageTurn(array $assets): array
     {
@@ -456,13 +471,14 @@ final class MessageHistoryBuilder
         // dropped and nothing is said about them. The capability is only
         // asked for when there is an image to send.
         if ($assets === [] || ($this->driver !== null && !$this->driver->supportsImageInput())) {
-            return ['messages' => [], 'unreadable' => 0];
+            return ['messages' => [], 'unreadable' => 0, 'dropped' => 0];
         }
 
         $identities    = [];
         $images        = [];
         $imageBytes    = 0;
         $unreadable    = 0;
+        $dropped       = 0;
         $maxImageBytes = $this->maxImageBytes();
 
         foreach ($assets as $asset) {
@@ -472,7 +488,6 @@ final class MessageHistoryBuilder
                 $imageBytes,
                 $this->maxRowImageBytes,
                 $maxImageBytes,
-                $this->imageBudget,
             );
             if ($rendered === null) {
                 // Dropped for size, or the bytes are gone. Only the second
@@ -482,13 +497,22 @@ final class MessageHistoryBuilder
                 }
                 continue;
             }
+
+            // The request's share of the provider's ceiling. The image is
+            // rendered and then left out, so the model has to hear about it:
+            // the tool result says the image is attached.
+            if (!$this->imageBudget->accepts($rendered['encodedBytes'])) {
+                $dropped++;
+                continue;
+            }
+
             $identities[] = AttachmentRowRenderer::attachmentMetadataBlock($asset);
             $images[]     = $rendered['block'];
             $imageBytes  += $rendered['bytes'];
         }
 
         if ($images === []) {
-            return ['messages' => [], 'unreadable' => $unreadable];
+            return ['messages' => [], 'unreadable' => $unreadable, 'dropped' => $dropped];
         }
 
         return [
@@ -499,6 +523,7 @@ final class MessageHistoryBuilder
                 ],
             ],
             'unreadable' => $unreadable,
+            'dropped'    => $dropped,
         ];
     }
 
@@ -568,6 +593,7 @@ final class MessageHistoryBuilder
                 $content,
                 $rendered['missingImages'],
                 $rendered['unreadableImages'],
+                $rendered['droppedImages'],
             ),
         ];
     }
@@ -580,10 +606,12 @@ final class MessageHistoryBuilder
      * and an extra turn would reorder a tool batch. The operator's own text
      * is left exactly as it was — the note is additional.
      *
-     * The two reasons get their own sentence, because they are different
+     * The reasons get their own sentence, because they are different
      * facts: an asset that was removed from the archive is not an asset
-     * whose bytes cannot be read. A row can carry both, so the notes are
-     * appended in that case rather than merged into one claim.
+     * whose bytes cannot be read, and an image that did not fit the
+     * request was never sent. A row can carry more than one of them, so
+     * the notes are appended in that case rather than merged into one
+     * claim.
      *
      * @param  list<array<string, mixed>>|string|null  $content
      * @return list<array<string, mixed>>|string|null
@@ -592,6 +620,7 @@ final class MessageHistoryBuilder
         array|string|null $content,
         int $removed,
         int $unreadable,
+        int $dropped = 0,
     ): array|string|null {
         $notes = [];
 
@@ -605,6 +634,12 @@ final class MessageHistoryBuilder
             $notes[] = $unreadable === 1
                 ? self::UNREADABLE_ASSET_NOTE
                 : sprintf(self::UNREADABLE_ASSETS_NOTE, $unreadable);
+        }
+
+        if ($dropped > 0) {
+            $notes[] = $dropped === 1
+                ? self::DROPPED_ASSET_NOTE
+                : sprintf(self::DROPPED_ASSETS_NOTE, $dropped);
         }
 
         if ($notes === []) {
@@ -795,8 +830,10 @@ final class AttachmentRowRenderer
      * The two counts are different facts: `missingImages` counts images
      * whose asset is gone from the archive, `unreadableImages` counts
      * images whose asset is still there but whose bytes are not on hand.
+     * `droppedImages` counts images the request had no room for: the
+     * operator attached them, and they are not in the request.
      *
-     * @return array{content: list<array<string, mixed>>|null, missingImages: int, unreadableImages: int}
+     * @return array{content: list<array<string, mixed>>|null, missingImages: int, unreadableImages: int, droppedImages: int}
      */
     public function renderRow(TaskHistory $row): array
     {
@@ -811,6 +848,7 @@ final class AttachmentRowRenderer
             'content'           => $content,
             'missingImages'     => $blocks['missingImages'],
             'unreadableImages'  => $blocks['unreadableImages'],
+            'droppedImages'     => $blocks['droppedImages'],
         ];
     }
 
@@ -851,12 +889,12 @@ final class AttachmentRowRenderer
      * accepts ({@see MediaImageBlocks::maxImageBytesFor()}), and every image
      * of the request shares one budget ({@see ImageRequestBudget}).
      *
-     * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>, missingImages: int, unreadableImages: int}
+     * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>, missingImages: int, unreadableImages: int, droppedImages: int}
      */
     private function collectAttachmentBlocks(TaskHistory $row): array
     {
         if (!is_array($row->attachments)) {
-            return ['text' => [], 'image' => [], 'metadata' => [], 'missingImages' => 0, 'unreadableImages' => 0];
+            return ['text' => [], 'image' => [], 'metadata' => [], 'missingImages' => 0, 'unreadableImages' => 0, 'droppedImages' => 0];
         }
 
         $supportsImages = $this->driver !== null && $this->driver->supportsImageInput();
@@ -865,6 +903,7 @@ final class AttachmentRowRenderer
         $metadataBlocks = [];
         $missingImages  = 0;
         $unreadable     = 0;
+        $dropped        = 0;
         $derivatives    = $this->resolveTextDerivatives($row->attachments);
         $remaining      = self::MAX_INLINE_ROW_TEXT_BYTES;
         $imageBytes     = 0;
@@ -895,6 +934,8 @@ final class AttachmentRowRenderer
                 $imageBytes    += $image['bytes'];
             } elseif ($image['unreadable']) {
                 $unreadable++;
+            } elseif ($image['dropped']) {
+                $dropped++;
             }
         }
 
@@ -904,17 +945,18 @@ final class AttachmentRowRenderer
             'metadata'         => $metadataBlocks,
             'missingImages'    => $missingImages,
             'unreadableImages' => $unreadable,
+            'droppedImages'    => $dropped,
         ];
     }
 
     /**
      * An image attachment's blocks, and whether the model can still read it.
      *
-     * Three reasons leave the image out, one of them a removal the model has
+     * Four reasons leave the image out, one of them a removal the model has
      * to hear about: the driver cannot take images, the image did not fit,
-     * or the bytes are not on hand.
+     * the request had no room for it, or the bytes are not on hand.
      *
-     * @return array{block: array<string, mixed>|null, bytes: int, unreadable: bool}
+     * @return array{block: array<string, mixed>|null, bytes: int, unreadable: bool, dropped: bool}
      */
     private function imageAttachment(
         MediaAsset $asset,
@@ -925,13 +967,21 @@ final class AttachmentRowRenderer
         $image = $this->buildImageBlock($asset, $supportsImages, $imageBytes, $maxImageBytes);
 
         if ($image !== null) {
-            return ['block' => $image['block'], 'bytes' => $image['bytes'], 'unreadable' => false];
+            // The request's share of the provider's ceiling. The metadata
+            // block still names the asset, so the model has to hear that
+            // the image itself is not in the request.
+            if ($this->imageBudget !== null && !$this->imageBudget->accepts($image['encodedBytes'])) {
+                return ['block' => null, 'bytes' => 0, 'unreadable' => false, 'dropped' => true];
+            }
+
+            return ['block' => $image['block'], 'bytes' => $image['bytes'], 'unreadable' => false, 'dropped' => false];
         }
 
         return [
             'block'      => null,
             'bytes'      => 0,
             'unreadable' => $supportsImages && MediaImageBlocks::bytesWentMissing($asset, $this->basePath),
+            'dropped'    => false,
         ];
     }
 
@@ -1050,7 +1100,7 @@ final class AttachmentRowRenderer
      * no room in the row's image budget, or a payload over the per-asset
      * cap — so the caller can drop it without branching.
      *
-     * @return array{block: array<string, mixed>, bytes: int}|null
+     * @return array{block: array<string, mixed>, bytes: int, encodedBytes: int}|null
      */
     private function buildImageBlock(
         MediaAsset $asset,
@@ -1068,7 +1118,6 @@ final class AttachmentRowRenderer
             $imageBytes,
             $this->maxRowImageBytes,
             $maxImageBytes,
-            $this->imageBudget,
         );
     }
 
@@ -1224,7 +1273,7 @@ final class AttachmentRowRenderer
      * attachment layout is wider than a single text body); image
      * blocks follow.
      *
-     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>, missingImages: int, unreadableImages: int} $blocks
+     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>, missingImages: int, unreadableImages: int, droppedImages: int} $blocks
      * @return list<array<string, mixed>>
      */
     private function buildAttachmentContent(array $blocks, string $prompt): array

@@ -71,6 +71,7 @@ final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements Dr
             // the ceiling.
             maxEncodedImageBytes: RequestLimits::OPENAI_RESPONSES_MAX_IMAGE_BYTES - RequestLimits::DATA_URL_PREFIX_BYTES,
             maxRequestBytes: RequestLimits::OPENAI_MAX_REQUEST_BYTES,
+            maxImagesPerRequest: RequestLimits::OPENAI_MAX_IMAGES,
         );
         $this->requestBuilder = new ResponsesRequestBuilder(
             $apiKey,

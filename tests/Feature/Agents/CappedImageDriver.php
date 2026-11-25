@@ -24,6 +24,7 @@ final class CappedImageDriver implements LLMDriverInterface, RequestLimitAwareDr
     public function __construct(
         private readonly int $maxEncodedImageBytes,
         private readonly int $maxRequestBytes = 1_000_000_000,
+        private readonly int $maxImagesPerRequest = 1_000,
     ) {}
 
     public function complete(LLMRequest $request): LLMResponse
@@ -54,5 +55,10 @@ final class CappedImageDriver implements LLMDriverInterface, RequestLimitAwareDr
     public function maxRequestBytes(): int
     {
         return $this->maxRequestBytes;
+    }
+
+    public function maxImagesPerRequest(): int
+    {
+        return $this->maxImagesPerRequest;
     }
 }
