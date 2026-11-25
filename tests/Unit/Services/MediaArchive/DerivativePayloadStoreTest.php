@@ -60,9 +60,8 @@ test('remove() leaves a data_url row alone, the row delete drops the column', fu
     $asset = payloadAsset('data_url');
     $asset->payload = 'still here';
 
-    payloadStore()->remove($asset);
-
-    expect($asset->payload)->toBe('still here');
+    expect(payloadStore()->remove($asset))->toBeTrue()
+        ->and($asset->payload)->toBe('still here');
 });
 
 test('read() and rewrite() round-trip bytes through a local file', function (): void {
@@ -111,9 +110,42 @@ test('rewrite() is a no-op for a local asset with no resolvable path', function 
 });
 
 test('remove() tolerates a missing file instead of warning', function (): void {
-    payloadStore()->remove(payloadAsset('local', 'never-written'));
+    // The bytes are already gone, which is what the caller asked for.
+    expect(payloadStore()->remove(payloadAsset('local', 'never-written')))->toBeTrue();
+});
 
-    expect(true)->toBeTrue();
+test('remove() reports the refusal when the filesystem keeps the file', function (): void {
+    // `unlink()` returns false when the filesystem refuses, and the row
+    // that pointed at the file is the only thing that accounts for it — so
+    // the caller has to hear about it.
+    $token = 'payloadstore-' . bin2hex(random_bytes(4));
+    $asset = payloadAsset('local', $token);
+    $path  = payloadStore()->pathFor($asset);
+    expect($path)->not->toBeNull();
+
+    $dir = dirname($path);
+    if (!is_dir($dir)) {
+        mkdir($dir, 0o777, true);
+    }
+    file_put_contents($path, 'bytes the filesystem refuses to lose');
+
+    chmod($dir, 0555);
+    clearstatcache(true, $dir);
+
+    try {
+        // A process that holds CAP_DAC_OVERRIDE writes regardless of the
+        // permissions, so this environment cannot express the failure.
+        if (is_writable($dir)) {
+            $this->markTestSkipped(
+                'This process can write to a read-only directory, so the refused unlink cannot be exercised here.',
+            );
+        }
+
+        expect(payloadStore()->remove($asset))->toBeFalse()
+            ->and(is_file($path))->toBeTrue();
+    } finally {
+        chmod($dir, 0755);
+    }
 });
 
 /**

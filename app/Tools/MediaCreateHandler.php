@@ -194,6 +194,10 @@ final readonly class MediaCreateHandler
         // `delete()` takes the bytes with the row: a `local`-mode row's file
         // is unlinked, not just its row dropped, so a rejected call leaves
         // nothing behind on disk.
+        //
+        // A discard that cannot free the bytes throws, and the row stays:
+        // reporting a clean rejection while the row is still there would
+        // send the model looking for a file the operator never lost.
         $this->archive->delete($asset->id);
 
         return ToolResult::fail(sprintf(
@@ -269,6 +273,10 @@ final readonly class MediaCreateHandler
         // The row that was just written is the duplicate, not the one
         // that was already there: it is the one the operator did not
         // ask for, and it is the one the retry recipe can find again.
+        //
+        // A discard that cannot free the bytes throws, and the row stays:
+        // the refusal below would otherwise tell the model the duplicate
+        // is gone while it is still in the library.
         $this->archive->delete($asset->id);
 
         return ToolResult::fail(sprintf(

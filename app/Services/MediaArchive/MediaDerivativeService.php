@@ -133,10 +133,14 @@ final class MediaDerivativeService
      * Remove every derivative of `$parent` — the derivative row, its
      * join row, and its on-disk payload — before the parent itself goes
      * away.
+     *
+     * @return bool False when a derivative's bytes survived the unlink.
+     *              The row of such a derivative stays, so the bytes keep
+     *              a row pointing at them and a retry can free them.
      */
-    public function deleteWithDerivatives(MediaAsset $parent): void
+    public function deleteWithDerivatives(MediaAsset $parent): bool
     {
-        self::deleteRowsWithPayloads($parent, $this->payloads);
+        return self::deleteRowsWithPayloads($parent, $this->payloads);
     }
 
     /**
@@ -157,8 +161,10 @@ final class MediaDerivativeService
      * over `BASE_PATH` and not a wired service. Retention is an
      * opportunistic sweep that runs off raw row ids, with no
      * `MediaDerivativeService` in scope and no reason to construct one.
+     *
+     * @return bool False when a derivative's bytes survived the unlink.
      */
-    public static function deleteRowsWithPayloads(MediaAsset $parent, DerivativePayloadStore $payloads): void
+    public static function deleteRowsWithPayloads(MediaAsset $parent, DerivativePayloadStore $payloads): bool
     {
         $derivativeIds = MediaDerivative::query()
             ->where('parent_id', $parent->id)
@@ -166,20 +172,35 @@ final class MediaDerivativeService
             ->all();
 
         if ($derivativeIds === []) {
-            return;
+            return true;
         }
 
+        $survivors = [];
         foreach (MediaAsset::query()->whereIn('id', $derivativeIds)->get() as $derivative) {
-            $payloads->remove($derivative);
+            // The bytes first: a row deleted while its file survives
+            // leaves the bytes on disk with nothing pointing at them.
+            if (!$payloads->remove($derivative)) {
+                $survivors[] = $derivative->id;
+                continue;
+            }
             $derivative->delete();
         }
 
         // Explicit, not left to the FK cascade: a cascade that silently does
         // not fire (SQLite without `PRAGMA foreign_keys=ON`, a partially
         // applied migration) is exactly what leaves the orphan row behind.
-        MediaDerivative::query()
-            ->where('parent_id', $parent->id)
-            ->delete();
+        //
+        // A survivor's join row stays with it: the row is what tells
+        // {@see MediaArchiveService::list()} that this asset is a
+        // derivative, and a derivative whose join row is gone resurfaces
+        // as a stray top-level library asset.
+        $joins = MediaDerivative::query()->where('parent_id', $parent->id);
+        if ($survivors !== []) {
+            $joins->whereNotIn('derivative_id', $survivors);
+        }
+        $joins->delete();
+
+        return $survivors === [];
     }
 
     /**
@@ -259,10 +280,18 @@ final class MediaDerivativeService
      * that row deliberately: the parent may already have a thumbnail or a
      * render from another producer, and a failed text extraction is no
      * reason to take those with it.
+     *
+     * A file the filesystem refuses to unlink keeps its row — and its join
+     * row — so the bytes keep an owner instead of becoming an orphan on
+     * disk. The join row matters as much: without it the derivative
+     * resurfaces as a stray top-level library asset.
      */
     private function discardEmptyDerivative(MediaAsset $derivative): void
     {
-        $this->payloads->remove($derivative);
+        if (!$this->payloads->remove($derivative)) {
+            return;
+        }
+
         MediaDerivative::query()
             ->where('derivative_id', $derivative->id)
             ->delete();

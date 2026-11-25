@@ -79,21 +79,35 @@ final readonly class DerivativePayloadStore
      * Drop the payload. A `data_url` derivative's bytes live in the BLOB
      * column the row delete removes for us, and an `external` row has no
      * Spora-side file at all.
+     *
+     * @return bool True when the bytes are gone — the file was unlinked,
+     *              or there was no file to unlink. False when the file
+     *              is still there: the filesystem refused the unlink.
+     *              The caller has to keep the row, or the bytes are on
+     *              disk with nothing pointing at them.
      */
-    public function remove(MediaAsset $derivative): void
+    public function remove(MediaAsset $derivative): bool
     {
         if ($derivative->storage_mode !== 'local') {
-            return;
+            return true;
         }
         $path = $this->pathFor($derivative);
         if ($path === null) {
-            return;
+            return true;
         }
-        $this->withSuppressedWarnings(static function () use ($path): void {
-            if (is_file($path)) {
-                unlink($path);
-            }
-        });
+        if (!is_file($path)) {
+            // Already gone: the bytes are not on disk, which is what
+            // the caller asked for.
+            return true;
+        }
+
+        // `unlink()` reports the refusal by returning false, and by
+        // warning. The warning is suppressed (a missing directory should
+        // not warn on the way to a caller that accepts a no-op), so the
+        // return value is what says the bytes survived.
+        $unlinked = $this->withSuppressedWarnings(static fn(): bool => unlink($path));
+
+        return $unlinked;
     }
 
     /**
@@ -124,6 +138,10 @@ final readonly class DerivativePayloadStore
      * Run a filesystem operation with E_WARNING suppressed. PHP 8.4+ no
      * longer fully honours `@` for file writes, and a missing directory
      * should not warn on the way to a caller that already accepts a no-op.
+     *
+     * @template T
+     * @param  callable(): T $operation
+     * @return T
      */
     private function withSuppressedWarnings(callable $operation): mixed
     {

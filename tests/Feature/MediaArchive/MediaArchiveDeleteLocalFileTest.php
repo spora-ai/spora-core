@@ -13,6 +13,7 @@ use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\DerivativePayloadStore;
+use Spora\Services\MediaArchive\MediaArchiveException;
 use Tests\Support\MediaArchiveTestSupport;
 
 /**
@@ -166,6 +167,48 @@ describe('deleting an asset takes its bytes with it', function (): void {
         expect(MediaAsset::query()->find($asset->id))->toBeNull();
     });
 
+    it('keeps the row when the filesystem refuses to remove the file', function (): void {
+        // The bytes are on disk and the row is the only thing pointing at
+        // them. A row deleted anyway leaves the bytes on disk with nothing
+        // to account for them and no way to retry: the second delete finds
+        // no row and returns.
+        //
+        // The assets directory is made read-only, so `unlink()` fails —
+        // removing an entry needs write permission on the directory that
+        // holds it, not on the file.
+        $store   = deleteLocalStore();
+        $service = MediaArchiveTestSupport::buildService($store);
+        $asset   = deleteLocalAsset($store);
+
+        $path = (new DerivativePayloadStore(BASE_PATH))->pathFor($asset);
+        expect(is_file($path))->toBeTrue();
+
+        $assetsDir = dirname((string) $path);
+        chmod($assetsDir, 0555);
+        clearstatcache(true, $assetsDir);
+
+        try {
+            // A process that holds CAP_DAC_OVERRIDE reads and writes
+            // regardless of the permissions, so this environment cannot
+            // express the failure the test is about.
+            if (is_writable($assetsDir)) {
+                $this->markTestSkipped(
+                    'This process can write to a read-only directory, so the refused unlink cannot be exercised here.',
+                );
+            }
+
+            expect(fn() => $service->delete($asset->id))
+                ->toThrow(MediaArchiveException::class);
+
+            // The row survives, so a retry can free the bytes once the
+            // filesystem allows it.
+            expect(MediaAsset::query()->find($asset->id))->not->toBeNull();
+            expect(is_file($path))->toBeTrue();
+        } finally {
+            chmod($assetsDir, 0755);
+        }
+    });
+
     it('removes the row of a data_url asset and leaves the assets directory alone', function (): void {
         // A `data_url` asset's bytes live in the column the row delete
         // drops, so there is no file to unlink — and no other asset's file
@@ -218,5 +261,61 @@ describe('deleting an asset takes its bytes with it', function (): void {
         expect(is_file($parentPath))->toBeFalse();
         expect(is_file($derivativePath))->toBeFalse();
         expect(glob(($GLOBALS['deleteLocalDir'] ?? '') . '/assets/*'))->toBe([]);
+    });
+
+    it('keeps the whole asset when a derivative\'s bytes survive the unlink', function (): void {
+        // The derivative's bytes are on disk and its row is the only thing
+        // pointing at them. A parent deleted anyway takes the derivative's
+        // row with it — and the bytes are then on disk with nothing left to
+        // account for them.
+        //
+        // The parent's own bytes go last, so a parent whose derivative
+        // survived keeps its own file too: a row that points at a file
+        // that is gone is a broken asset, not a deleted one.
+        $store   = deleteLocalStore();
+        $service = MediaArchiveTestSupport::buildService($store);
+        $parent  = deleteLocalAsset($store);
+
+        $derivative = deleteLocalAsset($store, 'holiday.thumbnail-256');
+        MediaDerivative::create([
+            'id'                 => testGenerateUuidV4(),
+            'parent_id'          => $parent->id,
+            'derivative_id'      => $derivative->id,
+            'format'             => 'thumbnail-256',
+            'producer_plugin'    => 'tests',
+            'producer_operation' => 'thumbnail',
+            'created_at'         => date('Y-m-d H:i:s'),
+            'updated_at'         => date('Y-m-d H:i:s'),
+        ]);
+
+        $payloads = new DerivativePayloadStore(BASE_PATH);
+        $parentPath     = (string) $payloads->pathFor($parent);
+        $derivativePath = (string) $payloads->pathFor($derivative);
+
+        $assetsDir = dirname($derivativePath);
+        chmod($assetsDir, 0555);
+        clearstatcache(true, $assetsDir);
+
+        try {
+            if (is_writable($assetsDir)) {
+                $this->markTestSkipped(
+                    'This process can write to a read-only directory, so the refused unlink cannot be exercised here.',
+                );
+            }
+
+            expect(fn() => $service->delete($parent->id))
+                ->toThrow(MediaArchiveException::class);
+
+            // The parent row and its bytes stay, and the derivative's row
+            // and join row stay with its bytes — a derivative whose join
+            // row is gone resurfaces as a stray top-level library asset.
+            expect(MediaAsset::query()->find($parent->id))->not->toBeNull();
+            expect(MediaAsset::query()->find($derivative->id))->not->toBeNull();
+            expect(MediaDerivative::query()->where('parent_id', $parent->id)->count())->toBe(1);
+            expect(is_file($parentPath))->toBeTrue();
+            expect(is_file($derivativePath))->toBeTrue();
+        } finally {
+            chmod($assetsDir, 0755);
+        }
     });
 });
