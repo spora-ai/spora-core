@@ -364,4 +364,18 @@ describe('the media-library skill matches the media tool', function (): void {
         expect($body)->toContain('did not fit in the request')
             ->and($body)->toContain('not sent');
     });
+
+    it('does not promise that a smaller derivative always fits', function (): void {
+        // Two ceilings can leave an image out: the bytes it takes and the
+        // number of images the endpoint takes. The note does not say which
+        // one applied, and only the first is answered by a smaller
+        // derivative — the derivative needs a slot of its own. A skill that
+        // promises the derivative always fits teaches the model to retry
+        // a derivative that is dropped for the same reason.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('A smaller derivative is not always the way out')
+            ->and($body)->toContain('does not say which limit applied')
+            ->and($body)->toContain('may or may not help');
+    });
 });
