@@ -241,13 +241,10 @@ final class MediaInspectImageHandler
             return null;
         }
 
-        $agent = Agent::query()->find($agentId);
-        if ($agent === null) {
-            return null;
-        }
-
         try {
-            return $driverFactory->makeFromAgent($agent);
+            $agent = Agent::query()->find($agentId);
+
+            return $agent === null ? null : $driverFactory->makeFromAgent($agent);
         } catch (Throwable) {
             // An agent whose LLM cannot even be resolved cannot read an
             // image either; the capability refusal says so.
