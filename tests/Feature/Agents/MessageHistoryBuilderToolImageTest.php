@@ -87,6 +87,29 @@ function toolImageAsset(string $uuid, string $payload): MediaAsset
 }
 
 /**
+ * An archive asset whose bytes are not on hand: the row is there, the
+ * file is not.
+ *
+ * Nobody deleted the asset — the asset GC swept the file, or the storage
+ * failed — and the model has to be told a different thing than it is
+ * told when the asset was removed.
+ */
+function toolImageAssetWithoutBytes(string $uuid): MediaAsset
+{
+    return MediaAsset::create([
+        'id'           => $uuid,
+        'asset_url'    => "/api/v1/assets/{$uuid}.png",
+        'storage_mode' => 'local',
+        'media_type'   => 'image',
+        'mime_type'    => 'image/png',
+        'byte_size'    => 1024,
+        'user_id'      => 1,
+        'asset_token'  => bin2hex(random_bytes(16)),
+        'filename'     => 'pixel.png',
+    ]);
+}
+
+/**
  * The transcript a tool call leaves behind: the assistant turn that asked
  * for it, and the tool result.
  *
@@ -572,5 +595,47 @@ describe('an image the operator removed from the Media Archive', function (): vo
             '2 images referenced by this message were removed from the Media Archive',
         );
         expect(substr_count((string) $messages[1]['content'], 'removed from the Media Archive'))->toBe(1);
+    });
+});
+
+describe('an image whose bytes are no longer on hand', function (): void {
+    it('tells the model the image cannot be read, without claiming it was removed', function (): void {
+        // The row is still there — nobody deleted the asset. The file is
+        // not: the asset GC swept it, or the storage failed. The claim
+        // "you can see it now" is just as unsupported, but the note must
+        // not say the asset was removed, because it was not.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $asset = toolImageAssetWithoutBytes('44444444-4444-4444-8444-444444444444');
+
+        writeToolImageTranscript($task, [['media_id' => $asset->id, 'kind' => 'image']]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect($messages)->toHaveCount(2);
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toContain('can no longer be read');
+        expect($messages[1]['content'])->not->toContain('removed from the Media Archive');
+    });
+
+    it('says nothing when the image was dropped for size', function (): void {
+        // A budget drop is documented behaviour, not a removal: the image
+        // is there, the row simply had no room for it. Saying it was
+        // removed would be a lie.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $first  = toolImageAsset('56789012-3456-4789-0123-456789012345', $png);
+        $second = toolImageAsset('67890123-4567-4890-1234-567890123456', $png);
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $first->id, 'kind' => 'image'],
+            ['media_id' => $second->id, 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder(null, maxRowImageBytes: strlen($png) + 1))->build($task->id);
+
+        expect($messages[1]['content'])->toBe('The image is attached.');
     });
 });

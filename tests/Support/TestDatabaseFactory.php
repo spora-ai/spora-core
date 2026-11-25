@@ -164,6 +164,10 @@ final class TestDatabaseFactory
      * touched. Closing the connection ends the transaction and releases
      * every lock it held, so the drop that follows returns instead of
      * blocking on the test's own connection.
+     *
+     * The rollback that ends the transaction **discards whatever the test
+     * wrote since the suite's global `beforeEach` began it**, so call
+     * this before the test's own setup, not after it.
      */
     private static function releaseConnections(): void
     {

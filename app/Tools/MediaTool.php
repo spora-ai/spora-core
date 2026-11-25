@@ -423,13 +423,14 @@ final class MediaTool extends AbstractTool
                 $agentId,
                 $this->driverFactory,
                 $this->resolveScope($agentId, $userId),
-                fn(string $notVisible): MediaAsset|ToolResult => $this->resolveAssetOrFail(
+                fn(string $notVisible, string $scope): MediaAsset|ToolResult => $this->resolveAssetOrFail(
                     'inspect_image',
                     $arguments,
                     $agentId,
                     $userId,
                     $context,
                     $notVisible,
+                    $scope,
                 ),
             ),
             default             => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, create_media, list_folders, create_folder, rename_folder, delete_folder, file_asset, search_assets, or inspect_image.'),
@@ -547,13 +548,14 @@ final class MediaTool extends AbstractTool
         ?int $userId,
         ?PrincipalContext $context,
         ?string $notFoundMessage = null,
+        ?string $scope = null,
     ): MediaAsset|ToolResult {
         $assetId = trim((string) ($arguments['asset_id'] ?? ''));
         if ($assetId === '') {
             return ToolResult::fail("asset_id is required for {$operation}.");
         }
         $asset = $this->archive->find($assetId);
-        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId, $context)) {
+        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId, $context, $scope)) {
             return ToolResult::fail($notFoundMessage ?? self::ERR_ASSET_NOT_FOUND);
         }
         return $asset;
@@ -908,12 +910,17 @@ final class MediaTool extends AbstractTool
         int $agentId,
         ?int $userId,
         ?PrincipalContext $context = null,
+        ?string $scope = null,
     ): bool {
         if ($this->auth->isAdmin()) {
             return true;
         }
 
-        $scope = $this->resolveScope($agentId, $userId);
+        // The scope the caller already resolved, when it has one. The
+        // settings cascade is a read, and a caller that resolved the
+        // scope to name a refusal must not have the check decide on a
+        // different one.
+        $scope ??= $this->resolveScope($agentId, $userId);
         // Legacy alias: existing agents may still have 'user' persisted.
         $effective = $scope === 'user' ? 'principal' : $scope;
 

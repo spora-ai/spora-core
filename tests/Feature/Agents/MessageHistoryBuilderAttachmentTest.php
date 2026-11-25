@@ -652,6 +652,59 @@ test('an attachment row whose image still exists carries no note', function (): 
     expect($blocks[2]['type'])->toBe('image');
 });
 
+test('an attachment row whose image cannot be read says so, without claiming it was removed', function (): void {
+    // The asset is still in the archive — its file is not on hand. The
+    // operator uploaded it into the chat and the bytes went missing, so
+    // the note must not tell the model the operator deleted the asset.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+
+    $asset = MediaAsset::create([
+        'id'           => 'abababab-abab-4bab-8bab-abababababab',
+        'asset_url'    => '/api/v1/assets/abababab-abab-4bab-8bab-abababababab.png',
+        'storage_mode' => 'local',
+        'media_type'   => 'image',
+        'mime_type'    => 'image/png',
+        'byte_size'    => 1024,
+        'user_id'      => 1,
+        'asset_token'  => bin2hex(random_bytes(16)),
+        'filename'     => 'pixel.png',
+    ]);
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => 'What is in this photo?',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'image']],
+    ]);
+
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: new MockHttpClient(),
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+    expect($messages)->toHaveCount(1);
+    $blocks = $messages[0]['content'];
+    expect($blocks)->toBeArray();
+    // The operator's own words survive untouched; the note is additional.
+    expect($blocks[1]['text'])->toBe('What is in this photo?');
+
+    $texts = array_values(array_filter(
+        $blocks,
+        static fn(array $block): bool => $block['type'] === 'text' && str_contains((string) $block['text'], 'Note:'),
+    ));
+    expect($texts)->toHaveCount(1);
+    expect($texts[0]['text'])->toContain('can no longer be read');
+    expect($texts[0]['text'])->not->toContain('removed from the Media Archive');
+});
+
 /**
  * The raw-bytes fallback and the pointer fallback.
  *

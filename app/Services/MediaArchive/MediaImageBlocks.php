@@ -99,6 +99,27 @@ final class MediaImageBlocks
     }
 
     /**
+     * Whether the asset's bytes went missing.
+     *
+     * The row is there and the bytes are not: the file was swept by the
+     * asset GC, or the storage failed. That is a removal the caller has
+     * to hear about — {@see self::renderForRow()} answers null for it and
+     * for the image that simply did not fit, and only this says which.
+     *
+     * An `external` asset is not one of those: its bytes live on someone
+     * else's server and were never on hand here, so nothing has gone
+     * missing.
+     */
+    public static function bytesWentMissing(MediaAsset $asset, string $basePath): bool
+    {
+        if ($asset->storage_mode === 'external') {
+            return false;
+        }
+
+        return self::loadBytes($asset, $basePath) === null;
+    }
+
+    /**
      * The asset's bytes, or null when they are not on hand.
      *
      * Only the two storage modes that carry the bytes are readable: a

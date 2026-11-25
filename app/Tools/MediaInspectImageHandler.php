@@ -60,10 +60,10 @@ final class MediaInspectImageHandler
 
     /**
      * @param  array<string, mixed>                          $arguments
-     * @param  callable(string): (MediaAsset|ToolResult)     $resolveAsset
+     * @param  callable(string, string): (MediaAsset|ToolResult)     $resolveAsset
      *        The caller's scope check. It receives the message to answer
-     *        with when the asset is not visible, and returns the asset or
-     *        the refusal.
+     *        with when the asset is not visible, and the scope that
+     *        message names, and returns the asset or the refusal.
      */
     public function inspect(
         array $arguments,
@@ -81,7 +81,9 @@ final class MediaInspectImageHandler
             return $refusal;
         }
 
-        $asset = $resolveAsset($this->notVisibleMessage($scope, $assetId));
+        // The scope goes with the message: the refusal names it, and the
+        // check that answers it has to decide on the same one.
+        $asset = $resolveAsset($this->notVisibleMessage($scope, $assetId), $scope);
         if ($asset instanceof ToolResult) {
             return $asset;
         }
