@@ -9,7 +9,7 @@ use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 #[ToolSetting(key: 'supports_image_input', label: 'Allow images', type: 'toggle', default: false, description: 'When enabled, image attachments are forwarded to the LLM as image content blocks. Disable for non-vision endpoints to avoid API errors.')]
-abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface, EffortAwareDriverInterface
+abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface, EffortAwareDriverInterface, RequestLimitAwareDriverInterface
 {
     /**
      * The levels the configuration names. Empty means the driver's own set
@@ -33,8 +33,30 @@ abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriver
         protected readonly ?bool               $supportsImageInput = null,
         array                                   $effortLevels = [],
         protected readonly ?bool               $supportsEffort = null,
+        protected readonly int                 $maxEncodedImageBytes = RequestLimits::SAFE_MAX_IMAGE_BYTES,
+        protected readonly int                 $maxRequestBytes = RequestLimits::SAFE_MAX_REQUEST_BYTES,
     ) {
         $this->configuredEffortLevels = $effortLevels;
+    }
+
+    /**
+     * The base64 ceiling of the endpoint this driver talks to.
+     *
+     * The limits are constructor arguments rather than methods of their
+     * own: the concrete drivers sit at Sonar's per-class method budget,
+     * and the numbers they state are the only thing that differs.
+     */
+    public function maxEncodedImageBytes(): int
+    {
+        return $this->maxEncodedImageBytes;
+    }
+
+    /**
+     * The request ceiling of the endpoint this driver talks to.
+     */
+    public function maxRequestBytes(): int
+    {
+        return $this->maxRequestBytes;
     }
 
     public function getModelName(): string

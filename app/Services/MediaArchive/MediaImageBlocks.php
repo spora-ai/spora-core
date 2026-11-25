@@ -81,10 +81,12 @@ final class MediaImageBlocks
      * The image block and the raw bytes it spent.
      *
      * The byte count travels with the block so a caller that budgets a
-     * row's images does not have to decode the base64 again.
+     * row's images does not have to decode the base64 again; the encoded
+     * count travels with it because that is the size the provider
+     * measures.
      *
      * @param  int  $maxImageBytes  The ceiling on the bytes of one image.
-     * @return array{block: array<string, mixed>, bytes: int}|null
+     * @return array{block: array<string, mixed>, bytes: int, encodedBytes: int}|null
      */
     public static function renderAsset(
         MediaAsset $asset,
@@ -96,13 +98,16 @@ final class MediaImageBlocks
             return null;
         }
 
+        $base64 = base64_encode($bytes);
+
         return [
             'block' => [
                 'type'      => 'image',
                 'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
-                'base64'    => base64_encode($bytes),
+                'base64'    => $base64,
             ],
-            'bytes' => strlen($bytes),
+            'bytes'        => strlen($bytes),
+            'encodedBytes' => strlen($base64),
         ];
     }
 
@@ -122,7 +127,7 @@ final class MediaImageBlocks
      * @param  int  $maxRowBytes    The ceiling on the image bytes one row forwards.
      * @param  int  $maxImageBytes  The ceiling on the bytes of one image.
      * @param  ImageRequestBudget|null  $budget  What is left of the request.
-     * @return array{block: array<string, mixed>, bytes: int}|null
+     * @return array{block: array<string, mixed>, bytes: int, encodedBytes: int}|null
      */
     public static function renderForRow(
         MediaAsset $asset,
@@ -142,14 +147,15 @@ final class MediaImageBlocks
         }
 
         $rendered = self::renderAsset($asset, $basePath, $maxImageBytes);
-        if ($rendered === null || $rowBytes + $rendered['bytes'] > $maxRowBytes) {
-            return null;
-        }
 
-        // The request budget is spent in encoded bytes, because that is what
-        // the provider measures — and the request fails as a whole when it
-        // carries more than it accepts.
-        if ($budget !== null && !$budget->accepts(strlen((string) $rendered['block']['base64']))) {
+        // The row budget is spent in raw bytes — the worker's own copy of
+        // the image — and the request budget in encoded bytes, because
+        // that is what the provider measures, and a request over the limit
+        // is refused as a whole.
+        if ($rendered === null
+            || $rowBytes + $rendered['bytes'] > $maxRowBytes
+            || ($budget !== null && !$budget->accepts($rendered['encodedBytes']))
+        ) {
             return null;
         }
 

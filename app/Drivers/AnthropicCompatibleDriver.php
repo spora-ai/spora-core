@@ -24,7 +24,7 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 #[ToolSetting(key: 'effort_levels', label: 'Effort levels', type: 'text', default: '', description: 'Comma-separated list of the reasoning-effort levels this endpoint accepts, e.g. low, medium, high. Empty = the driver\'s own set. A level the endpoint does not take is refused.')]
 #[ToolSetting(key: 'supports_effort', label: 'Supports reasoning effort', type: 'toggle', default: true, defaultAppliesWhenAbsent: true, description: 'Turn this off for an endpoint with no reasoning-effort parameter at all — the agent then has no effort picker and any effort sent is refused.')]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
-final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface, RequestLimitAwareDriverInterface
+final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface
 {
     private const PROVIDER_KEY = 'anthropic_compatible';
 
@@ -41,6 +41,12 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
         ?int                $timeout = null,
         ?AnthropicDriverOptions $options = null,
     ) {
+        // Bedrock's Anthropic-native route halves the ceiling on one
+        // image and shrinks the one on the whole request; the host says
+        // which of the two this endpoint is.
+        $bedrock = str_contains(strtolower($baseUrl), 'bedrock-runtime.')
+            || str_contains(strtolower($baseUrl), 'bedrock-mantle.');
+
         parent::__construct(
             $apiKey,
             $model,
@@ -51,6 +57,12 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
             $options?->supportsImageInput,
             $options !== null ? $options->configuredEffortLevels : [],
             $options?->supportsEffort,
+            maxEncodedImageBytes: $bedrock
+                ? RequestLimits::BEDROCK_MAX_IMAGE_BYTES
+                : RequestLimits::CLAUDE_API_MAX_IMAGE_BYTES,
+            maxRequestBytes: $bedrock
+                ? RequestLimits::BEDROCK_MAX_REQUEST_BYTES
+                : RequestLimits::CLAUDE_API_MAX_REQUEST_BYTES,
         );
         $this->requestBuilder = new AnthropicRequestBuilder(
             apiKey: $apiKey,
@@ -127,44 +139,6 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
     public function getProviderName(): string
     {
         return 'anthropic_compatible';
-    }
-
-    /**
-     * The base64 ceiling of the endpoint this driver talks to.
-     *
-     * The Claude API takes 10 MB of base64 per image and Bedrock only
-     * 5 MB, so the same image is acceptable to one and a 400 at the
-     * other. Bedrock is recognised by its host: its Anthropic-native
-     * route is the one the driver already speaks
-     * (`{base_url}/v1/messages`).
-     */
-    public function maxEncodedImageBytes(): int
-    {
-        return $this->targetsBedrock()
-            ? RequestLimits::BEDROCK_MAX_IMAGE_BYTES
-            : RequestLimits::CLAUDE_API_MAX_IMAGE_BYTES;
-    }
-
-    /**
-     * The request ceiling of the endpoint this driver talks to.
-     *
-     * The Claude API takes a 128 MB request; Bedrock limits a request
-     * payload to 20 MB, and it says so plainly — "when sending large
-     * documents or many images, you may reach this limit before the token
-     * limit".
-     */
-    public function maxRequestBytes(): int
-    {
-        return $this->targetsBedrock()
-            ? RequestLimits::BEDROCK_MAX_REQUEST_BYTES
-            : RequestLimits::CLAUDE_API_MAX_REQUEST_BYTES;
-    }
-
-    private function targetsBedrock(): bool
-    {
-        $url = strtolower($this->baseUrl);
-
-        return str_contains($url, 'bedrock-runtime.') || str_contains($url, 'bedrock-mantle.');
     }
 
     public function complete(LLMRequest $request): LLMResponse
