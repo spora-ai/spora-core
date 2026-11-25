@@ -106,17 +106,28 @@ final class MediaImageBlocks
      * to hear about — {@see self::renderForRow()} answers null for it and
      * for the image that simply did not fit, and only this says which.
      *
+     * The check probes for the bytes rather than reading them: the
+     * render that just failed has read the file already, and a second
+     * read of an image that was dropped for size costs a full pass over
+     * its bytes to learn nothing.
+     *
      * An `external` asset is not one of those: its bytes live on someone
      * else's server and were never on hand here, so nothing has gone
      * missing.
      */
     public static function bytesWentMissing(MediaAsset $asset, string $basePath): bool
     {
-        if ($asset->storage_mode === 'external') {
-            return false;
+        if ($asset->storage_mode === 'data_url') {
+            return !is_string($asset->payload);
         }
 
-        return self::loadBytes($asset, $basePath) === null;
+        if ($asset->storage_mode === 'local') {
+            $path = self::payloadPath($asset, $basePath);
+
+            return $path === null || !is_file($path) || !is_readable($path);
+        }
+
+        return false;
     }
 
     /**
@@ -132,26 +143,42 @@ final class MediaImageBlocks
         if ($asset->storage_mode === 'data_url') {
             return is_string($asset->payload) ? $asset->payload : null;
         }
-        if ($asset->storage_mode === 'local' && $asset->asset_token !== null && $asset->asset_token !== '') {
-            $paths = new Paths($basePath);
-            // The writer's rule, not a MIME-only guess: the archive stores a
-            // local asset under the suffix its own `filename` produced (an
-            // upload named `photo.jpeg` lands as `<token>.jpeg`, because the
-            // filename wins over the MIME map's `jpg`), so the reader has to
-            // ask the same question the writer did.
-            $path = $paths->storage('assets') . '/' . $asset->asset_token
-                . '.' . LocalAssetStore::storedExtension($asset->mime_type, $asset->filename);
-            if (!is_file($path)) {
-                return null;
-            }
 
-            // A failed read is not an empty file: `file_get_contents()`
-            // returns false, and casting that to a string would hand the
-            // caller a zero-byte image that reads as a successful load.
-            $contents = file_get_contents($path);
-
-            return $contents === false ? null : $contents;
+        $path = self::payloadPath($asset, $basePath);
+        if ($path === null || !is_file($path)) {
+            return null;
         }
-        return null;
+
+        // A failed read is not an empty file: `file_get_contents()`
+        // returns false, and casting that to a string would hand the
+        // caller a zero-byte image that reads as a successful load.
+        $contents = file_get_contents($path);
+
+        return $contents === false ? null : $contents;
+    }
+
+    /**
+     * Where a `local`-mode asset's bytes live, or null when it has none.
+     *
+     * The writer's rule, not a MIME-only guess: the archive stores a
+     * local asset under the suffix its own `filename` produced (an
+     * upload named `photo.jpeg` lands as `<token>.jpeg`, because the
+     * filename wins over the MIME map's `jpg`), so the reader has to ask
+     * the same question the writer did.
+     */
+    private static function payloadPath(MediaAsset $asset, string $basePath): ?string
+    {
+        if ($asset->storage_mode !== 'local') {
+            return null;
+        }
+
+        if ($asset->asset_token === null || $asset->asset_token === '') {
+            return null;
+        }
+
+        $paths = new Paths($basePath);
+
+        return $paths->storage('assets') . '/' . $asset->asset_token
+            . '.' . LocalAssetStore::storedExtension($asset->mime_type, $asset->filename);
     }
 }

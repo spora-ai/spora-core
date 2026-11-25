@@ -244,4 +244,75 @@ describe('MediaImageBlocks', function () {
             removeImageBlockStorageDir($dir);
         }
     });
+
+    it('reports bytes that went missing for a local asset with no file', function (): void {
+        // The row is there, the file is not: the asset GC swept it, or the
+        // storage failed. The caller has to hear about that, because the
+        // alternative is a tool result claiming an image the model cannot
+        // see.
+        $dir = makeImageBlockStorageDir();
+
+        $asset = makeLocalImageAsset(
+            '12121212-1212-4212-8212-121212121212',
+            'ffffffffffffffffffffffffffffffff',
+            1024,
+        );
+
+        expect(MediaImageBlocks::bytesWentMissing($asset, BASE_PATH))->toBeTrue();
+
+        removeImageBlockStorageDir($dir);
+    });
+
+    it('does not report bytes as missing for a local asset whose file is there', function (): void {
+        // The same row, with the file written: an image dropped for size
+        // is not a removal, and saying it was would be a lie.
+        $dir  = makeImageBlockStorageDir();
+        $paths = new Paths(BASE_PATH);
+        $token = 'ababababababababababababababababab';
+
+        file_put_contents($paths->storage('assets') . '/' . $token . '.png', mediaImageBlockPng());
+
+        $asset = makeLocalImageAsset(
+            '13131313-1313-4313-8313-131313131313',
+            $token,
+            1024,
+        );
+
+        expect(MediaImageBlocks::bytesWentMissing($asset, BASE_PATH))->toBeFalse();
+
+        removeImageBlockStorageDir($dir);
+    });
+
+    it('does not report bytes as missing for an external asset', function (): void {
+        // Its bytes live on someone else's server and were never on hand
+        // here, so nothing has gone missing.
+        $asset = MediaAsset::create([
+            'id'           => '14141414-1414-4414-8414-141414141414',
+            'asset_url'    => 'https://cdn.example.com/14141414-1414-4414-8414-141414141414.png',
+            'storage_mode' => 'external',
+            'media_type'   => 'image',
+            'mime_type'    => 'image/png',
+            'byte_size'    => 1024,
+            'user_id'      => 1,
+            'filename'     => 'pixel.png',
+        ]);
+
+        expect(MediaImageBlocks::bytesWentMissing($asset, BASE_PATH))->toBeFalse();
+    });
+
+    it('reports bytes that went missing for a data_url row with no payload', function (): void {
+        // The row says the bytes are inline and the column is empty.
+        $asset = MediaAsset::create([
+            'id'           => '15151515-1515-4515-8515-151515151515',
+            'asset_url'    => '/api/v1/assets/15151515-1515-4515-8515-151515151515.png',
+            'storage_mode' => 'data_url',
+            'media_type'   => 'image',
+            'mime_type'    => 'image/png',
+            'byte_size'    => 1024,
+            'user_id'      => 1,
+            'filename'     => 'pixel.png',
+        ]);
+
+        expect(MediaImageBlocks::bytesWentMissing($asset, BASE_PATH))->toBeTrue();
+    });
 });
