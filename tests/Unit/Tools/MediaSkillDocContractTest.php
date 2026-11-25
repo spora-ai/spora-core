@@ -378,4 +378,12 @@ describe('the media-library skill matches the media tool', function (): void {
             ->and($body)->toContain('does not say which limit applied')
             ->and($body)->toContain('may or may not help');
     });
+
+    it('does not let the model read a second omission as a full request', function (): void {
+        // A derivative that is left out as well was left out for one of
+        // two reasons, and the note does not say which. Claiming the
+        // request is full of images states something the model cannot
+        // know — the byte budget may be the reason too.
+        expect(mediaSkillBody())->not->toContain('the request is full of images');
+    });
 });
