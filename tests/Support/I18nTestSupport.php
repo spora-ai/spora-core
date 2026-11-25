@@ -35,6 +35,10 @@ if (!function_exists('makeLocaleDir')) {
             throw new RuntimeException("Could not create the locale fixture directory {$dir}.");
         }
 
+        // Registered before the catalogues are written: a half-built
+        // directory has to be cleaned up too.
+        $GLOBALS['__spora_locale_fixtures'][] = $dir;
+
         foreach ($catalogues as $locale => $messages) {
             $path = $dir . '/' . $locale . '.json';
 
@@ -52,16 +56,56 @@ if (!function_exists('makeLocaleDir')) {
     }
 }
 
+if (!function_exists('removeLocaleFixtures')) {
+    /**
+     * Remove only the fixtures this process created — another worker's are
+     * not ours to delete.
+     *
+     * The system temp directory is shared by every parallel Pest worker on
+     * the machine, so a directory is only ours to remove when this process
+     * is the one that made it.
+     */
+    function removeLocaleFixtures(): void
+    {
+        foreach ($GLOBALS['__spora_locale_fixtures'] ?? [] as $dir) {
+            removeLocaleDir($dir);
+        }
+        $GLOBALS['__spora_locale_fixtures'] = [];
+    }
+}
+
 if (!function_exists('removeLocaleDir')) {
+    /**
+     * Remove a fixture directory and the files in it.
+     *
+     * A directory that still holds a subdirectory is left behind, and
+     * silently so: the registry only ever holds the flat trees this
+     * process created, so a subdirectory means the tree is not ours to
+     * dismantle. The leftover is the price of not touching what we did
+     * not create, and nothing sweeps it up afterwards.
+     */
     function removeLocaleDir(string $dir): void
     {
         if (!is_dir($dir)) {
             return;
         }
 
+        $complete = true;
+
         foreach ((array) glob($dir . '/*') as $file) {
+            if (!is_file((string) $file)) {
+                $complete = false;
+
+                continue;
+            }
+
             unlink((string) $file);
         }
-        rmdir($dir);
+
+        // A directory that still holds a subdirectory cannot go, and rmdir()
+        // warns when it tries.
+        if ($complete) {
+            rmdir($dir);
+        }
     }
 }

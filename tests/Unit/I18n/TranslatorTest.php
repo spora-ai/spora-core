@@ -6,9 +6,7 @@ use Spora\I18n\CatalogLoader;
 use Spora\I18n\Translator;
 
 afterEach(function (): void {
-    foreach (glob(sys_get_temp_dir() . '/spora-i18n-*') ?: [] as $dir) {
-        removeLocaleDir($dir);
-    }
+    removeLocaleFixtures();
 });
 
 test('a message with no catalogue entry renders as its English source', function (): void {

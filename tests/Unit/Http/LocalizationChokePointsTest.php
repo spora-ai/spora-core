@@ -47,14 +47,16 @@ function germanTranslator(): Translator
  * is already in the shipped German catalogue, so the assertion is about
  * the lookup and not about a translation someone might edit. Copied rather
  * than patched in place — the fixture is shared with the parallel runner.
+ *
+ * The root carries a random suffix: the temp directory is shared by every
+ * suite on the machine, and a fixed name would make two concurrent runs
+ * write into the same tree.
  */
 function localePluginFixture(): string
 {
-    $root = sys_get_temp_dir() . '/spora-i18n-plugin-fixture';
+    $root = sys_get_temp_dir() . '/spora-i18n-plugin-fixture-' . bin2hex(random_bytes(8));
     $copy = $root . '/InventoryPlugin';
-    if (!is_dir($copy)) {
-        mkdir($copy, 0o777, true);
-    }
+    mkdir($copy, 0o777, true);
 
     file_put_contents($copy . '/composer.json', (string) file_get_contents(
         BASE_PATH . '/tests/Fixtures/plugins_inventory/InventoryPlugin/composer.json',
@@ -69,15 +71,19 @@ function localePluginFixture(): string
     return $root;
 }
 
-function removeLocalePluginFixture(): void
+/**
+ * The plugin fixture holds a directory inside the root, so it is not one
+ * of the flat trees the locale registry cleans up.
+ */
+function removeLocalePluginFixture(string $root): void
 {
-    $copy = sys_get_temp_dir() . '/spora-i18n-plugin-fixture/InventoryPlugin';
+    $copy = $root . '/InventoryPlugin';
     foreach ((array) glob($copy . '/*') as $file) {
         unlink((string) $file);
     }
 
     if (is_dir($copy) && rmdir($copy)) {
-        rmdir(dirname($copy));
+        rmdir($root);
     }
 }
 
@@ -176,15 +182,19 @@ it('renders English when no catalogue has the message', function (): void {
 });
 
 it('translates a plugin manifest description at render time', function (): void {
-    $loader = new PluginLoader([localePluginFixture()], null);
-    $loader->boot();
+    $root = localePluginFixture();
 
-    $service = new PluginsService($loader, new PluginMetadataExtractor(), germanTranslator());
-    $plugin = $service->listPlugins()[0];
+    try {
+        $loader = new PluginLoader([$root], null);
+        $loader->boot();
 
-    // The manifest is a file on disk that nobody translated; the catalogue
-    // is what carries the German wording, keyed by what the file says.
-    expect($plugin['description'])->toBe('Installierte Plugins und ihr Status.');
+        $service = new PluginsService($loader, new PluginMetadataExtractor(), germanTranslator());
+        $plugin = $service->listPlugins()[0];
 
-    removeLocalePluginFixture();
+        // The manifest is a file on disk that nobody translated; the catalogue
+        // is what carries the German wording, keyed by what the file says.
+        expect($plugin['description'])->toBe('Installierte Plugins und ihr Status.');
+    } finally {
+        removeLocalePluginFixture($root);
+    }
 });
