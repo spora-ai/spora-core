@@ -6,9 +6,7 @@ use Spora\I18n\CatalogLoader;
 use Spora\I18n\Translator;
 
 afterEach(function (): void {
-    foreach (glob(sys_get_temp_dir() . '/spora-i18n-*') ?: [] as $dir) {
-        removeLocaleDir($dir);
-    }
+    removeLocaleFixtures();
 });
 
 test('a plugin key that core also declares resolves to the core wording', function (): void {

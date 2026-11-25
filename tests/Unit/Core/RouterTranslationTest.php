@@ -25,9 +25,7 @@ final class RouterTranslationController
 }
 
 afterEach(function (): void {
-    foreach (glob(sys_get_temp_dir() . '/spora-i18n-*') ?: [] as $dir) {
-        removeLocaleDir($dir);
-    }
+    removeLocaleFixtures();
 });
 
 /**

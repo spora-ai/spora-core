@@ -5,6 +5,10 @@ declare(strict_types=1);
 use Spora\Build\I18nCheckCommand;
 use Symfony\Component\Console\Command\Command;
 
+afterEach(function (): void {
+    removeLocaleFixtures();
+});
+
 /**
  * The PHP half of the i18n CI contract.
  *
@@ -278,19 +282,11 @@ function i18nParity(array $catalogue): array
  */
 function i18nUnreachable(array $catalogue): array
 {
-    $dir = sys_get_temp_dir() . '/spora-i18n-check-' . bin2hex(random_bytes(6));
-    mkdir($dir, 0o777, true);
-    $path = $dir . '/de.json';
-    file_put_contents($path, (string) json_encode($catalogue, JSON_UNESCAPED_UNICODE));
+    $dir = makeLocaleDir(['de' => $catalogue], 'check');
 
-    try {
-        $instance = new I18nCheckCommand();
+    $instance = new I18nCheckCommand();
 
-        return (new ReflectionMethod($instance, 'unreachable'))->invoke($instance, 'de', $catalogue, $path);
-    } finally {
-        unlink($path);
-        rmdir($dir);
-    }
+    return (new ReflectionMethod($instance, 'unreachable'))->invoke($instance, 'de', $catalogue, $dir . '/de.json');
 }
 
 // Referenced so the import is meaningful to static analysis: the command
