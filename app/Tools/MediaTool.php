@@ -884,7 +884,11 @@ final class MediaTool extends AbstractTool
         // wrong setting must not widen the reach, so it takes the narrowest
         // scope.
         $raw   = $settings['scope'] ?? null;
-        $scope = is_string($raw) ? $raw : ($raw === null ? 'principal' : 'agent');
+        $scope = match (true) {
+            is_string($raw) => $raw,
+            $raw === null   => 'principal',
+            default         => 'agent',
+        };
 
         // Legacy 'user' is a runtime alias for 'principal' — see the
         // class-level docblock. An unrecognised string is a wrong setting

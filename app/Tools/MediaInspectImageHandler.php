@@ -96,7 +96,53 @@ final class MediaInspectImageHandler
      */
     private function attach(MediaAsset $asset, array $arguments): ToolResult
     {
-        $mime = strtolower(trim((string) ($asset->mime_type ?? '')));
+        $mime    = strtolower(trim((string) ($asset->mime_type ?? '')));
+        $refusal = $this->mimeRefusal($asset, $mime)
+            ?? $this->storageRefusal($asset)
+            ?? $this->sizeRefusal($asset);
+
+        if ($refusal !== null) {
+            return $refusal;
+        }
+
+        $image = $this->loadImage($asset);
+        if ($image instanceof ToolResult) {
+            return $image;
+        }
+
+        $question = trim((string) ($arguments['question'] ?? ''));
+        $filename = (string) ($asset->filename ?? '');
+        if ($filename === '') {
+            $filename = $asset->id;
+        }
+
+        $text = sprintf(
+            'Attached media asset %s (%s, %s, %d bytes) to this result — you can see it now.',
+            $asset->id,
+            $filename,
+            $mime,
+            $image['size'],
+        );
+        $text .= "\n\nQuestion: " . ($question === '' ? 'none given.' : $question);
+
+        return ToolResult::ok(
+            $text,
+            [
+                'asset_id'  => $asset->id,
+                'filename'  => $filename,
+                'mime_type' => $mime,
+                'byte_size' => $image['size'],
+                'question'  => $question === '' ? null : $question,
+            ],
+            [['media_id' => $asset->id, 'kind' => 'image']],
+        );
+    }
+
+    /**
+     * The refusal for a MIME type `inspect_image` does not read.
+     */
+    private function mimeRefusal(MediaAsset $asset, string $mime): ?ToolResult
+    {
         if ($mime === 'image/svg+xml') {
             return ToolResult::fail(sprintf(
                 '`inspect_image` does not read SVG (asset %s): an SVG is a script-capable document, not a raster '
@@ -115,6 +161,14 @@ final class MediaInspectImageHandler
             ));
         }
 
+        return null;
+    }
+
+    /**
+     * The refusal for an asset whose bytes are not on hand here.
+     */
+    private function storageRefusal(MediaAsset $asset): ?ToolResult
+    {
         if (!in_array($asset->storage_mode, self::READABLE_STORAGE_MODES, true)) {
             return ToolResult::fail(sprintf(
                 'Asset %s is stored externally (storage_mode=%s) and has no Spora-side payload, so `inspect_image` '
@@ -124,15 +178,34 @@ final class MediaInspectImageHandler
             ));
         }
 
-        // The stored size is a hint, not the truth: it can be stale, and a
-        // stale column must not be what decides whether the bytes fit. It
-        // rejects the obvious case without a read; the measurement after the
-        // load is the one that counts.
+        return null;
+    }
+
+    /**
+     * The refusal for an asset the stored size already rules out.
+     *
+     * The stored size is a hint, not the truth: it can be stale, and a
+     * stale column must not be what decides whether the bytes fit. It
+     * rejects the obvious case without a read; the measurement after the
+     * load is the one that counts.
+     */
+    private function sizeRefusal(MediaAsset $asset): ?ToolResult
+    {
         $declared = (int) ($asset->byte_size ?? 0);
         if ($declared > MediaImageBlocks::MAX_IMAGE_BYTES) {
             return ToolResult::fail($this->oversizedMessage($asset, $declared));
         }
 
+        return null;
+    }
+
+    /**
+     * The image's bytes, or the refusal that says why there are none.
+     *
+     * @return array{bytes: string, size: int}|ToolResult
+     */
+    private function loadImage(MediaAsset $asset): array|ToolResult
+    {
         $bytes = MediaImageBlocks::loadBytes($asset, $this->basePath());
         if ($bytes === null) {
             return ToolResult::fail(sprintf(
@@ -149,32 +222,7 @@ final class MediaInspectImageHandler
             return ToolResult::fail($this->oversizedMessage($asset, $size));
         }
 
-        $question = trim((string) ($arguments['question'] ?? ''));
-        $filename = (string) ($asset->filename ?? '');
-        if ($filename === '') {
-            $filename = $asset->id;
-        }
-
-        $text = sprintf(
-            'Attached media asset %s (%s, %s, %d bytes) to this result — you can see it now.',
-            $asset->id,
-            $filename,
-            $mime,
-            $size,
-        );
-        $text .= "\n\nQuestion: " . ($question === '' ? 'none given.' : $question);
-
-        return ToolResult::ok(
-            $text,
-            [
-                'asset_id'  => $asset->id,
-                'filename'  => $filename,
-                'mime_type' => $mime,
-                'byte_size' => $size,
-                'question'  => $question === '' ? null : $question,
-            ],
-            [['media_id' => $asset->id, 'kind' => 'image']],
-        );
+        return ['bytes' => $bytes, 'size' => $size];
     }
 
     /**

@@ -88,16 +88,11 @@ final readonly class DerivativePayloadStore
      */
     public function remove(MediaAsset $derivative): bool
     {
-        if ($derivative->storage_mode !== 'local') {
-            return true;
-        }
         $path = $this->pathFor($derivative);
-        if ($path === null) {
-            return true;
-        }
-        if (!is_file($path)) {
-            // Already gone: the bytes are not on disk, which is what
-            // the caller asked for.
+
+        // No file to unlink: the bytes are not on disk, which is what the
+        // caller asked for.
+        if ($path === null || !is_file($path)) {
             return true;
         }
 
@@ -105,9 +100,7 @@ final readonly class DerivativePayloadStore
         // warning. The warning is suppressed (a missing directory should
         // not warn on the way to a caller that accepts a no-op), so the
         // return value is what says the bytes survived.
-        $unlinked = $this->withSuppressedWarnings(static fn(): bool => unlink($path));
-
-        return $unlinked;
+        return $this->withSuppressedWarnings(static fn(): bool => unlink($path));
     }
 
     /**

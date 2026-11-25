@@ -278,7 +278,7 @@ final class ToolCallExecutor
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
 
-            $this->orchestrator->appendToolResult(
+            HistoryRowWriter::appendToolResult(
                 $task->id,
                 $result,
                 $toolCall->providerCallId,
@@ -318,7 +318,7 @@ final class ToolCallExecutor
         ToolResult    $result,
         array         $arguments,
     ): void {
-        $this->orchestrator->appendToolResult(
+        HistoryRowWriter::appendToolResult(
             $task->id,
             $result,
             (string) $toolCallRecord->provider_call_id,
@@ -486,7 +486,7 @@ final class ToolCallExecutor
                 'result_content' => $scrubbed,
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
-            $this->orchestrator->appendToolResult(
+            HistoryRowWriter::appendToolResult(
                 $task->id,
                 $result,
                 $toolCall->providerCallId,
@@ -519,7 +519,7 @@ final class ToolCallExecutor
                 'result_data'    => $result->data,
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
-            $this->orchestrator->appendToolResult(
+            HistoryRowWriter::appendToolResult(
                 $task->id,
                 $result,
                 $toolCall->providerCallId,

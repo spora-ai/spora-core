@@ -148,36 +148,18 @@ final class MessageHistoryBuilder
             $pair     = $this->consumeAdjacentPair($row, $rowsArray, $i);
             $firstSeq = $pair['first'] ?? (int) $row->sequence;
 
-            // A summary stands in for the rows its range starts at, so it is
-            // sent at that position rather than at its own row's position.
-            // The pair's FIRST sequence decides the position: a range that
-            // starts on the second half must be sent after the first half.
-            while ($pending !== [] && $pending[0]['first'] <= $firstSeq) {
-                $messages[] = $this->summaryMessage($pending[0]['row']);
-                array_shift($pending);
-            }
+            $this->flushSummariesBefore($messages, $pending, $firstSeq);
 
-            $turnMessages = $this->turnMessage($row, $pair, $compactions);
+            $turn = $this->turnFor($row, $pair, $compactions);
 
             if ($row->role === 'tool') {
                 // The tool result goes out now; the image turn waits for the
                 // run of tool results to end.
-                $toolResult = array_shift($turnMessages);
-                if ($toolResult !== null) {
-                    $messages[] = $toolResult;
-                }
-                foreach ($turnMessages as $imageTurn) {
-                    $toolImages[] = $imageTurn;
-                }
+                $messages   = array_merge($messages, $turn['messages']);
+                $toolImages = array_merge($toolImages, $turn['images']);
             } else {
-                foreach ($toolImages as $imageTurn) {
-                    $messages[] = $imageTurn;
-                }
+                $messages   = array_merge($messages, $toolImages, $turn['messages']);
                 $toolImages = [];
-
-                foreach ($turnMessages as $message) {
-                    $messages[] = $message;
-                }
             }
 
             $i = $pair['nextIndex'] ?? ($i + 1);
@@ -194,6 +176,47 @@ final class MessageHistoryBuilder
         }
 
         return $messages;
+    }
+
+    /**
+     * The summaries that start before `$firstSeq` stand in for the rows they
+     * cover, so they are sent at the position their range starts — not at
+     * their own row's position.
+     *
+     * @param  list<array<string, mixed>>              $messages
+     * @param  list<array{row: TaskHistory, first: int, last: int}>  $pending
+     */
+    private function flushSummariesBefore(array &$messages, array &$pending, int $firstSeq): void
+    {
+        while ($pending !== [] && $pending[0]['first'] <= $firstSeq) {
+            $messages[] = $this->summaryMessage($pending[0]['row']);
+            array_shift($pending);
+        }
+    }
+
+    /**
+     * One row's turn: the messages it contributes, and the image turns that
+     * have to wait for the run of tool results to end.
+     *
+     * @param  array{row: TaskHistory, nextIndex: int, first: int, last: int, halves: list<TaskHistory>}|null  $pair
+     * @return array{messages: list<array<string, mixed>>, images: list<array<string, mixed>>}
+     */
+    private function turnFor(TaskHistory $row, ?array $pair, ActiveCompactions $compactions): array
+    {
+        $turnMessages = $this->turnMessage($row, $pair, $compactions);
+
+        if ($row->role !== 'tool') {
+            return ['messages' => $turnMessages, 'images' => []];
+        }
+
+        // The tool result goes out now; the image turn waits for the run of
+        // tool results to end.
+        $toolResult = array_shift($turnMessages);
+
+        return [
+            'messages' => $toolResult === null ? [] : [$toolResult],
+            'images'   => $turnMessages,
+        ];
     }
 
     /**
@@ -216,23 +239,24 @@ final class MessageHistoryBuilder
             return $coversFirst ? [] : $this->messageFromHistoryRow($row);
         }
 
+        // Which half the summary covers decides what is left to send: an
+        // uncovered half goes on its own, and a fully covered pair is
+        // dropped — the summary stands in for it.
         if (!$coversFirst && !$coversLast) {
-            return $this->messageFromHistoryRow($pair['row']);
-        }
-
-        if (!$coversFirst) {
+            $message = $this->messageFromHistoryRow($pair['row']);
+        } elseif (!$coversFirst) {
             // Only the second half is covered: send the first half alone —
             // dropping the merged row would lose it.
-            return $this->messageFromHistoryRow($pair['halves'][0]);
-        }
-
-        if (!$coversLast) {
+            $message = $this->messageFromHistoryRow($pair['halves'][0]);
+        } elseif (!$coversLast) {
             // Only the first half is covered: send the second half alone,
             // not the merged row — that would repeat what the summary has.
-            return $this->messageFromHistoryRow($pair['halves'][1]);
+            $message = $this->messageFromHistoryRow($pair['halves'][1]);
+        } else {
+            $message = [];
         }
 
-        return [];
+        return $message;
     }
 
     /**
@@ -409,11 +433,10 @@ final class MessageHistoryBuilder
      */
     private function toolImageTurn(array $assets): array
     {
-        if ($assets === []) {
-            return ['messages' => [], 'unreadable' => 0];
-        }
-
-        if ($this->driver !== null && !$this->driver->supportsImageInput()) {
+        // A driver that cannot read images gets none: the images are
+        // dropped and nothing is said about them. The capability is only
+        // asked for when there is an image to send.
+        if ($assets === [] || ($this->driver !== null && !$this->driver->supportsImageInput())) {
             return ['messages' => [], 'unreadable' => 0];
         }
 
@@ -809,30 +832,29 @@ final class AttachmentRowRenderer
         foreach ($this->uniqueAttachments($row->attachments) as $attachment) {
             $asset = $this->resolveAttachmentAsset($attachment['media_id']);
             if ($asset === null) {
-                if ($attachment['kind'] === 'image') {
-                    $missingImages++;
-                }
+                // Only an image is a loss the operator sees; a text
+                // attachment that resolves to nothing is not counted.
+                $missingImages += ($attachment['kind'] === 'image') ? 1 : 0;
                 continue;
             }
+
             $metadataBlocks[] = self::attachmentMetadataBlock($asset);
-            if ($attachment['kind'] === 'image') {
-                $image = $this->buildImageBlock($asset, $supportsImages, $imageBytes);
-                if ($image === null) {
-                    // Three reasons, one of them a removal the model has to
-                    // hear about: the driver cannot take images, the image
-                    // did not fit, or the bytes are not on hand.
-                    if ($supportsImages && MediaImageBlocks::bytesWentMissing($asset, $this->basePath)) {
-                        $unreadable++;
-                    }
-                    continue;
-                }
+
+            if ($attachment['kind'] !== 'image') {
+                [$block, $inlined] = $this->buildTextBlock($asset, $derivatives[$asset->id] ?? null, $remaining);
+                $textBlocks[] = $block;
+                $remaining    = max(0, $remaining - $inlined);
+                continue;
+            }
+
+            $image = $this->imageAttachment($asset, $supportsImages, $imageBytes);
+
+            if ($image['block'] !== null) {
                 $imageBlocks[] = $image['block'];
                 $imageBytes    += $image['bytes'];
-                continue;
+            } elseif ($image['unreadable']) {
+                $unreadable++;
             }
-            [$block, $inlined] = $this->buildTextBlock($asset, $derivatives[$asset->id] ?? null, $remaining);
-            $textBlocks[] = $block;
-            $remaining    = max(0, $remaining - $inlined);
         }
 
         return [
@@ -841,6 +863,30 @@ final class AttachmentRowRenderer
             'metadata'         => $metadataBlocks,
             'missingImages'    => $missingImages,
             'unreadableImages' => $unreadable,
+        ];
+    }
+
+    /**
+     * An image attachment's blocks, and whether the model can still read it.
+     *
+     * Three reasons leave the image out, one of them a removal the model has
+     * to hear about: the driver cannot take images, the image did not fit,
+     * or the bytes are not on hand.
+     *
+     * @return array{block: array<string, mixed>|null, bytes: int, unreadable: bool}
+     */
+    private function imageAttachment(MediaAsset $asset, bool $supportsImages, int $imageBytes): array
+    {
+        $image = $this->buildImageBlock($asset, $supportsImages, $imageBytes);
+
+        if ($image !== null) {
+            return ['block' => $image['block'], 'bytes' => $image['bytes'], 'unreadable' => false];
+        }
+
+        return [
+            'block'      => null,
+            'bytes'      => 0,
+            'unreadable' => $supportsImages && MediaImageBlocks::bytesWentMissing($asset, $this->basePath),
         ];
     }
 

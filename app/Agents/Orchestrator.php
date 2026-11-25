@@ -23,7 +23,6 @@ use Spora\Metering\UsageMeterInterface;
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\Task;
-use Spora\Models\TaskHistory;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\EffortService;
@@ -33,7 +32,6 @@ use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
-use Spora\Services\ScrubDataUrls;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\TaskCompactionService;
 use Spora\Services\TaskCompactionServiceInterface;
@@ -396,15 +394,7 @@ final class Orchestrator implements OrchestratorInterface
         ?string                $content,
         ?HistoryMessageContext $context = null,
     ): void {
-        $context ??= new HistoryMessageContext();
-
-        $row = HistoryRowWriter::buildRow($taskId, $role, $content, $context);
-
-        $nextSeq = TaskHistory::where('task_id', $taskId)->max('sequence') ?? -1;
-        $row['sequence'] = $nextSeq + 1;
-        $history = TaskHistory::create($row);
-
-        HistoryRowWriter::insertUsageIfPresent($history->id, $context->usage);
+        HistoryRowWriter::appendWithinTransaction($taskId, $role, $content, $context);
     }
 
     /**
@@ -839,39 +829,6 @@ final class Orchestrator implements OrchestratorInterface
         ?string                   $content,
         ?HistoryMessageContext    $context = null,
     ): void {
-        $context ??= new HistoryMessageContext();
-        $row = HistoryRowWriter::buildRow($taskId, $role, $content, $context);
-        $usage = $context->usage;
-
-        Capsule::connection()->transaction(function () use ($taskId, $row, $usage): void {
-            $nextSeq = TaskHistory::where('task_id', $taskId)->lockForUpdate()->max('sequence') ?? -1;
-            $row['sequence'] = $nextSeq + 1;
-            $history = TaskHistory::create($row);
-
-            HistoryRowWriter::insertUsageIfPresent($history->id, $usage);
-        });
-    }
-
-    /**
-     * Append the result of a tool call as a `tool` history row.
-     *
-     * The one writer for the rows that carry a real {@see ToolResult}: the
-     * content is scrubbed of data URLs, and the result's attachments travel
-     * with the row so the builder can put the assets in front of the model.
-     * A result without attachments leaves the column null, exactly as the
-     * rows written before the channel existed.
-     */
-    public function appendToolResult(int $taskId, ToolResult $result, string $toolCallId, string $toolName): void
-    {
-        $this->appendHistory(
-            taskId: $taskId,
-            role: 'tool',
-            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
-            context: new HistoryMessageContext(
-                toolCallId: $toolCallId,
-                toolName: $toolName,
-                attachments: $result->attachments === [] ? null : $result->attachments,
-            ),
-        );
+        HistoryRowWriter::append($taskId, $role, $content, $context);
     }
 }

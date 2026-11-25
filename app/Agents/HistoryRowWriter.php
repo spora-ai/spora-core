@@ -4,23 +4,28 @@ declare(strict_types=1);
 
 namespace Spora\Agents;
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Models\TaskHistory;
 use Spora\Models\Usage;
+use Spora\Services\ScrubDataUrls;
+use Spora\Services\Text\Utf8Sanitizer;
+use Spora\Tools\ValueObjects\ToolResult;
 
 /**
  * SQL + row-shaping helpers for the task_history / usage writes that
- * {@see Orchestrator::appendHistory()} and
- * {@see Orchestrator::appendHistoryWithinTransaction()} both invoke.
+ * {@see Orchestrator::appendHistory()},
+ * {@see Orchestrator::appendHistoryWithinTransaction()} and
+ * {@see self::appendToolResult()} all invoke.
  *
  * Lives outside {@see Orchestrator} so the orchestration class stays
  * focused on policy / state-machine concerns instead of growing a new
  * private helper for every persistence shape. Both methods are
  * stateless and don't need DI wiring — call statically.
  *
- * Caller contract: methods here assume the caller already holds the
- * appropriate transaction boundary if composition is required; the
- * class performs no transactional bookkeeping of its own.
+ * Caller contract: {@see self::appendWithinTransaction()} assumes the
+ * caller already holds the transaction boundary if composition is
+ * required; {@see self::append()} opens its own.
  */
 final class HistoryRowWriter
 {
@@ -90,5 +95,76 @@ final class HistoryRowWriter
             'driver_meta_info' => $usage->driverMetaInfo,
             'created_at' => date(Orchestrator::DB_TIMESTAMP_FORMAT),
         ]))->save();
+    }
+
+    /**
+     * Append one history row.
+     *
+     * The sequence number is read under a row lock, so two writers cannot
+     * claim the same one, and the row and its usage entry commit together.
+     */
+    public static function append(
+        int                    $taskId,
+        string                 $role,
+        ?string                $content,
+        ?HistoryMessageContext $context = null,
+    ): void {
+        $context ??= new HistoryMessageContext();
+        $row  = self::buildRow($taskId, $role, $content, $context);
+        $usage = $context->usage;
+
+        Capsule::connection()->transaction(function () use ($taskId, $row, $usage): void {
+            $nextSeq = TaskHistory::where('task_id', $taskId)->lockForUpdate()->max('sequence') ?? -1;
+            $row['sequence'] = $nextSeq + 1;
+            $history = TaskHistory::create($row);
+
+            self::insertUsageIfPresent($history->id, $usage);
+        });
+    }
+
+    /**
+     * Append one history row inside a transaction the caller already holds.
+     *
+     * The caller's transaction boundary is the point: the row has to commit
+     * together with the state change it belongs to.
+     */
+    public static function appendWithinTransaction(
+        int                    $taskId,
+        string                 $role,
+        ?string                $content,
+        ?HistoryMessageContext $context = null,
+    ): void {
+        $context ??= new HistoryMessageContext();
+
+        $row = self::buildRow($taskId, $role, $content, $context);
+
+        $nextSeq = TaskHistory::where('task_id', $taskId)->max('sequence') ?? -1;
+        $row['sequence'] = $nextSeq + 1;
+        $history = TaskHistory::create($row);
+
+        self::insertUsageIfPresent($history->id, $context->usage);
+    }
+
+    /**
+     * Append the result of a tool call as a `tool` history row.
+     *
+     * The one writer for the rows that carry a real {@see ToolResult}: the
+     * content is scrubbed of data URLs, and the result's attachments travel
+     * with the row so the builder can put the assets in front of the model.
+     * A result without attachments leaves the column null, exactly as the
+     * rows written before the channel existed.
+     */
+    public static function appendToolResult(int $taskId, ToolResult $result, string $toolCallId, string $toolName): void
+    {
+        self::append(
+            $taskId,
+            'tool',
+            ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
+            new HistoryMessageContext(
+                toolCallId: $toolCallId,
+                toolName: $toolName,
+                attachments: $result->attachments === [] ? null : $result->attachments,
+            ),
+        );
     }
 }

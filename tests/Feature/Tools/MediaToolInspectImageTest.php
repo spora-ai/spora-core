@@ -2,8 +2,7 @@
 
 declare(strict_types=1);
 
-use Spora\Agents\Orchestrator;
-use Spora\Agents\OrchestratorConfig;
+use Spora\Agents\HistoryRowWriter;
 use Spora\Agents\ToolDefinitionBuilder;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\DriverFactory;
@@ -93,12 +92,7 @@ function inspectImagePersistedRow(int $agentId, Spora\Tools\ValueObjects\ToolRes
         'max_steps'        => 10,
     ]);
 
-    $driver = Mockery::mock(Spora\Drivers\LLMDriverInterface::class);
-    $factory = Mockery::mock(DriverFactory::class);
-    $factory->allows('makeFromAgent')->andReturn($driver);
-
-    $orchestrator = new Orchestrator($factory, new OrchestratorConfig());
-    $orchestrator->appendToolResult($task->id, $result, 'call_1', 'media');
+    HistoryRowWriter::appendToolResult($task->id, $result, 'call_1', 'media');
 
     $row = TaskHistory::where('task_id', $task->id)->where('role', 'tool')->first();
     expect($row)->not->toBeNull();

@@ -167,7 +167,7 @@ final class ApprovedToolExecutor
             return;
         }
 
-        $this->orchestrator->appendToolResult(
+        HistoryRowWriter::appendToolResult(
             $task->id,
             $result,
             $providerCallId,
