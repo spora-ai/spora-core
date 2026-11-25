@@ -193,7 +193,7 @@ The response is the usual asset header plus a download card, and the structured 
 
 **The same asset can be inspected again.** Each call is a fresh look at the same bytes, so you can ask a second question about an image you have already seen. The image stays in the task history and is re-sent on every later turn, exactly like an operator-attached image, so do not inspect the same asset over and over.
 
-**An image can also disappear.** If a later turn says the image was removed from the Media Archive, it is gone — the operator deleted it. Do not try to look at it again, and do not describe what you saw; say that it is no longer available and move on.
+**An image can also disappear.** If a later turn says the image was removed from the Media Archive, it is gone — the operator deleted it. If it says the image can no longer be read, the asset is still in the archive but its bytes are not on hand. Either way the image is not available. Do not try to look at it again, and do not describe what you saw; say that it is no longer available and move on.
 
 **Scope still applies.** `inspect_image` reaches the assets the media tool's `scope` setting allows (see Scope below). When an asset is not visible, the message says so and names the setting to change — it never confirms whether the asset exists.
 

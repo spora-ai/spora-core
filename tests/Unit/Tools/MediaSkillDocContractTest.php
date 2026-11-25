@@ -340,4 +340,16 @@ describe('the media-library skill matches the media tool', function (): void {
             ->and($body)->not->toContain('data.parent_id')
             ->and($body)->toContain('does **not** reach you');
     });
+
+    it('names both of the notes a missing image produces', function (): void {
+        // Two things end an image and only one of them is a removal: the
+        // row is gone, or the row is there and its bytes are not. The
+        // builder sends a different note for each, and the skill has to
+        // name both — a model told only about the removal reads the
+        // other note as a deletion that never happened.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('removed from the Media Archive')
+            ->and($body)->toContain('can no longer be read');
+    });
 });
