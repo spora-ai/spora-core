@@ -191,14 +191,13 @@ final readonly class MediaCreateHandler
             return $this->created($asset);
         }
 
-        // `delete()` also removes the bytes in `data_url` mode; a `local`-mode
-        // row would leave its file on disk with no row pointing at it. Not
-        // reachable under the shipped defaults — `MAX_CONTENT_BYTES` equals the
-        // default `asset_store.auto_threshold_bytes` and `AutoAssetStore`
-        // compares `<=`, so a payload at the cap stays inline — but an operator
-        // who lowers the threshold or forces `local` would accumulate one
-        // orphaned file per rejected call. The fix belongs in
-        // `MediaArchiveService::delete()`, which has the same gap everywhere.
+        // `delete()` takes the bytes with the row: a `local`-mode row's file
+        // is unlinked, not just its row dropped, so a rejected call leaves
+        // nothing behind on disk.
+        //
+        // A discard that cannot free the bytes throws, and the row stays:
+        // reporting a clean rejection while the row is still there would
+        // send the model looking for a file the operator never lost.
         $this->archive->delete($asset->id);
 
         return ToolResult::fail(sprintf(
@@ -274,6 +273,10 @@ final readonly class MediaCreateHandler
         // The row that was just written is the duplicate, not the one
         // that was already there: it is the one the operator did not
         // ask for, and it is the one the retry recipe can find again.
+        //
+        // A discard that cannot free the bytes throws, and the row stays:
+        // the refusal below would otherwise tell the model the duplicate
+        // is gone while it is still in the library.
         $this->archive->delete($asset->id);
 
         return ToolResult::fail(sprintf(

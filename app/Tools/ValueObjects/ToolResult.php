@@ -27,14 +27,29 @@ final readonly class ToolResult
          * @var array<string, mixed>|null
          */
         public ?array  $data = null,
+
+        /**
+         * Archive assets this result points at.
+         *
+         * Each is rendered as an image content block on a user turn that
+         * follows the tool result — a provider's tool result carries text
+         * only, so the image cannot travel inside it. The bytes are read from
+         * storage when the request is built; the reference is what gets
+         * persisted.
+         *
+         * @var list<array{media_id: string, kind: string}>
+         */
+        public array   $attachments = [],
     ) {}
 
     /**
      * Build a successful ToolResult with the given content and optional data.
+     *
+     * @param list<array{media_id: string, kind: string}> $attachments
      */
-    public static function ok(string $content, ?array $data = null): self
+    public static function ok(string $content, ?array $data = null, array $attachments = []): self
     {
-        return new self(true, $content, $data);
+        return new self(true, $content, $data, $attachments);
     }
 
     /**

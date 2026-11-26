@@ -35,7 +35,7 @@ it('puts the asset rows of a search into the content', function (): void {
         idOverride: 'aaaaaaaa-1111-2222-3333-444444444444',
     );
 
-    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth(), mediaToolScopeConfig('agent'));
     try {
         $result = $tool->execute(['action' => 'search'], agentId: $agentA);
 
@@ -63,7 +63,7 @@ it('says how many rows a search returned and how many match', function (): void 
         );
     }
 
-    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth(), mediaToolScopeConfig('agent'));
     try {
         $result = $tool->execute(['action' => 'search', 'limit' => 1], agentId: $agentA);
 

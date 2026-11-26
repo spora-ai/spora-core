@@ -1,0 +1,891 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature\Agents;
+
+use Spora\Agents\MessageHistoryBuilder;
+use Spora\Core\Paths;
+use Spora\Drivers\AnthropicCompatibleDriver;
+use Spora\Drivers\RequestLimits;
+use Spora\Models\MediaAsset;
+use Spora\Models\TaskHistory;
+use Symfony\Component\HttpClient\MockHttpClient;
+
+defined('TOOL_IMAGE_PASSWORD') || define('TOOL_IMAGE_PASSWORD', 'Password1!');
+
+/**
+ * The tool-result image channel: a tool row that points at an archive
+ * image becomes the tool result plus a user turn that carries the image.
+ *
+ * The bytes are read when the request is built, not when the tool ran —
+ * the row persists a reference, and the reference is resolved per request.
+ */
+function seedToolImageAgent(): int
+{
+    $authService = bootAuthLayer();
+    $userId      = $authService->register('tool-image@example.com', TOOL_IMAGE_PASSWORD, 'Tool Image');
+
+    $config = \Spora\Models\LLMDriverConfiguration::create([
+        'principal_id'       => null,
+        'name'               => 'Tool Image Config',
+        'driver_class'       => AnthropicCompatibleDriver::class,
+        'settings'           => json_encode(['api_key' => 'test']),
+        'is_global'          => true,
+        'is_default'         => true,
+        'context_window'     => 200000,
+        'max_tokens_output'  => 4096,
+    ]);
+
+    return \Spora\Models\Agent::create([
+        'principal_id'       => createUserPrincipalPublic($userId),
+        'name'               => 'Tool Image Agent',
+        'llm_driver_config_id' => $config->id,
+        'max_steps'          => 10,
+        'is_active'          => true,
+    ])->id;
+}
+
+function makeToolImageTask(int $agentId): \Spora\Models\Task
+{
+    $agent = \Spora\Models\Agent::find($agentId);
+
+    return \Spora\Models\Task::create([
+        'agent_id'        => $agentId,
+        'principal_id'    => (int) $agent->principal_id,
+        'trigger_user_id' => $agent->user_id,
+        'status'          => 'RUNNING',
+        'user_prompt'     => 'tool image test',
+        'step_count'      => 0,
+        'max_steps'       => 10,
+    ]);
+}
+
+function toolImagePng(): string
+{
+    return base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+        strict: true,
+    );
+}
+
+/**
+ * An archive asset whose bytes are on hand inline.
+ */
+function toolImageAsset(string $uuid, string $payload): MediaAsset
+{
+    return MediaAsset::create([
+        'id'           => $uuid,
+        'asset_url'    => "/api/v1/assets/{$uuid}.png",
+        'storage_mode' => 'data_url',
+        'media_type'   => 'image',
+        'mime_type'    => 'image/png',
+        'byte_size'    => strlen($payload),
+        'user_id'      => 1,
+        'payload'      => $payload,
+        'filename'     => 'pixel.png',
+    ]);
+}
+
+/**
+ * An archive asset whose bytes are not on hand: the row is there, the
+ * file is not.
+ *
+ * Nobody deleted the asset — the asset GC swept the file, or the storage
+ * failed — and the model has to be told a different thing than it is
+ * told when the asset was removed.
+ */
+function toolImageAssetWithoutBytes(string $uuid): MediaAsset
+{
+    return MediaAsset::create([
+        'id'           => $uuid,
+        'asset_url'    => "/api/v1/assets/{$uuid}.png",
+        'storage_mode' => 'local',
+        'media_type'   => 'image',
+        'mime_type'    => 'image/png',
+        'byte_size'    => 1024,
+        'user_id'      => 1,
+        'asset_token'  => bin2hex(random_bytes(16)),
+        'filename'     => 'pixel.png',
+    ]);
+}
+
+/**
+ * The transcript a tool call leaves behind: the assistant turn that asked
+ * for it, and the tool result.
+ *
+ * @param list<array{media_id: string, kind: string}>|null $attachments
+ */
+function writeToolImageTranscript(
+    \Spora\Models\Task $task,
+    ?array $attachments,
+    string $toolContent = 'The image is attached.',
+): void {
+    TaskHistory::create([
+        'task_id'           => $task->id,
+        'sequence'          => 0,
+        'role'              => 'assistant',
+        'content'           => null,
+        'tool_call_payload' => json_encode([
+            [
+                'id'       => 'call_1',
+                'type'     => 'function',
+                'function' => ['name' => 'media', 'arguments' => '{}'],
+            ],
+        ]),
+    ]);
+
+    $row = [
+        'task_id'      => $task->id,
+        'sequence'     => 1,
+        'role'         => 'tool',
+        'tool_call_id' => 'call_1',
+        'tool_name'    => 'media',
+        'content'      => $toolContent,
+    ];
+
+    if ($attachments !== null) {
+        $row['attachments'] = $attachments;
+    }
+
+    TaskHistory::create($row);
+}
+
+/**
+ * The transcript a batch of tool calls leaves behind: the assistant turn
+ * that asked for all of them, and one tool result per call.
+ *
+ * @param  list<list<array{media_id: string, kind: string}>|null>  $attachmentsPerResult
+ */
+function writeToolImageBatchTranscript(
+    \Spora\Models\Task $task,
+    array $attachmentsPerResult,
+): void {
+    $calls = [];
+
+    foreach (array_keys($attachmentsPerResult) as $index) {
+        $calls[] = [
+            'id'       => 'call_' . ($index + 1),
+            'type'     => 'function',
+            'function' => ['name' => 'media', 'arguments' => '{}'],
+        ];
+    }
+
+    TaskHistory::create([
+        'task_id'           => $task->id,
+        'sequence'          => 0,
+        'role'              => 'assistant',
+        'content'           => null,
+        'tool_call_payload' => json_encode($calls),
+    ]);
+
+    foreach ($attachmentsPerResult as $index => $attachments) {
+        $row = [
+            'task_id'      => $task->id,
+            'sequence'     => $index + 1,
+            'role'         => 'tool',
+            'tool_call_id' => 'call_' . ($index + 1),
+            'tool_name'    => 'media',
+            'content'      => 'The image is attached.',
+        ];
+
+        if ($attachments !== null) {
+            $row['attachments'] = $attachments;
+        }
+
+        TaskHistory::create($row);
+    }
+}
+
+/**
+ * An assistant turn after a run of tool results, so the image turn has a
+ * non-tool row to be flushed in front of.
+ */
+function writeTrailingAssistantRow(\Spora\Models\Task $task, int $sequence): void
+{
+    TaskHistory::create([
+        'task_id' => $task->id,
+        'sequence' => $sequence,
+        'role' => 'assistant',
+        'content' => 'Looking at the image now.',
+    ]);
+}
+
+/**
+ * The image blocks a built request carries, over every message.
+ *
+ * @param  list<array<string, mixed>>  $messages
+ * @return list<array<string, mixed>>
+ */
+function imageBlocksIn(array $messages): array
+{
+    $blocks = [];
+
+    foreach ($messages as $message) {
+        if (!is_array($message['content'] ?? null)) {
+            continue;
+        }
+        foreach ($message['content'] as $block) {
+            if (($block['type'] ?? null) === 'image') {
+                $blocks[] = $block;
+            }
+        }
+    }
+
+    return $blocks;
+}
+
+/**
+ * The text blocks of a built request that carry a given phrase.
+ *
+ * @param  list<array<string, mixed>>  $messages
+ * @return list<string>
+ */
+function textBlocksContaining(array $messages, string $phrase): array
+{
+    $texts = [];
+
+    foreach ($messages as $message) {
+        if (!is_array($message['content'] ?? null)) {
+            continue;
+        }
+        foreach ($message['content'] as $block) {
+            $text = (string) ($block['text'] ?? '');
+            if (($block['type'] ?? null) === 'text' && str_contains($text, $phrase)) {
+                $texts[] = $text;
+            }
+        }
+    }
+
+    return $texts;
+}
+
+describe('the tool-result image channel', function (): void {
+    it('turns a tool row with an image attachment into the tool message plus a user message carrying the image', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $asset = MediaAsset::create([
+            'id'           => '12345678-1234-4234-8234-123456789012',
+            'asset_url'    => '/api/v1/assets/12345678-1234-4234-8234-123456789012.png',
+            'storage_mode' => 'data_url',
+            'media_type'   => 'image',
+            'mime_type'    => 'image/png',
+            'byte_size'    => strlen($png),
+            'user_id'      => 1,
+            'payload'      => $png,
+            'filename'     => 'pixel.png',
+        ]);
+
+        writeToolImageTranscript($task, [['media_id' => $asset->id, 'kind' => 'image']]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect($messages)->toHaveCount(3);
+        expect($messages[0]['role'])->toBe('assistant');
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toBe('The image is attached.');
+        expect($messages[2]['role'])->toBe('user');
+
+        $blocks = $messages[2]['content'];
+        expect($blocks)->toBeArray();
+        expect($blocks)->toHaveCount(2);
+        // The identity block hands the asset_id back, so the turn is never
+        // image-only and the asset can be chained onward.
+        expect($blocks[0]['type'])->toBe('text');
+        expect($blocks[0]['text'])->toContain('[Attached asset_id=');
+        expect($blocks[0]['text'])->toContain($asset->id);
+        expect($blocks[1]['type'])->toBe('image');
+        expect($blocks[1]['mediaType'])->toBe('image/png');
+        expect(base64_decode((string) $blocks[1]['base64'], strict: true))->toBe($png);
+
+        // The image rides on a sibling turn, so the tool results of the
+        // batch stay contiguous.
+        expect(toolCallPairingFaults($messages))->toBe([]);
+    });
+
+    it('reads the bytes when the request is built, not when the tool ran', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        $dir = sys_get_temp_dir() . '/spora-tool-image-' . bin2hex(random_bytes(4));
+        mkdir($dir . '/assets', 0755, recursive: true);
+        putenv("SPORA_STORAGE_DIR={$dir}");
+        $_ENV['SPORA_STORAGE_DIR']    = $dir;
+        $_SERVER['SPORA_STORAGE_DIR'] = $dir;
+
+        $paths = new Paths(BASE_PATH);
+        $token = 'dddddddddddddddddddddddddddddddd';
+        $atToolTime = toolImagePng();
+        file_put_contents($paths->storage('assets') . '/' . $token . '.png', $atToolTime);
+
+        $asset = MediaAsset::create([
+            'id'           => '23456789-2345-4345-8345-234567890123',
+            'asset_url'    => '/api/v1/assets/23456789-2345-4345-8345-234567890123.png',
+            'storage_mode' => 'local',
+            'asset_token'  => $token,
+            'media_type'   => 'image',
+            'mime_type'    => 'image/png',
+            'byte_size'    => strlen($atToolTime),
+            'user_id'      => 1,
+            'filename'     => 'pixel.png',
+        ]);
+
+        writeToolImageTranscript($task, [['media_id' => $asset->id, 'kind' => 'image']]);
+
+        // The asset changes on disk between the tool call and the build.
+        $atBuildTime = "\x89PNG-replaced-after-the-tool-ran";
+        file_put_contents($paths->storage('assets') . '/' . $token . '.png', $atBuildTime);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect($messages)->toHaveCount(3);
+        $blocks = $messages[2]['content'];
+        expect(base64_decode((string) $blocks[1]['base64'], strict: true))->toBe($atBuildTime);
+
+        // The row itself carries a reference, never the bytes.
+        $row = TaskHistory::where('task_id', $task->id)->where('role', 'tool')->first();
+        expect((string) $row->content)->not->toContain(base64_encode($atBuildTime));
+
+        foreach (glob($dir . '/assets/*') ?: [] as $file) {
+            unlink($file);
+        }
+        @rmdir($dir . '/assets');
+        @rmdir($dir);
+    });
+
+    it('leaves a tool row without attachments byte-identical on the wire', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        writeToolImageTranscript($task, null);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect($messages)->toHaveCount(2);
+        expect($messages[1])->toBe([
+            'role' => 'tool',
+            'tool_call_id' => 'call_1',
+            'name' => 'media',
+            'content' => 'The image is attached.',
+        ]);
+    });
+
+    it('still delivers the tool text when the asset cannot be rendered', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        // An `external` asset has no bytes on hand: the archive holds a
+        // pointer to someone else's server.
+        $asset = MediaAsset::create([
+            'id'           => '34567890-3456-4456-8456-345678901234',
+            'asset_url'    => 'https://cdn.example.com/34567890-3456-4456-8456-345678901234.png',
+            'storage_mode' => 'external',
+            'media_type'   => 'image',
+            'mime_type'    => 'image/png',
+            'byte_size'    => 1024,
+            'user_id'      => 1,
+            'filename'     => 'pixel.png',
+        ]);
+
+        writeToolImageTranscript($task, [['media_id' => $asset->id, 'kind' => 'image']]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect($messages)->toHaveCount(2);
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toBe('The image is attached.');
+    });
+
+    it('drops the image for a driver that cannot take one', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $asset = MediaAsset::create([
+            'id'           => '45678901-2345-4678-9123-456789012345',
+            'asset_url'    => '/api/v1/assets/45678901-2345-4678-9123-456789012345.png',
+            'storage_mode' => 'data_url',
+            'media_type'   => 'image',
+            'mime_type'    => 'image/png',
+            'byte_size'    => strlen($png),
+            'user_id'      => 1,
+            'payload'      => $png,
+            'filename'     => 'pixel.png',
+        ]);
+
+        writeToolImageTranscript($task, [['media_id' => $asset->id, 'kind' => 'image']]);
+
+        $driver = new \Spora\Drivers\OpenAICompatibleDriver(
+            apiKey: 'test',
+            model: 'gpt-3.5-turbo',
+            baseUrl: 'https://api.openai.com/v1',
+            httpClient: new MockHttpClient(),
+            logger: new \Psr\Log\NullLogger(),
+            timeout: 60,
+        );
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        expect($messages)->toHaveCount(2);
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toBe('The image is attached.');
+    });
+
+    it('keeps the images that fit the row budget and drops the ones that do not', function (): void {
+        // The row's image bytes are capped as a whole, the same budget the
+        // attachment path spends: the per-asset cap bounds one image, not
+        // the row. An image that does not fit is dropped — the tool result
+        // text still reaches the model.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $first  = toolImageAsset('56789012-3456-4789-0123-456789012345', $png);
+        $second = toolImageAsset('67890123-4567-4890-1234-567890123456', $png);
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $first->id, 'kind' => 'image'],
+            ['media_id' => $second->id, 'kind' => 'image'],
+        ]);
+
+        // One image fits, the second does not.
+        $messages = (new MessageHistoryBuilder(null, maxRowImageBytes: strlen($png) + 1))->build($task->id);
+
+        expect($messages)->toHaveCount(3);
+
+        // The tool result survives the drop.
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toBe('The image is attached.');
+
+        $blocks = $messages[2]['content'];
+        expect($blocks)->toBeArray();
+        expect(array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image')))
+            ->toHaveCount(1);
+
+        // The identity block belongs to the image that was kept.
+        $identities = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'text'));
+        expect($identities)->toHaveCount(1);
+        expect($identities[0]['text'])->toContain($first->id);
+    });
+
+    it('keeps every image when the row budget has room for all of them', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $first  = toolImageAsset('78901234-5678-4901-2345-678901234567', $png);
+        $second = toolImageAsset('89012345-6789-4012-3456-789012345678', $png);
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $first->id, 'kind' => 'image'],
+            ['media_id' => $second->id, 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder(null, maxRowImageBytes: 2 * strlen($png)))->build($task->id);
+
+        expect($messages)->toHaveCount(3);
+        $blocks = $messages[2]['content'];
+        expect($blocks)->toBeArray();
+        expect(array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image')))
+            ->toHaveCount(2);
+    });
+
+    it('drops an image the endpoint cannot take, even when the archive could', function (): void {
+        // The provider caps the image it receives **encoded**, and base64
+        // spends four bytes on every three — so a file the archive accepts
+        // can still be one the provider answers with a 400. The history is
+        // rebuilt from the stored row on every tick, so that 400 would
+        // come back for the rest of the run.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        // 1 KB of base64 takes 768 bytes of file; 769 does not fit.
+        $driver = new CappedImageDriver(1024);
+        $tooBig = toolImageAsset('12134567-8901-4234-8234-567890123456', str_repeat('x', 769));
+        $fits   = toolImageAsset('13134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $tooBig->id, 'kind' => 'image'],
+            ['media_id' => $fits->id, 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        // The tool result survives the drop.
+        expect($messages)->toHaveCount(3);
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toBe('The image is attached.');
+
+        $blocks = $messages[2]['content'];
+        expect($blocks)->toBeArray();
+        $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));
+        expect($images)->toHaveCount(1);
+        expect(base64_decode((string) $images[0]['base64'], strict: true))->toHaveLength(768);
+    });
+
+    it('drops an image the request has no room for', function (): void {
+        // The per-image ceiling and the row budget both leave room for
+        // two images here, but the request they travel in does not: a
+        // provider rejects the whole request when it carries more than it
+        // accepts, and the same rows fail the same way on every rebuild.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        // 1 KB of base64 takes 768 bytes of file; the request has room for
+        // 1125 bytes of base64 — one image, not two.
+        $driver = new CappedImageDriver(1024, 1500);
+        $first  = toolImageAsset('15134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+        $second = toolImageAsset('16134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $first->id, 'kind' => 'image'],
+            ['media_id' => $second->id, 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        // The tool result survives the drop, and it says the image was
+        // left out — the tool result claims the image is attached.
+        expect($messages)->toHaveCount(3);
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toStartWith('The image is attached.');
+        expect($messages[1]['content'])->toContain('did not fit in the request');
+
+        $blocks = $messages[2]['content'];
+        expect($blocks)->toBeArray();
+        $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));
+        expect($images)->toHaveCount(1);
+    });
+
+    it('drops an image the request has no count room for', function (): void {
+        // A request with more images than the endpoint takes is refused
+        // whole, and for Claude the count is also what keeps the request
+        // out of the many-image rule.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        $driver = new CappedImageDriver(1024, 1_000_000, 1);
+        $first  = toolImageAsset('19134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+        $second = toolImageAsset('20134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $first->id, 'kind' => 'image'],
+            ['media_id' => $second->id, 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        expect($messages[1]['content'])->toContain('did not fit in the request');
+
+        $blocks = $messages[2]['content'];
+        expect($blocks)->toBeArray();
+        $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));
+        expect($images)->toHaveCount(1);
+    });
+
+    it('never carries more images than the Claude endpoint takes', function (): void {
+        // A Claude request with more than 20 image blocks is rejected when
+        // any of them is over 3,000 px on a side. The request is kept to
+        // 20 images, where that rule cannot apply — whatever size the
+        // images themselves are.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        $driver = new AnthropicCompatibleDriver(
+            apiKey: 'test',
+            model: 'claude-sonnet-5-5',
+            baseUrl: 'https://api.anthropic.com',
+            httpClient: new MockHttpClient(),
+            logger: new \Psr\Log\NullLogger(),
+            timeout: 60,
+        );
+
+        $attachments = [];
+        for ($index = 0; $index < 25; $index++) {
+            $asset = toolImageAsset(
+                sprintf('3%02d45678-1234-4234-8234-567890123456', $index),
+                toolImagePng(),
+            );
+            $attachments[] = ['media_id' => $asset->id, 'kind' => 'image'];
+        }
+
+        writeToolImageTranscript($task, $attachments);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        expect(RequestLimits::CLAUDE_API_MAX_IMAGES)->toBe(20)
+            ->and(imageBlocksIn($messages))->toHaveCount(20);
+
+        // The images that did not fit are announced, not silently dropped.
+        expect($messages[1]['content'])->toContain('did not fit in the request');
+    });
+
+    it('the operator\'s attachment and a tool image share the request budget', function (): void {
+        // One budget for the request, whichever path an image came from:
+        // the tool image takes it and the operator's attachment is the one
+        // that does not fit.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        $driver = new CappedImageDriver(1024, 1500);
+        $tool   = toolImageAsset('17134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+        $own    = toolImageAsset('18134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+
+        writeToolImageTranscript($task, [['media_id' => $tool->id, 'kind' => 'image']]);
+
+        TaskHistory::create([
+            'task_id'      => $task->id,
+            'sequence'     => 2,
+            'role'         => 'attachment',
+            'content'      => 'and this one',
+            'attachments'  => [['media_id' => $own->id, 'kind' => 'image']],
+        ]);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        $imageBlocks = [];
+        foreach ($messages as $message) {
+            if (!is_array($message['content'] ?? null)) {
+                continue;
+            }
+            foreach ($message['content'] as $block) {
+                if (($block['type'] ?? null) === 'image') {
+                    $imageBlocks[] = $block;
+                }
+            }
+        }
+
+        expect($imageBlocks)->toHaveCount(1);
+        expect(base64_decode((string) $imageBlocks[0]['base64'], strict: true))->toHaveLength(768);
+    });
+
+    it('tells the model when the operator\'s own attachment did not fit the request', function (): void {
+        // The operator attached the image and the model is told it is not
+        // in the request — the same notice the tool path gives, because the
+        // same thing happened: the request had no room.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        $driver = new CappedImageDriver(1024, 1500);
+        $tool   = toolImageAsset('24134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+        $own    = toolImageAsset('25134567-8901-4234-8234-567890123456', str_repeat('x', 768));
+
+        writeToolImageTranscript($task, [['media_id' => $tool->id, 'kind' => 'image']]);
+
+        TaskHistory::create([
+            'task_id'      => $task->id,
+            'sequence'     => 2,
+            'role'         => 'attachment',
+            'content'      => 'and this one',
+            'attachments'  => [['media_id' => $own->id, 'kind' => 'image']],
+        ]);
+
+        $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+        // The tool image fitted, so the tool result has nothing to announce.
+        expect($messages[1]['content'])->toBe('The image is attached.');
+
+        // The operator's attachment did not fit, and the note says so.
+        expect(textBlocksContaining($messages, 'did not fit in the request'))->toHaveCount(1);
+        expect(imageBlocksIn($messages))->toHaveCount(1);
+    });
+
+    it('holds the image turn back until the run of tool results ends', function (): void {
+        // A provider accepts a tool result only directly after the
+        // assistant turn that asked for it, so a user turn between two
+        // results of one batch is a 400.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $asset = toolImageAsset('90123456-7890-4123-8234-567890123456', $png);
+
+        writeToolImageBatchTranscript($task, [
+            [['media_id' => $asset->id, 'kind' => 'image']],
+            null,
+        ]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect(array_column($messages, 'role'))->toBe(['assistant', 'tool', 'tool', 'user']);
+        expect(toolCallPairingFaults($messages))->toBe([]);
+
+        // The image turn is the last one, and it carries the image.
+        $blocks = $messages[3]['content'];
+        expect($blocks)->toBeArray();
+        expect($blocks[1]['type'])->toBe('image');
+        expect(base64_decode((string) $blocks[1]['base64'], strict: true))->toBe($png);
+    });
+
+    it('holds the image turn back when the second result of the batch carries it', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $asset = toolImageAsset('01234567-8901-4234-8234-567890123456', $png);
+
+        writeToolImageBatchTranscript($task, [
+            null,
+            [['media_id' => $asset->id, 'kind' => 'image']],
+        ]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect(array_column($messages, 'role'))->toBe(['assistant', 'tool', 'tool', 'user']);
+        expect(toolCallPairingFaults($messages))->toBe([]);
+
+        $blocks = $messages[3]['content'];
+        expect($blocks)->toBeArray();
+        expect($blocks[1]['type'])->toBe('image');
+        expect(base64_decode((string) $blocks[1]['base64'], strict: true))->toBe($png);
+    });
+
+    it('holds the image turn back when a later result of a longer run carries it', function (): void {
+        // The image is on the second of three results, so the turn it rides
+        // on has to wait for the third as well.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $asset = toolImageAsset('21234567-8901-4234-8234-567890123456', $png);
+
+        writeToolImageBatchTranscript($task, [
+            null,
+            [['media_id' => $asset->id, 'kind' => 'image']],
+            null,
+        ]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect(array_column($messages, 'role'))->toBe(['assistant', 'tool', 'tool', 'tool', 'user']);
+        expect(toolCallPairingFaults($messages))->toBe([]);
+
+        $blocks = $messages[4]['content'];
+        expect($blocks)->toBeArray();
+        expect($blocks[1]['type'])->toBe('image');
+        expect(base64_decode((string) $blocks[1]['base64'], strict: true))->toBe($png);
+    });
+
+    it('flushes the image turn in front of the assistant row that follows the batch', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $asset = toolImageAsset('11234567-8901-4234-8234-567890123456', $png);
+
+        writeToolImageBatchTranscript($task, [
+            [['media_id' => $asset->id, 'kind' => 'image']],
+            null,
+        ]);
+        writeTrailingAssistantRow($task, 3);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect(array_column($messages, 'role'))->toBe(['assistant', 'tool', 'tool', 'user', 'assistant']);
+        expect(toolCallPairingFaults($messages))->toBe([]);
+    });
+});
+
+describe('an image the operator removed from the Media Archive', function (): void {
+    it('tells the model the image is gone rather than leaving the claim standing', function (): void {
+        // The tool result says "you can see it now". The operator deletes
+        // the asset from the Media Archive, and the row — which is what the
+        // provider sees on the next tick — still claims the image is there.
+        // The image block is dropped silently, so without a note the model
+        // reads a claim the payload no longer supports.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        writeToolImageTranscript($task, [['media_id' => '99999999-9999-4999-8999-999999999999', 'kind' => 'image']]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        // The tool result and nothing else: the image turn went with the
+        // image, and no message was added or reordered.
+        expect($messages)->toHaveCount(2);
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toStartWith('The image is attached.');
+        expect($messages[1]['content'])->toContain('removed from the Media Archive');
+        expect($messages[1]['content'])->toContain('no longer visible');
+    });
+
+    it('leaves the tool result byte-identical when every declared image still resolves', function (): void {
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $asset = toolImageAsset('11111111-1111-4111-8111-111111111111', toolImagePng());
+
+        writeToolImageTranscript($task, [['media_id' => $asset->id, 'kind' => 'image']]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect($messages[1])->toBe([
+            'role' => 'tool',
+            'tool_call_id' => 'call_1',
+            'name' => 'media',
+            'content' => 'The image is attached.',
+        ]);
+    });
+
+    it('names the count when several images are gone', function (): void {
+        // One sentence per row: several missing assets are one fact.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+
+        writeToolImageTranscript($task, [
+            ['media_id' => '22222222-2222-4222-8222-222222222222', 'kind' => 'image'],
+            ['media_id' => '33333333-3333-4333-8333-333333333333', 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect($messages)->toHaveCount(2);
+        expect($messages[1]['content'])->toContain(
+            '2 images referenced by this message were removed from the Media Archive',
+        );
+        expect(substr_count((string) $messages[1]['content'], 'removed from the Media Archive'))->toBe(1);
+    });
+});
+
+describe('an image whose bytes are no longer on hand', function (): void {
+    it('tells the model the image cannot be read, without claiming it was removed', function (): void {
+        // The row is still there — nobody deleted the asset. The file is
+        // not: the asset GC swept it, or the storage failed. The claim
+        // "you can see it now" is just as unsupported, but the note must
+        // not say the asset was removed, because it was not.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $asset = toolImageAssetWithoutBytes('44444444-4444-4444-8444-444444444444');
+
+        writeToolImageTranscript($task, [['media_id' => $asset->id, 'kind' => 'image']]);
+
+        $messages = (new MessageHistoryBuilder())->build($task->id);
+
+        expect($messages)->toHaveCount(2);
+        expect($messages[1]['role'])->toBe('tool');
+        expect($messages[1]['content'])->toContain('can no longer be read');
+        expect($messages[1]['content'])->not->toContain('removed from the Media Archive');
+    });
+
+    it('says nothing when the image was dropped for size', function (): void {
+        // A budget drop is documented behaviour, not a removal: the image
+        // is there, the row simply had no room for it. Saying it was
+        // removed would be a lie.
+        $agentId = seedToolImageAgent();
+        $task = makeToolImageTask($agentId);
+        $png = toolImagePng();
+
+        $first  = toolImageAsset('56789012-3456-4789-0123-456789012345', $png);
+        $second = toolImageAsset('67890123-4567-4890-1234-567890123456', $png);
+
+        writeToolImageTranscript($task, [
+            ['media_id' => $first->id, 'kind' => 'image'],
+            ['media_id' => $second->id, 'kind' => 'image'],
+        ]);
+
+        $messages = (new MessageHistoryBuilder(null, maxRowImageBytes: strlen($png) + 1))->build($task->id);
+
+        expect($messages[1]['content'])->toBe('The image is attached.');
+    });
+});

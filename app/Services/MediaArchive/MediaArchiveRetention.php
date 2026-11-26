@@ -166,20 +166,35 @@ final class MediaArchiveRetention
                 // derivative cascade took it in an earlier iteration.
                 continue;
             }
-            // The swept row's OWN bytes, before its cascade runs.
-            // `deleteRowsWithPayloads()` unlinks the payloads of an asset's
-            // *derivatives*; it never touches the asset itself, so without
-            // this a swept `local` row leaves its file on disk.
+            // The cascade runs first: it unlinks the payloads of the
+            // asset's *derivatives*, and it never touches the asset itself,
+            // so the swept row's own bytes need their own unlink below.
             //
-            // It also makes the walk order-independent. `findExcessTempIds()`
-            // orders by `created_at`, which `$table->timestamps()` resolves at
-            // second precision — a parent and the derivative minted alongside
-            // it tie, and which one the engine hands back first is not
-            // specified. If the derivative is walked first, its row is gone
-            // before the parent's cascade runs, so the cascade finds no row
-            // to unlink and its bytes survive the sweep for good.
-            $payloads->remove($asset);
-            MediaDerivativeService::deleteRowsWithPayloads($asset, $payloads);
+            // The order also makes the walk order-independent.
+            // `findExcessTempIds()` orders by `created_at`, which
+            // `$table->timestamps()` resolves at second precision — a parent
+            // and the derivative minted alongside it tie, and which one the
+            // engine hands back first is not specified. If the derivative is
+            // walked first, its row is gone before the parent's cascade
+            // runs, so the cascade finds no row to unlink and its bytes
+            // survive the sweep for good.
+            //
+            // A row whose bytes survived the unlink keeps its row: the
+            // bytes are on disk, and a row deleted anyway would leave them
+            // with nothing pointing at them and no way to retry. The sweep
+            // is opportunistic, so it moves on rather than failing the
+            // upload that triggered it.
+            //
+            // The cascade's own bytes go first for the same reason: a swept
+            // row that keeps its row because a derivative's bytes survived
+            // keeps its own bytes too, so the row never points at a file
+            // that is gone.
+            if (!MediaDerivativeService::deleteRowsWithPayloads($asset, $payloads)) {
+                continue;
+            }
+            if (!$payloads->remove($asset)) {
+                continue;
+            }
             $deleted += (int) $asset->delete();
         }
 

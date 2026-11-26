@@ -156,16 +156,22 @@ final class MediaArchiveService
 
     private readonly PrincipalResolver $principalResolver;
 
+    private readonly DerivativePayloadStore $payloads;
+
     public function __construct(
         private readonly MediaArchiveIngestPipeline $ingestPipeline,
         private readonly MediaDerivativeService $derivatives,
         ?PrincipalService $principalService = null,
         ?MediaAssetResolver $resolver = null,
         ?PrincipalResolver $principalResolver = null,
+        ?DerivativePayloadStore $payloads = null,
     ) {
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
         $this->resolver = $resolver ?? new MediaAssetResolver(new PrincipalResolver());
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+        $this->payloads = $payloads ?? new DerivativePayloadStore(
+            defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3),
+        );
     }
 
     /**
@@ -301,6 +307,17 @@ final class MediaArchiveService
         return MediaAsset::query()->find($id);
     }
 
+    /**
+     * Delete the asset, its derivatives and their bytes.
+     *
+     * The row survives when the bytes do not: a `local` file that the
+     * filesystem refuses to unlink stays on disk, and a row deleted
+     * anyway leaves those bytes with nothing pointing at them and no way
+     * to retry. The operator sees the failure and the asset is still
+     * there; a second delete frees it once the filesystem allows it.
+     *
+     * @throws MediaArchiveException When the bytes could not be freed.
+     */
     public function delete(string $id): void
     {
         $asset = MediaAsset::query()->find($id);
@@ -310,7 +327,30 @@ final class MediaArchiveService
         // Derivatives first — deleting the parent would cascade the join rows
         // away and orphan the derivative assets. See
         // {@see MediaDerivativeService::deleteWithDerivatives()}.
-        $this->derivatives->deleteWithDerivatives($asset);
+        $derivativesFreed = $this->derivatives->deleteWithDerivatives($asset);
+
+        // The parent's own bytes go last, after the derivatives are gone: a
+        // failure on either side keeps the whole asset, so a parent whose
+        // own bytes were freed while a derivative's survived is never a row
+        // pointing at a file that is no longer there.
+        $parentFreed = false;
+        if ($derivativesFreed) {
+            // A `local` row's file sits on disk with no other row pointing
+            // at it once the row goes, so it has to go with the row —
+            // otherwise the archive keeps the bytes of an asset the
+            // operator deleted, for ever. `remove()` is a no-op for a
+            // `data_url` row (the bytes live in the column the row delete
+            // drops) and for an `external` one (no Spora-side file at all).
+            $parentFreed = $this->payloads->remove($asset);
+        }
+
+        if (!$derivativesFreed || !$parentFreed) {
+            throw new MediaArchiveException(sprintf(
+                'MediaArchiveService: the bytes of asset %s could not be removed; the row was kept so the delete can be retried.',
+                $id,
+            ));
+        }
+
         $asset->delete();
     }
 

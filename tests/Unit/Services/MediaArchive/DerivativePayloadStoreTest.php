@@ -35,6 +35,45 @@ function payloadAsset(
     return $asset;
 }
 
+/**
+ * A private storage directory for one test, with the env restored
+ * afterwards.
+ *
+ * Per-test ownership of the tmp dir keeps parallel runs from deleting each
+ * other's files, and keeps a directory this test makes read-only away from
+ * the suite's shared `storage/assets` — a worker writing there while the
+ * mode is `0555` would fail, and a worker resetting the mode would undo
+ * the refusal the test is about.
+ *
+ * @return array{0: string, 1: Closure(): void}
+ */
+function payloadStoreDir(): array
+{
+    $dir = sys_get_temp_dir() . '/spora-payload-store-' . bin2hex(random_bytes(4));
+    mkdir($dir, 0755, recursive: true);
+
+    $previous = getenv('SPORA_STORAGE_DIR');
+    putenv("SPORA_STORAGE_DIR={$dir}");
+    $_ENV['SPORA_STORAGE_DIR']    = $dir;
+    $_SERVER['SPORA_STORAGE_DIR'] = $dir;
+
+    $restore = static function () use ($dir, $previous): void {
+        if ($previous === false) {
+            putenv('SPORA_STORAGE_DIR');
+            unset($_ENV['SPORA_STORAGE_DIR'], $_SERVER['SPORA_STORAGE_DIR']);
+        } else {
+            putenv("SPORA_STORAGE_DIR={$previous}");
+            $_ENV['SPORA_STORAGE_DIR']    = $previous;
+            $_SERVER['SPORA_STORAGE_DIR'] = $previous;
+        }
+        array_map('unlink', glob($dir . '/assets/*') ?: []);
+        @rmdir($dir . '/assets');
+        @rmdir($dir);
+    };
+
+    return [$dir, $restore];
+}
+
 test('read() returns the BLOB payload in data_url mode', function (): void {
     $asset = payloadAsset('data_url');
     $asset->payload = "# Heading\n\nbody";
@@ -60,9 +99,8 @@ test('remove() leaves a data_url row alone, the row delete drops the column', fu
     $asset = payloadAsset('data_url');
     $asset->payload = 'still here';
 
-    payloadStore()->remove($asset);
-
-    expect($asset->payload)->toBe('still here');
+    expect(payloadStore()->remove($asset))->toBeTrue()
+        ->and($asset->payload)->toBe('still here');
 });
 
 test('read() and rewrite() round-trip bytes through a local file', function (): void {
@@ -111,9 +149,48 @@ test('rewrite() is a no-op for a local asset with no resolvable path', function 
 });
 
 test('remove() tolerates a missing file instead of warning', function (): void {
-    payloadStore()->remove(payloadAsset('local', 'never-written'));
+    // The bytes are already gone, which is what the caller asked for.
+    expect(payloadStore()->remove(payloadAsset('local', 'never-written')))->toBeTrue();
+});
 
-    expect(true)->toBeTrue();
+test('remove() reports the refusal when the filesystem keeps the file', function (): void {
+    // `unlink()` returns false when the filesystem refuses, and the row
+    // that pointed at the file is the only thing that accounts for it — so
+    // the caller has to hear about it.
+    [$dir, $restore] = payloadStoreDir();
+
+    try {
+        $token = 'payloadstore-' . bin2hex(random_bytes(4));
+        $asset = payloadAsset('local', $token);
+        $path  = payloadStore()->pathFor($asset);
+        expect($path)->not->toBeNull();
+
+        $assetsDir = dirname($path);
+        if (!is_dir($assetsDir)) {
+            mkdir($assetsDir, 0o777, true);
+        }
+        file_put_contents($path, 'bytes the filesystem refuses to lose');
+
+        chmod($assetsDir, 0555);
+        clearstatcache(true, $assetsDir);
+
+        try {
+            // A process that holds CAP_DAC_OVERRIDE writes regardless of the
+            // permissions, so this environment cannot express the failure.
+            if (is_writable($assetsDir)) {
+                $this->markTestSkipped(
+                    'This process can write to a read-only directory, so the refused unlink cannot be exercised here.',
+                );
+            }
+
+            expect(payloadStore()->remove($asset))->toBeFalse()
+                ->and(is_file($path))->toBeTrue();
+        } finally {
+            chmod($assetsDir, 0755);
+        }
+    } finally {
+        $restore();
+    }
 });
 
 /**
@@ -138,32 +215,12 @@ describe('local-mode agreement with the writer', function (): void {
      */
     function agreementStore(): array
     {
-        $dir = sys_get_temp_dir() . '/spora-payload-store-' . bin2hex(random_bytes(4));
-        mkdir($dir, 0755, recursive: true);
-
-        $previous = getenv('SPORA_STORAGE_DIR');
-        putenv("SPORA_STORAGE_DIR={$dir}");
-        $_ENV['SPORA_STORAGE_DIR']    = $dir;
-        $_SERVER['SPORA_STORAGE_DIR'] = $dir;
+        [$dir, $restore] = payloadStoreDir();
 
         $store = new LocalAssetStore(
             new Paths(BASE_PATH, null),
             new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
         );
-
-        $restore = static function () use ($dir, $previous): void {
-            if ($previous === false) {
-                putenv('SPORA_STORAGE_DIR');
-                unset($_ENV['SPORA_STORAGE_DIR'], $_SERVER['SPORA_STORAGE_DIR']);
-            } else {
-                putenv("SPORA_STORAGE_DIR={$previous}");
-                $_ENV['SPORA_STORAGE_DIR']    = $previous;
-                $_SERVER['SPORA_STORAGE_DIR'] = $previous;
-            }
-            array_map('unlink', glob($dir . '/assets/*') ?: []);
-            @rmdir($dir . '/assets');
-            @rmdir($dir);
-        };
 
         return [$store, $dir, $restore];
     }

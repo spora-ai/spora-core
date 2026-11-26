@@ -41,6 +41,12 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
         ?int                $timeout = null,
         ?AnthropicDriverOptions $options = null,
     ) {
+        // Bedrock's Anthropic-native route halves the ceiling on one
+        // image and shrinks the one on the whole request; the host says
+        // which of the two this endpoint is.
+        $bedrock = str_contains(strtolower($baseUrl), 'bedrock-runtime.')
+            || str_contains(strtolower($baseUrl), 'bedrock-mantle.');
+
         parent::__construct(
             $apiKey,
             $model,
@@ -51,6 +57,13 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
             $options?->supportsImageInput,
             $options !== null ? $options->configuredEffortLevels : [],
             $options?->supportsEffort,
+            maxEncodedImageBytes: $bedrock
+                ? RequestLimits::BEDROCK_MAX_IMAGE_BYTES
+                : RequestLimits::CLAUDE_API_MAX_IMAGE_BYTES,
+            maxRequestBytes: $bedrock
+                ? RequestLimits::BEDROCK_MAX_REQUEST_BYTES
+                : RequestLimits::CLAUDE_API_MAX_REQUEST_BYTES,
+            maxImagesPerRequest: RequestLimits::CLAUDE_API_MAX_IMAGES,
         );
         $this->requestBuilder = new AnthropicRequestBuilder(
             apiKey: $apiKey,

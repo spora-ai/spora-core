@@ -63,6 +63,10 @@ final class ThrownLiteralHarvest implements Harvest
         'Access tool settings via ToolConfigService, not directly.',
         'BASE_PATH is not defined. Add `define(\'BASE_PATH\', dirname(__FILE__, 2));` to your bin/spora before requiring this script.',
         'PrincipalService not wired into AgentPrincipalService — cannot transfer.',
+        // The delete refusal is a service diagnostic: `MediaArchiveException`
+        // has no arm in the Kernel's known-exception map, so the message
+        // reaches the log and the model's tool result, never an envelope.
+        'MediaArchiveService: the bytes of asset %s could not be removed; the row was kept so the delete can be retried.',
     ];
 
     public function __construct(

@@ -6,6 +6,7 @@ namespace Spora\Tools;
 
 use Spora\Auth\AuthService;
 use Spora\Core\Config;
+use Spora\Drivers\DriverFactory;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaActiveTypesPolicy;
@@ -122,20 +123,39 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                           root. A folder already holding that filename
  *                           refuses it.
  *   - `search_assets`      — the assets inside one folder.
+ *   - `inspect_image`      — send an image from the archive to the model so
+ *                           it can look at it. The image rides on a user turn
+ *                           that follows the tool result, so the model sees it
+ *                           on its next turn.
+ *                           **Off by default**: an operator opts in per
+ *                           agent, and the agent's LLM has to accept image
+ *                           content blocks for the call to succeed.
  *
- * Scope behavior (`scope` setting, default `agent`):
+ * Scope behavior (`scope` setting, default `principal`):
  *
- *   - `agent` (default): `search` filters by `agent_id`, the per-asset
- *     ops require `asset->agent_id === $agentId`.
- *   - `principal`: the per-asset ops accept any asset whose stored
- *     `principal_id` is the calling agent's principal, or — for a legacy
- *     row with none — whose attached agent belongs to that principal, or
- *     which the owner of a personal principal uploaded themselves.
- *     `search` lists the rows the principal's agents hold.
+ *   - `principal` (default): the per-asset ops accept any asset whose
+ *     stored `principal_id` is the calling agent's principal, or — for a
+ *     legacy row with none — whose attached agent belongs to that
+ *     principal, or which the owner of a personal principal uploaded
+ *     themselves. `search` lists the rows the principal's agents hold.
+ *   - `agent`: `search` filters by `agent_id`, the per-asset ops require
+ *     `asset->agent_id === $agentId`. An agent that was enabled before
+ *     the default moved keeps this: where no layer of the settings
+ *     cascade — the agent's own row, the shared group, the global
+ *     layer, the principal layer — supplied a scope, migration 0105
+ *     materialises `scope: 'agent'` into the agent's own override row,
+ *     so the reach it had survives the change; where a scope was set
+ *     deliberately, at any of those levels, that scope is left exactly
+ *     as it is, because writing `agent` over it would narrow the reach
+ *     the operator asked for. An agent enabled from now on gets
+ *     `principal`.
  *   - `user` (legacy): the per-asset ops treat it as an alias for
  *     `principal` so existing `agent_tool_settings` rows keep working
  *     without a DB migration; the listing narrows to the caller user's
  *     own rows.
+ *   - A stored value that is none of these reads as `agent`: a setting
+ *     that cannot be understood — a typo, a value of a type the setting
+ *     never holds — must not widen what the agent sees.
  *   - Admins (`AuthService::isAdmin()`) bypass the scope check on the
  *     per-asset ops.
  */
@@ -151,7 +171,7 @@ use Spora\Tools\ValueObjects\ToolResult;
     key: 'scope',
     label: 'Library scope',
     type: 'select',
-    default: 'agent',
+    default: 'principal',
     options: [
         'agent'     => 'Only media created by this agent',
         'principal' => 'All media owned by the calling agent\'s principal '
@@ -247,6 +267,12 @@ use Spora\Tools\ValueObjects\ToolResult;
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
+#[ToolOperation(
+    name: 'inspect_image',
+    description: 'Send an image from the media archive to the model so it can look at it, describe it, or QA it. The image is attached on a user turn that follows the tool result — the model sees it on the next turn. Requires a vision-capable LLM, and the media tool\'s Library scope decides which images are reachable.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: false,
+)]
 #[ToolParameter(name: 'plugin_slug', type: 'string', description: 'Filter by media_assets.plugin_slug.', required: false)]
 #[ToolParameter(
     name: 'mime_type',
@@ -266,7 +292,13 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(name: 'task_id', type: 'integer', description: 'Filter by media_assets.task_id.', required: false)]
 #[ToolParameter(name: 'limit', type: 'integer', description: 'Maximum items to return (default 24, capped at 100).', required: false, default: 24)]
 #[ToolParameter(name: 'offset', type: 'integer', description: 'Items to skip (default 0).', required: false, default: 0)]
-#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset. Required for get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, and file_asset (search ignores it).', required: ['get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'file_asset'])]
+#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset. Required for get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, file_asset and inspect_image (search ignores it).', required: ['get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'file_asset', 'inspect_image'])]
+#[ToolParameter(
+    name: 'question',
+    type: 'string',
+    description: 'What to look at in the image, for `inspect_image` — e.g. "is the chart axis labelled?". Ignored by every other op.',
+    required: false,
+)]
 #[ToolParameter(
     name: 'format',
     type: 'string',
@@ -351,6 +383,8 @@ final class MediaTool extends AbstractTool
         private readonly MediaActiveTypesPolicy $activeTypes,
         private readonly Config $config,
         private readonly ?ToolConfigService $toolConfigService = null,
+        private readonly ?DriverFactory $driverFactory = null,
+        private readonly MediaInspectImageHandler $inspectHandler = new MediaInspectImageHandler(),
     ) {}
 
     public function execute(
@@ -381,7 +415,25 @@ final class MediaTool extends AbstractTool
             'create_media'      => $this->createHandler->create($arguments, $agentId, $userId, $context),
             'list_folders', 'create_folder', 'rename_folder', 'delete_folder', 'file_asset', 'search_assets'
                 => $this->folderHandler->run($operation, $principalId, $arguments),
-            default             => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, create_media, list_folders, create_folder, rename_folder, delete_folder, file_asset, or search_assets.'),
+            // The scope check is MediaTool's, not the handler's: every
+            // per-asset operation shares one implementation of it, and the
+            // handler receives it as a closure so there is no second one.
+            'inspect_image'     => $this->inspectHandler->inspect(
+                $arguments,
+                $agentId,
+                $this->driverFactory,
+                $this->resolveScope($agentId, $userId),
+                fn(string $notVisible, string $scope): MediaAsset|ToolResult => $this->resolveAssetOrFail(
+                    'inspect_image',
+                    $arguments,
+                    $agentId,
+                    $userId,
+                    $context,
+                    $notVisible,
+                    $scope,
+                ),
+            ),
+            default             => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, create_media, list_folders, create_folder, rename_folder, delete_folder, file_asset, search_assets, or inspect_image.'),
         };
     }
 
@@ -414,6 +466,7 @@ final class MediaTool extends AbstractTool
             'delete_folder'     => sprintf('Media delete_folder(%s)', $folderId),
             'file_asset'        => sprintf('Media file_asset(%s, folder=%s)', $assetId, $folderId),
             'search_assets'     => sprintf('Media search_assets(folder=%s)', $folderId),
+            'inspect_image'     => sprintf('Media inspect_image(%s)', $assetId),
             default             => sprintf('Media %s', $op),
         };
     }
@@ -478,6 +531,13 @@ final class MediaTool extends AbstractTool
     }
 
     /**
+     * The asset the operation names, or the refusal to report.
+     *
+     * `$notFoundMessage` overrides the generic "Media asset not found." for
+     * an operation whose refusal has to tell the model more than that — the
+     * generic answer does not distinguish "no such asset" from "not visible
+     * under your scope", and a model that cannot tell the two cannot act.
+     *
      * @param  array<string, mixed> $arguments
      * @return MediaAsset|ToolResult
      */
@@ -487,14 +547,16 @@ final class MediaTool extends AbstractTool
         int $agentId,
         ?int $userId,
         ?PrincipalContext $context,
+        ?string $notFoundMessage = null,
+        ?string $scope = null,
     ): MediaAsset|ToolResult {
         $assetId = trim((string) ($arguments['asset_id'] ?? ''));
         if ($assetId === '') {
             return ToolResult::fail("asset_id is required for {$operation}.");
         }
         $asset = $this->archive->find($assetId);
-        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId, $context)) {
-            return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
+        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId, $context, $scope)) {
+            return ToolResult::fail($notFoundMessage ?? self::ERR_ASSET_NOT_FOUND);
         }
         return $asset;
     }
@@ -814,11 +876,23 @@ final class MediaTool extends AbstractTool
     private function resolveScope(int $agentId, ?int $userId): string
     {
         $settings = $this->toolConfigService?->getEffectiveSettings(self::class, $agentId, $userId) ?? [];
-        $scope = is_string($settings['scope'] ?? null) ? $settings['scope'] : 'agent';
+
+        // Two questions, two answers. An absent setting — or the null the
+        // cascade stores for "cleared, inherit" — is the operator's silence,
+        // so it takes the shipped default (`principal`). A value nobody can
+        // read (a boolean, a number, an array) is a wrong setting, and a
+        // wrong setting must not widen the reach, so it takes the narrowest
+        // scope.
+        $raw   = $settings['scope'] ?? null;
+        $scope = match (true) {
+            is_string($raw) => $raw,
+            $raw === null   => 'principal',
+            default         => 'agent',
+        };
 
         // Legacy 'user' is a runtime alias for 'principal' — see the
-        // class-level docblock. Anything unrecognised falls back to
-        // 'agent' so a stale or mistyped setting never widens visibility.
+        // class-level docblock. An unrecognised string is a wrong setting
+        // too, and takes the narrowest scope as well.
         return in_array($scope, ['agent', 'principal', 'user'], true) ? $scope : 'agent';
     }
 
@@ -840,12 +914,17 @@ final class MediaTool extends AbstractTool
         int $agentId,
         ?int $userId,
         ?PrincipalContext $context = null,
+        ?string $scope = null,
     ): bool {
         if ($this->auth->isAdmin()) {
             return true;
         }
 
-        $scope = $this->resolveScope($agentId, $userId);
+        // The scope the caller already resolved, when it has one. The
+        // settings cascade is a read, and a caller that resolved the
+        // scope to name a refusal must not have the check decide on a
+        // different one.
+        $scope ??= $this->resolveScope($agentId, $userId);
         // Legacy alias: existing agents may still have 'user' persisted.
         $effective = $scope === 'user' ? 'principal' : $scope;
 

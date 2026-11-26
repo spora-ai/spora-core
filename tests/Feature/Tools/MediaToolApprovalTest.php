@@ -33,10 +33,11 @@ use Spora\Tools\MediaTool;
  *   - `delete_folder`     : enabled_by_default = true,  requires_approval_by_default = true
  *   - `file_asset`        : enabled_by_default = true,  requires_approval_by_default = false
  *   - `search_assets`     : enabled_by_default = true,  requires_approval_by_default = false
+ *   - `inspect_image`     : enabled_by_default = false, requires_approval_by_default = false
  *   - The discriminator `enum` in the generated JSON schema lists every
  *     operation (the orchestrator narrows the enum per-agent).
- *   - All are enabled by default, so an agent with no override row sees
- *     the full matrix. The ones that ask for approval do so for a reason
+ *   - All but `inspect_image` are enabled by default, so an agent with no
+ *     override row sees the full matrix minus that one. The ones that ask for approval do so for a reason
  *     about durability rather than reads: `get_public_url` mints a
  *     link that outlives the session, `create_media` is the one write with
  *     no natural key, so a retry duplicates the row and a loop spams the
@@ -44,7 +45,8 @@ use Spora\Tools\MediaTool;
  *     mutations change a tree the operator curates. The rest are reads or
  *     writes the agent could already make against assets it owns, and
  *     `create_derivative`'s idempotency is a DB-enforced UNIQUE index.
- *     Matches `enabledByDefault` in
+ *     `inspect_image` ships OFF: it puts an archive image in front of the
+ *     model, so an operator opts in per agent. Matches `enabledByDefault` in
  *     {@see ToolDefinitionBuilder::buildToolDefinitions()}.
  *
  * Uses a real `MediaArchiveService` rather than a Mockery mock because
@@ -115,14 +117,23 @@ describe('MediaTool attributes', function (): void {
         expect($tool->description)->toContain('media library');
     });
 
-    it('declares exactly the fourteen expected operations', function (): void {
+    it('declares exactly the fifteen expected operations', function (): void {
         $names = array_map(static fn(ToolOperation $op) => $op->name, mediaToolOperations());
         expect($names)->toBe([
             'search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source',
             'list_derivatives', 'create_derivative', 'create_media',
             'list_folders', 'create_folder', 'rename_folder', 'delete_folder',
-            'file_asset', 'search_assets',
+            'file_asset', 'search_assets', 'inspect_image',
         ]);
+    });
+
+    it('marks inspect_image as disabled by default and auto-approved', function (): void {
+        // It puts an archive image in front of the model, so an operator
+        // opts in per agent. The approval is a read, and a read needs no
+        // prompt.
+        $op = mediaToolOpByName('inspect_image');
+        expect($op->enabledByDefault)->toBeFalse()
+            ->and($op->requiresApprovalByDefault)->toBeFalse();
     });
 
     it('marks search as enabled by default and auto-approved', function (): void {
@@ -230,7 +241,7 @@ describe('MediaTool attributes', function (): void {
         ]);
     });
 
-    it('enables every operation by default', function (): void {
+    it('enables every operation but inspect_image by default', function (): void {
         $disabled = array_values(array_map(
             static fn(ToolOperation $op): string => $op->name,
             array_filter(
@@ -239,7 +250,7 @@ describe('MediaTool attributes', function (): void {
             ),
         ));
 
-        expect($disabled)->toBe([]);
+        expect($disabled)->toBe(['inspect_image']);
     });
 
     it('exposes the scope setting as a select with two options', function (): void {
@@ -250,7 +261,7 @@ describe('MediaTool attributes', function (): void {
         $setting = $attrs[0]->newInstance();
         expect($setting->key)->toBe('scope')
             ->and($setting->type)->toBe('select')
-            ->and($setting->default)->toBe('agent')
+            ->and($setting->default)->toBe('principal')
             ->and($setting->options)->toBe([
                 'agent'     => 'Only media created by this agent',
                 'principal' => 'All media owned by the calling agent\'s principal '
@@ -268,7 +279,7 @@ describe('MediaTool attributes', function (): void {
 });
 
 describe('MediaTool parameter schema', function (): void {
-    it('synthesizes an "action" discriminator with the fourteen operations in its enum', function (): void {
+    it('synthesizes an "action" discriminator with the fifteen operations in its enum', function (): void {
         $tool = buildMediaToolForSchema();
 
         $schema = $tool->getParametersSchema();
@@ -279,16 +290,17 @@ describe('MediaTool parameter schema', function (): void {
             'search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source',
             'list_derivatives', 'create_derivative', 'create_media',
             'list_folders', 'create_folder', 'rename_folder', 'delete_folder',
-            'file_asset', 'search_assets',
+            'file_asset', 'search_assets', 'inspect_image',
         ]);
     });
 });
 
 describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
-    it('exposes all fourteen operations when no per-agent override exists', function (): void {
-        // No AgentToolOperationOverride rows for this agent. Every op declares
-        // `enabledByDefault: true`, so the full matrix is exposed — including
-        // `get_public_url`, which is exposed but still asks for approval.
+    it('exposes every operation but inspect_image when no per-agent override exists', function (): void {
+        // No AgentToolOperationOverride rows for this agent. Every op but
+        // `inspect_image` declares `enabledByDefault: true`, so the full
+        // matrix minus that one is exposed — including `get_public_url`,
+        // which is exposed but still asks for approval.
         //
         // That split is the point: the enum is what the model may *ask* for,
         // and approval is decided per call at execute time. Narrowing the enum

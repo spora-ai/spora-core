@@ -23,7 +23,6 @@ use Spora\Metering\UsageMeterInterface;
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\Task;
-use Spora\Models\TaskHistory;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\EffortService;
@@ -395,15 +394,7 @@ final class Orchestrator implements OrchestratorInterface
         ?string                $content,
         ?HistoryMessageContext $context = null,
     ): void {
-        $context ??= new HistoryMessageContext();
-
-        $row = HistoryRowWriter::buildRow($taskId, $role, $content, $context);
-
-        $nextSeq = TaskHistory::where('task_id', $taskId)->max('sequence') ?? -1;
-        $row['sequence'] = $nextSeq + 1;
-        $history = TaskHistory::create($row);
-
-        HistoryRowWriter::insertUsageIfPresent($history->id, $context->usage);
+        HistoryRowWriter::appendWithinTransaction($taskId, $role, $content, $context);
     }
 
     /**
@@ -838,16 +829,6 @@ final class Orchestrator implements OrchestratorInterface
         ?string                   $content,
         ?HistoryMessageContext    $context = null,
     ): void {
-        $context ??= new HistoryMessageContext();
-        $row = HistoryRowWriter::buildRow($taskId, $role, $content, $context);
-        $usage = $context->usage;
-
-        Capsule::connection()->transaction(function () use ($taskId, $row, $usage): void {
-            $nextSeq = TaskHistory::where('task_id', $taskId)->lockForUpdate()->max('sequence') ?? -1;
-            $row['sequence'] = $nextSeq + 1;
-            $history = TaskHistory::create($row);
-
-            HistoryRowWriter::insertUsageIfPresent($history->id, $usage);
-        });
+        HistoryRowWriter::append($taskId, $role, $content, $context);
     }
 }

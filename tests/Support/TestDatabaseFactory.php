@@ -18,6 +18,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Core\Config;
 use Spora\Core\Database;
+use Spora\Core\Exceptions\DatabaseNotBootedException;
 
 final class TestDatabaseFactory
 {
@@ -140,6 +141,8 @@ final class TestDatabaseFactory
             return;
         }
 
+        self::releaseConnections();
+
         self::dropWorkerDatabase();
         self::createWorkerDatabase();
         self::$workerSchemaInstalled = false;
@@ -151,6 +154,36 @@ final class TestDatabaseFactory
         (new Database(self::buildConfigForDriver()))->boot();
         Database::setSchemaInstallSkipped(true);
         self::$workerSchemaInstalled = true;
+    }
+
+    /**
+     * Close the connections the suite is holding.
+     *
+     * An open transaction keeps its metadata locks until it ends, and
+     * `DROP DATABASE` waits for an exclusive lock on every table it
+     * touched. Closing the connection ends the transaction and releases
+     * every lock it held, so the drop that follows returns instead of
+     * blocking on the test's own connection.
+     *
+     * The rollback that ends the transaction **discards whatever the test
+     * wrote since the suite's global `beforeEach` began it**, so call
+     * this before the test's own setup, not after it.
+     */
+    private static function releaseConnections(): void
+    {
+        try {
+            $capsule = Database::getCapsule();
+        } catch (DatabaseNotBootedException) {
+            return;
+        }
+
+        foreach ($capsule->getDatabaseManager()->getConnections() as $connection) {
+            if ($connection->transactionLevel() > 0) {
+                $connection->rollBack();
+            }
+
+            $connection->disconnect();
+        }
     }
 
     /** Connect-only boot for tests that build their own partial schema. */
@@ -187,6 +220,8 @@ final class TestDatabaseFactory
             (new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:'])))->bootDatabaseConnectionOnly();
             return;
         }
+
+        self::releaseConnections();
 
         self::dropWorkerDatabase();
         self::createWorkerDatabase();

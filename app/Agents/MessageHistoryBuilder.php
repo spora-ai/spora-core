@@ -9,13 +9,19 @@ use Spora\Drivers\LLMDriverInterface;
 use Spora\Models\MediaAsset;
 use Spora\Models\MediaDerivative;
 use Spora\Models\TaskHistory;
+use Spora\Services\MediaArchive\ImageRequestBudget;
 use Spora\Services\MediaArchive\MediaDerivativeService;
+use Spora\Services\MediaArchive\MediaImageBlocks;
 
 /**
  * Replays {@see TaskHistory} rows into the OpenAI-compatible message list sent
  * to the LLM each tick. Rows with `role=attachment` are never sent as such
  * (providers reject the role) — they fold into the adjacent `user` row,
  * with the operator's typed prompt preserved as a leading text block.
+ *
+ * A `role=tool` row that carries image attachments contributes two messages:
+ * the tool result, and a sibling `user` row with the images. A provider's
+ * tool result takes text only, so the image cannot live inside it.
  *
  * Pairing is order-symmetric: {@see consumeAttachmentPair()} handles the
  * reverse-order case and {@see consumeUserAttachmentPair()} the production
@@ -41,15 +47,79 @@ use Spora\Services\MediaArchive\MediaDerivativeService;
  */
 final class MessageHistoryBuilder
 {
+    /**
+     * The notes appended to a message whose image attachment no longer
+     * resolves.
+     *
+     * A tool result that says "you can see it now" outlives the asset it
+     * points at: the operator can delete that asset from the Media Archive
+     * at any time, and the row — which is what the provider sees on the
+     * next tick — still claims the image is there. The image block is
+     * dropped silently in that case, so without this note the model reads
+     * a claim the payload no longer supports.
+     *
+     * Two reasons, and they are not the same fact. The **row** can be
+     * gone — the asset was removed from the archive. Or the row can be
+     * there and the **bytes** can be missing: the file was swept by the
+     * asset GC, or it cannot be read. The first says the operator
+     * deleted it; the second does not, and claiming so would be a lie.
+     *
+     * A third case is not a removal, but the model still has to hear
+     * about it: an image the **request had no room for** — the
+     * provider's ceiling on the encoded bytes or on the number of
+     * images was already spent — was never sent, and the message that
+     * named it is still in the request.
+     *
+     * A fourth case produces no note at all: an image that was **dropped
+     * for size** — over the per-asset cap or out of the row's budget —
+     * is documented behaviour, and the tool result's text still reaches
+     * the model.
+     *
+     * One sentence per reason: several missing assets are one fact, not
+     * several, so the plural variant names the count instead of repeating
+     * the sentence.
+     */
+    private const REMOVED_ASSET_NOTE = 'Note: the image referenced by this message was removed from the Media Archive '
+        . 'and is no longer visible in this conversation.';
+
+    private const REMOVED_ASSETS_NOTE = 'Note: the %d images referenced by this message were removed from the Media '
+        . 'Archive and are no longer visible in this conversation.';
+
+    private const UNREADABLE_ASSET_NOTE = 'Note: the image referenced by this message can no longer be read, so it is '
+        . 'no longer visible in this conversation.';
+
+    private const UNREADABLE_ASSETS_NOTE = 'Note: the %d images referenced by this message can no longer be read, so '
+        . 'they are no longer visible in this conversation.';
+
+    private const DROPPED_ASSET_NOTE = 'Note: the image referenced by this message did not fit in the request and was '
+        . 'not sent, so it is not visible in this conversation.';
+
+    private const DROPPED_ASSETS_NOTE = 'Note: the %d images referenced by this message did not fit in the request and '
+        . 'were not sent, so they are not visible in this conversation.';
+
+    /**
+     * The image bytes one request may carry.
+     *
+     * Shared by the two paths that put an image in front of the model, so
+     * the total of a request is the same whichever path an image came
+     * from.
+     */
+    private readonly ImageRequestBudget $imageBudget;
+
     public function __construct(
         private readonly ?LLMDriverInterface $driver = null,
-    ) {}
+        private readonly int $maxRowImageBytes = MediaImageBlocks::MAX_ROW_BYTES,
+    ) {
+        $this->imageBudget = MediaImageBlocks::requestBudgetFor($driver);
+    }
 
     /**
      * @return list<array<string, mixed>>  OpenAI-compatible messages, in `sequence` order.
      */
     public function build(int $taskId): array
     {
+        $this->imageBudget->reset();
+
         $rows = TaskHistory::where('task_id', $taskId)
             ->orderBy('sequence')
             ->get();
@@ -86,6 +156,12 @@ final class MessageHistoryBuilder
         $pending   = $compactions->summaries();
         $rowsArray = $rows->values()->all();
 
+        // The images a tool result carries ride on a user turn that follows
+        // the whole run of tool results. A provider accepts a tool result
+        // only directly after the assistant turn that asked for it, so a
+        // user turn between two results of the same batch is a 400.
+        $toolImages = [];
+
         $i = 0;
         while ($i < count($rowsArray)) {
             $row = $rowsArray[$i];
@@ -98,18 +174,18 @@ final class MessageHistoryBuilder
             $pair     = $this->consumeAdjacentPair($row, $rowsArray, $i);
             $firstSeq = $pair['first'] ?? (int) $row->sequence;
 
-            // A summary stands in for the rows its range starts at, so it is
-            // sent at that position rather than at its own row's position.
-            // The pair's FIRST sequence decides the position: a range that
-            // starts on the second half must be sent after the first half.
-            while ($pending !== [] && $pending[0]['first'] <= $firstSeq) {
-                $messages[] = $this->summaryMessage($pending[0]['row']);
-                array_shift($pending);
-            }
+            $this->flushSummariesBefore($messages, $pending, $firstSeq);
 
-            $message = $this->turnMessage($row, $pair, $compactions);
-            if ($message !== null) {
-                $messages[] = $message;
+            $turn = $this->turnFor($row, $pair, $compactions);
+
+            if ($row->role === 'tool') {
+                // The tool result goes out now; the image turn waits for the
+                // run of tool results to end.
+                $messages   = array_merge($messages, $turn['messages']);
+                $toolImages = array_merge($toolImages, $turn['images']);
+            } else {
+                $messages   = array_merge($messages, $toolImages, $turn['messages']);
+                $toolImages = [];
             }
 
             $i = $pair['nextIndex'] ?? ($i + 1);
@@ -121,30 +197,78 @@ final class MessageHistoryBuilder
             $messages[] = $this->summaryMessage($summary['row']);
         }
 
+        foreach ($toolImages as $imageTurn) {
+            $messages[] = $imageTurn;
+        }
+
         return $messages;
     }
 
     /**
-     * What one turn contributes to the message list, or `null` when a summary
-     * already stands in for it.
+     * The summaries that start before `$firstSeq` stand in for the rows they
+     * cover, so they are sent at the position their range starts — not at
+     * their own row's position.
+     *
+     * @param  list<array<string, mixed>>              $messages
+     * @param  list<array{row: TaskHistory, first: int, last: int}>  $pending
+     */
+    private function flushSummariesBefore(array &$messages, array &$pending, int $firstSeq): void
+    {
+        while ($pending !== [] && $pending[0]['first'] <= $firstSeq) {
+            $messages[] = $this->summaryMessage($pending[0]['row']);
+            array_shift($pending);
+        }
+    }
+
+    /**
+     * One row's turn: the messages it contributes, and the image turns that
+     * have to wait for the run of tool results to end.
+     *
+     * @param  array{row: TaskHistory, nextIndex: int, first: int, last: int, halves: list<TaskHistory>}|null  $pair
+     * @return array{messages: list<array<string, mixed>>, images: list<array<string, mixed>>}
+     */
+    private function turnFor(TaskHistory $row, ?array $pair, ActiveCompactions $compactions): array
+    {
+        $turnMessages = $this->turnMessage($row, $pair, $compactions);
+
+        if ($row->role !== 'tool') {
+            return ['messages' => $turnMessages, 'images' => []];
+        }
+
+        // The tool result goes out now; the image turn waits for the run of
+        // tool results to end.
+        $toolResult = array_shift($turnMessages);
+
+        return [
+            'messages' => $toolResult === null ? [] : [$toolResult],
+            'images'   => $turnMessages,
+        ];
+    }
+
+    /**
+     * What one turn contributes to the message list — an empty list when a
+     * summary already stands in for it.
      *
      * A summary's range is expressed in raw row sequences, so it can cover
      * one half of a pair and not the other — the halves are checked
      * separately and the uncovered one is sent on its own.
      *
      * @param  array{row: TaskHistory, nextIndex: int, first: int, last: int, halves: list<TaskHistory>}|null  $pair
-     * @return array<string, mixed>|null
+     * @return list<array<string, mixed>>
      */
-    private function turnMessage(TaskHistory $row, ?array $pair, ActiveCompactions $compactions): ?array
+    private function turnMessage(TaskHistory $row, ?array $pair, ActiveCompactions $compactions): array
     {
         $coversFirst = $compactions->covers($pair['first'] ?? (int) $row->sequence);
         $coversLast  = $compactions->covers($pair['last'] ?? (int) $row->sequence);
 
-        $message = null;
-
         if ($pair === null) {
-            $message = $coversFirst ? null : $this->messageFromHistoryRow($row);
-        } elseif (!$coversFirst && !$coversLast) {
+            return $coversFirst ? [] : $this->messageFromHistoryRow($row);
+        }
+
+        // Which half the summary covers decides what is left to send: an
+        // uncovered half goes on its own, and a fully covered pair is
+        // dropped — the summary stands in for it.
+        if (!$coversFirst && !$coversLast) {
             $message = $this->messageFromHistoryRow($pair['row']);
         } elseif (!$coversFirst) {
             // Only the second half is covered: send the first half alone —
@@ -154,6 +278,8 @@ final class MessageHistoryBuilder
             // Only the first half is covered: send the second half alone,
             // not the merged row — that would repeat what the summary has.
             $message = $this->messageFromHistoryRow($pair['halves'][1]);
+        } else {
+            $message = [];
         }
 
         return $message;
@@ -241,15 +367,22 @@ final class MessageHistoryBuilder
     }
 
     /**
+     * The messages one row contributes.
+     *
      * `attachment` has no valid wire role, so it must never fall through to a
      * literal `{role: 'attachment'}` — every provider rejects that with a 400.
      *
-     * @return array<string, mixed>
+     * A tool row that carries an image attachment contributes two: the tool
+     * result, and the user turn that carries the image. The image turn is
+     * always the second entry, so {@see applySummaryCompaction()} can hold
+     * it back until the run of tool results ends.
+     *
+     * @return list<array<string, mixed>>
      */
     private function messageFromHistoryRow(TaskHistory $row): array
     {
         if ($row->role === 'attachment') {
-            return $this->attachmentMessage($row);
+            return [$this->attachmentMessage($row)];
         }
 
         $content = $row->content;
@@ -263,13 +396,26 @@ final class MessageHistoryBuilder
         ];
 
         if ($row->role === 'tool') {
-            $message = [
-                'role' => 'tool',
-                'tool_call_id' => $row->tool_call_id,
-                'name' => $row->tool_name,
-                'content' => $row->content,
+            $resolved = $this->toolImageAssets($row);
+            $turn     = $this->toolImageTurn($resolved['assets']);
+
+            return [
+                [
+                    'role' => 'tool',
+                    'tool_call_id' => $row->tool_call_id,
+                    'name' => $row->tool_name,
+                    'content' => $this->withMissingAssetNote(
+                        $row->content,
+                        $resolved['removed'],
+                        $turn['unreadable'],
+                        $turn['dropped'],
+                    ),
+                ],
+                ...$turn['messages'],
             ];
-        } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
+        }
+
+        if ($row->role === 'assistant' && $row->tool_call_payload !== null) {
             $message = [
                 'role'    => 'assistant',
                 'content' => $content,
@@ -282,7 +428,143 @@ final class MessageHistoryBuilder
             }
         }
 
-        return $message;
+        return [$message];
+    }
+
+    /**
+     * The user turn that carries the images a tool result points at.
+     *
+     * A provider's tool result carries text only, so the image rides on a
+     * sibling user turn. The identity text block leads it: the model gets
+     * the asset_id back, so the turn is never image-only and the asset can
+     * be chained onward.
+     *
+     * A driver that reports it cannot take images drops the block, the same
+     * way the attachment path does — a provider that cannot read an image
+     * block rejects the request. A missing driver is not a refusal: the tool
+     * that produced the attachment already checked the agent's LLM.
+     *
+     * The row's image bytes are capped as a whole
+     * ({@see MediaImageBlocks::MAX_ROW_BYTES}), the same budget the
+     * attachment path spends: the per-asset cap bounds one image, not the
+     * row. The per-asset cap is the endpoint's own ceiling on the image it
+     * receives ({@see MediaImageBlocks::maxImageBytesFor()}), so an image
+     * the provider would answer with a 400 is dropped here rather than
+     * sent on every rebuilt history. Every image in the request shares one
+     * budget ({@see ImageRequestBudget}), so the request cannot add up to
+     * more than the provider accepts. An image that does not fit is
+     * dropped — the tool result text still reaches the model, and the note
+     * says the image was left out, because the tool result says it was
+     * attached.
+     *
+     * An image whose **bytes are not on hand** is a different thing: the
+     * row is there, the file is not, and the message that claimed the
+     * image has to be corrected. The count comes back with the turn so
+     * the caller can write that note.
+     *
+     * @param  list<MediaAsset>  $assets  The declared images that still resolve.
+     * @return array{messages: list<array<string, mixed>>, unreadable: int, dropped: int}
+     */
+    private function toolImageTurn(array $assets): array
+    {
+        // A driver that cannot read images gets none: the images are
+        // dropped and nothing is said about them. The capability is only
+        // asked for when there is an image to send.
+        if ($assets === [] || ($this->driver !== null && !$this->driver->supportsImageInput())) {
+            return ['messages' => [], 'unreadable' => 0, 'dropped' => 0];
+        }
+
+        $identities    = [];
+        $images        = [];
+        $imageBytes    = 0;
+        $unreadable    = 0;
+        $dropped       = 0;
+        $maxImageBytes = $this->maxImageBytes();
+
+        foreach ($assets as $asset) {
+            $rendered = MediaImageBlocks::renderForRow(
+                $asset,
+                $this->basePath(),
+                $imageBytes,
+                $this->maxRowImageBytes,
+                $maxImageBytes,
+            );
+            if ($rendered === null) {
+                // Dropped for size, or the bytes are gone. Only the second
+                // one is a removal the model has to hear about.
+                if (MediaImageBlocks::bytesWentMissing($asset, $this->basePath())) {
+                    $unreadable++;
+                }
+                continue;
+            }
+
+            // The request's share of the provider's ceiling. The image is
+            // rendered and then left out, so the model has to hear about it:
+            // the tool result says the image is attached.
+            if (!$this->imageBudget->accepts($rendered['encodedBytes'])) {
+                $dropped++;
+                continue;
+            }
+
+            $identities[] = AttachmentRowRenderer::attachmentMetadataBlock($asset);
+            $images[]     = $rendered['block'];
+            $imageBytes  += $rendered['bytes'];
+        }
+
+        if ($images === []) {
+            return ['messages' => [], 'unreadable' => $unreadable, 'dropped' => $dropped];
+        }
+
+        return [
+            'messages' => [
+                [
+                    'role'    => 'user',
+                    'content' => array_merge($identities, $images),
+                ],
+            ],
+            'unreadable' => $unreadable,
+            'dropped'    => $dropped,
+        ];
+    }
+
+    /**
+     * The assets a tool row's image attachments name, and how many of the
+     * declared ones no longer exist.
+     *
+     * Resolved once per row: the builder runs on every tick, and the tool
+     * result and the image turn need the same answer.
+     *
+     * @return array{assets: list<MediaAsset>, removed: int}
+     */
+    private function toolImageAssets(TaskHistory $row): array
+    {
+        if (!is_array($row->attachments)) {
+            return ['assets' => [], 'removed' => 0];
+        }
+
+        $assets  = [];
+        $removed = 0;
+
+        foreach ($row->attachments as $attachment) {
+            if (!is_array($attachment)) {
+                continue;
+            }
+            if (($attachment['kind'] ?? 'text') !== 'image') {
+                continue;
+            }
+            $mediaId = $attachment['media_id'] ?? null;
+            if (!is_string($mediaId) || $mediaId === '') {
+                continue;
+            }
+            $asset = MediaAsset::query()->find($mediaId);
+            if ($asset instanceof MediaAsset) {
+                $assets[] = $asset;
+                continue;
+            }
+            $removed++;
+        }
+
+        return ['assets' => $assets, 'removed' => $removed];
     }
 
     /**
@@ -297,21 +579,106 @@ final class MessageHistoryBuilder
     {
         $renderer = new AttachmentRowRenderer(
             $this->driver,
-            defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3),
+            $this->basePath(),
+            $this->maxRowImageBytes,
+            $this->imageBudget,
         );
 
-        $rendered = $renderer->render($row);
-        if ($rendered !== null) {
-            return [
-                'role'    => 'user',
-                'content' => $rendered,
-            ];
-        }
+        $rendered = $renderer->renderRow($row);
+        $content  = $rendered['content'] ?? $renderer->fallbackText($row->content);
 
         return [
             'role'    => 'user',
-            'content' => $renderer->fallbackText($row->content),
+            'content' => $this->withMissingAssetNote(
+                $content,
+                $rendered['missingImages'],
+                $rendered['unreadableImages'],
+                $rendered['droppedImages'],
+            ),
         ];
+    }
+
+    /**
+     * Tell the model that an image it was shown is gone.
+     *
+     * The note rides on the message that made the claim, not as a message of
+     * its own: the message count and the order are the provider's contract,
+     * and an extra turn would reorder a tool batch. The operator's own text
+     * is left exactly as it was — the note is additional.
+     *
+     * The reasons get their own sentence, because they are different
+     * facts: an asset that was removed from the archive is not an asset
+     * whose bytes cannot be read, and an image that did not fit the
+     * request was never sent. A row can carry more than one of them, so
+     * the notes are appended in that case rather than merged into one
+     * claim.
+     *
+     * @param  list<array<string, mixed>>|string|null  $content
+     * @return list<array<string, mixed>>|string|null
+     */
+    private function withMissingAssetNote(
+        array|string|null $content,
+        int $removed,
+        int $unreadable,
+        int $dropped = 0,
+    ): array|string|null {
+        $notes = [];
+
+        if ($removed > 0) {
+            $notes[] = $removed === 1
+                ? self::REMOVED_ASSET_NOTE
+                : sprintf(self::REMOVED_ASSETS_NOTE, $removed);
+        }
+
+        if ($unreadable > 0) {
+            $notes[] = $unreadable === 1
+                ? self::UNREADABLE_ASSET_NOTE
+                : sprintf(self::UNREADABLE_ASSETS_NOTE, $unreadable);
+        }
+
+        if ($dropped > 0) {
+            $notes[] = $dropped === 1
+                ? self::DROPPED_ASSET_NOTE
+                : sprintf(self::DROPPED_ASSETS_NOTE, $dropped);
+        }
+
+        if ($notes === []) {
+            return $content;
+        }
+
+        if (is_array($content)) {
+            $blocks = $content;
+            foreach ($notes as $note) {
+                $blocks[] = ['type' => 'text', 'text' => $note];
+            }
+
+            return $blocks;
+        }
+
+        $base = (string) $content;
+
+        return $base === '' ? implode("\n\n", $notes) : $base . "\n\n" . implode("\n\n", $notes);
+    }
+
+    /**
+     * Where the archive's asset files live.
+     */
+    private function basePath(): string
+    {
+        return defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 2);
+    }
+
+    /**
+     * The largest image the endpoint takes, in raw bytes.
+     *
+     * The provider caps the image it receives **encoded**, and base64
+     * spends a third more than the file does, so the file that fits is
+     * smaller than the archive's own per-asset cap on every provider that
+     * states a limit.
+     */
+    private function maxImageBytes(): int
+    {
+        return MediaImageBlocks::maxImageBytesFor($this->driver);
     }
 
     /**
@@ -352,16 +719,12 @@ final class MessageHistoryBuilder
  * Renders a {@see TaskHistory} `attachment` row into the internal
  * `content` array for the merged `user` message. Internal to
  * {@see MessageHistoryBuilder} — instantiated by {@see MessageHistoryBuilder::attachmentMessage()}.
+ *
+ * The identity block it builds is shared with the tool-result image path:
+ * both put the asset_id in front of the model.
  */
 final class AttachmentRowRenderer
 {
-    /**
-     * Hard cap on inline image bytes. A 4K photo can exceed 20 MiB
-     * after MIME decode; without a cap, a single oversized attachment
-     * blows up the LLM context window and the request payload.
-     */
-    private const MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024;
-
     /**
      * Hard cap on inline text bytes, applied to BOTH inline branches:
      * the `md` derivative and the raw source text.
@@ -402,18 +765,10 @@ final class AttachmentRowRenderer
      * arithmetic above describes.
      *
      * Image blocks are not counted: they are separately capped per asset
-     * ({@see MAX_INLINE_IMAGE_BYTES}) and cost far fewer tokens per byte.
+     * ({@see MediaImageBlocks::maxImageBytesFor()}) and cost far fewer
+     * tokens per byte.
      */
     private const MAX_INLINE_ROW_TEXT_BYTES = 512 * 1024;
-
-    /**
-     * The ceiling on the image bytes one row forwards.
-     *
-     * The per-asset cap bounds one image; this bounds the row. An image
-     * block is a base64 copy of the asset, so a row of images costs the
-     * worker its own bytes before the provider request is even built.
-     */
-    private const MAX_INLINE_ROW_IMAGE_BYTES = 32 * 1024 * 1024;
 
     /**
      * Leading bytes we sample to confirm the asset really is text
@@ -455,26 +810,46 @@ final class AttachmentRowRenderer
     public function __construct(
         private readonly ?LLMDriverInterface $driver,
         private readonly string $basePath,
-        private readonly int $maxRowImageBytes = self::MAX_INLINE_ROW_IMAGE_BYTES,
+        private readonly int $maxRowImageBytes = MediaImageBlocks::MAX_ROW_BYTES,
+        private readonly ?ImageRequestBudget $imageBudget = null,
     ) {}
 
     /**
-     * Null when no resolvable blocks exist (legacy rows, all-refs-missing,
-     * or attachments whose assets cannot be resolved). Callers fall back
-     * to {@see fallbackText()} in that case.
+     * The rendered blocks, and how many of the row's declared image
+     * attachments no longer resolve.
      *
-     * @return list<array<string, mixed>>|null
+     * The content is null when no resolvable blocks exist (legacy rows,
+     * all-refs-missing, or attachments whose assets cannot be resolved);
+     * callers fall back to {@see fallbackText()} in that case.
+     *
+     * The count is what lets the caller tell the model that an image it was
+     * shown is gone: the block simply does not appear, and without the count
+     * that omission is indistinguishable from an image that was never
+     * attached.
+     *
+     * The two counts are different facts: `missingImages` counts images
+     * whose asset is gone from the archive, `unreadableImages` counts
+     * images whose asset is still there but whose bytes are not on hand.
+     * `droppedImages` counts images the request had no room for: the
+     * operator attached them, and they are not in the request.
+     *
+     * @return array{content: list<array<string, mixed>>|null, missingImages: int, unreadableImages: int, droppedImages: int}
      */
-    public function render(TaskHistory $row): ?array
+    public function renderRow(TaskHistory $row): array
     {
         $blocks = $this->collectAttachmentBlocks($row);
         $prompt = is_string($row->content) ? trim($row->content) : '';
 
-        if ($blocks['text'] === [] && $blocks['image'] === [] && $blocks['metadata'] === []) {
-            return null;
-        }
+        $content = $blocks['text'] === [] && $blocks['image'] === [] && $blocks['metadata'] === []
+            ? null
+            : $this->buildAttachmentContent($blocks, $prompt);
 
-        return $this->buildAttachmentContent($blocks, $prompt);
+        return [
+            'content'           => $content,
+            'missingImages'     => $blocks['missingImages'],
+            'unreadableImages'  => $blocks['unreadableImages'],
+            'droppedImages'     => $blocks['droppedImages'],
+        ];
     }
 
     /**
@@ -509,47 +884,105 @@ final class AttachmentRowRenderer
      * forbidding.
      *
      * The row's image bytes are capped as a whole
-     * ({@see MAX_INLINE_ROW_IMAGE_BYTES}), because the per-asset cap bounds
-     * one image and not the row.
+     * ({@see MediaImageBlocks::MAX_ROW_BYTES}), because the per-asset cap bounds
+     * one image and not the row. Each image is capped at what the endpoint
+     * accepts ({@see MediaImageBlocks::maxImageBytesFor()}), and every image
+     * of the request shares one budget ({@see ImageRequestBudget}).
      *
-     * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>}
+     * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>, missingImages: int, unreadableImages: int, droppedImages: int}
      */
     private function collectAttachmentBlocks(TaskHistory $row): array
     {
         if (!is_array($row->attachments)) {
-            return ['text' => [], 'image' => [], 'metadata' => []];
+            return ['text' => [], 'image' => [], 'metadata' => [], 'missingImages' => 0, 'unreadableImages' => 0, 'droppedImages' => 0];
         }
 
         $supportsImages = $this->driver !== null && $this->driver->supportsImageInput();
         $textBlocks     = [];
         $imageBlocks    = [];
         $metadataBlocks = [];
+        $missingImages  = 0;
+        $unreadable     = 0;
+        $dropped        = 0;
         $derivatives    = $this->resolveTextDerivatives($row->attachments);
         $remaining      = self::MAX_INLINE_ROW_TEXT_BYTES;
         $imageBytes     = 0;
+        $maxImageBytes  = MediaImageBlocks::maxImageBytesFor($this->driver);
 
         foreach ($this->uniqueAttachments($row->attachments) as $attachment) {
             $asset = $this->resolveAttachmentAsset($attachment['media_id']);
             if ($asset === null) {
+                // Only an image is a loss the operator sees; a text
+                // attachment that resolves to nothing is not counted.
+                $missingImages += ($attachment['kind'] === 'image') ? 1 : 0;
                 continue;
             }
-            $metadataBlocks[] = $this->attachmentMetadataBlock($asset);
-            if ($attachment['kind'] === 'image') {
-                $image = $this->buildImageBlock($asset, $supportsImages, $imageBytes);
-                if ($image === null) {
-                    continue;
-                }
-                [$imageBlock, $bytes] = $image;
-                $imageBlocks[] = $imageBlock;
-                $imageBytes    += $bytes;
+
+            $metadataBlocks[] = self::attachmentMetadataBlock($asset);
+
+            if ($attachment['kind'] !== 'image') {
+                [$block, $inlined] = $this->buildTextBlock($asset, $derivatives[$asset->id] ?? null, $remaining);
+                $textBlocks[] = $block;
+                $remaining    = max(0, $remaining - $inlined);
                 continue;
             }
-            [$block, $inlined] = $this->buildTextBlock($asset, $derivatives[$asset->id] ?? null, $remaining);
-            $textBlocks[] = $block;
-            $remaining    = max(0, $remaining - $inlined);
+
+            $image = $this->imageAttachment($asset, $supportsImages, $imageBytes, $maxImageBytes);
+
+            if ($image['block'] !== null) {
+                $imageBlocks[] = $image['block'];
+                $imageBytes    += $image['bytes'];
+            } elseif ($image['unreadable']) {
+                $unreadable++;
+            } elseif ($image['dropped']) {
+                $dropped++;
+            }
         }
 
-        return ['text' => $textBlocks, 'image' => $imageBlocks, 'metadata' => $metadataBlocks];
+        return [
+            'text'             => $textBlocks,
+            'image'            => $imageBlocks,
+            'metadata'         => $metadataBlocks,
+            'missingImages'    => $missingImages,
+            'unreadableImages' => $unreadable,
+            'droppedImages'    => $dropped,
+        ];
+    }
+
+    /**
+     * An image attachment's blocks, and whether the model can still read it.
+     *
+     * Four reasons leave the image out, one of them a removal the model has
+     * to hear about: the driver cannot take images, the image did not fit,
+     * the request had no room for it, or the bytes are not on hand.
+     *
+     * @return array{block: array<string, mixed>|null, bytes: int, unreadable: bool, dropped: bool}
+     */
+    private function imageAttachment(
+        MediaAsset $asset,
+        bool $supportsImages,
+        int $imageBytes,
+        int $maxImageBytes,
+    ): array {
+        $image = $this->buildImageBlock($asset, $supportsImages, $imageBytes, $maxImageBytes);
+
+        if ($image !== null) {
+            // The request's share of the provider's ceiling. The metadata
+            // block still names the asset, so the model has to hear that
+            // the image itself is not in the request.
+            if ($this->imageBudget !== null && !$this->imageBudget->accepts($image['encodedBytes'])) {
+                return ['block' => null, 'bytes' => 0, 'unreadable' => false, 'dropped' => true];
+            }
+
+            return ['block' => $image['block'], 'bytes' => $image['bytes'], 'unreadable' => false, 'dropped' => false];
+        }
+
+        return [
+            'block'      => null,
+            'bytes'      => 0,
+            'unreadable' => $supportsImages && MediaImageBlocks::bytesWentMissing($asset, $this->basePath),
+            'dropped'    => false,
+        ];
     }
 
     /**
@@ -667,40 +1100,25 @@ final class AttachmentRowRenderer
      * no room in the row's image budget, or a payload over the per-asset
      * cap — so the caller can drop it without branching.
      *
-     * The recorded size decides whether the image fits the row's budget,
-     * so an image that does not fit is never read off disk — the same
-     * order the text branch uses. An asset whose size was not recorded is
-     * measured after it is loaded, and the loaded bytes are measured
-     * again, because the recorded size can be stale.
-     *
-     * @return array{0: array<string, mixed>, 1: int}|null
+     * @return array{block: array<string, mixed>, bytes: int, encodedBytes: int}|null
      */
-    private function buildImageBlock(MediaAsset $asset, bool $supportsImages, int $imageBytes): ?array
-    {
-        $size = (int) ($asset->byte_size ?? 0);
-        $fits = $size > 0
-            ? $imageBytes + $size <= $this->maxRowImageBytes
-            : $imageBytes < $this->maxRowImageBytes;
-
-        // An image that does not fit is never read off disk — the same order
-        // the text branch uses.
-        $bytes = $supportsImages && $fits ? $this->loadAssetBytes($asset) : null;
-
-        if ($bytes === null
-            || strlen($bytes) > self::MAX_INLINE_IMAGE_BYTES
-            || $imageBytes + strlen($bytes) > $this->maxRowImageBytes
-        ) {
+    private function buildImageBlock(
+        MediaAsset $asset,
+        bool $supportsImages,
+        int $imageBytes,
+        int $maxImageBytes,
+    ): ?array {
+        if (!$supportsImages) {
             return null;
         }
 
-        return [
-            [
-                'type'      => 'image',
-                'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
-                'base64'    => base64_encode($bytes),
-            ],
-            strlen($bytes),
-        ];
+        return MediaImageBlocks::renderForRow(
+            $asset,
+            $this->basePath,
+            $imageBytes,
+            $this->maxRowImageBytes,
+            $maxImageBytes,
+        );
     }
 
     /**
@@ -855,7 +1273,7 @@ final class AttachmentRowRenderer
      * attachment layout is wider than a single text body); image
      * blocks follow.
      *
-     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>} $blocks
+     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>, missingImages: int, unreadableImages: int, droppedImages: int} $blocks
      * @return list<array<string, mixed>>
      */
     private function buildAttachmentContent(array $blocks, string $prompt): array
@@ -911,7 +1329,7 @@ final class AttachmentRowRenderer
      *
      * @return array<string, mixed>
      */
-    private function attachmentMetadataBlock(MediaAsset $asset): array
+    public static function attachmentMetadataBlock(MediaAsset $asset): array
     {
         $sizeLabel = $asset->byte_size !== null
             ? ' (' . self::humanByteSize((int) $asset->byte_size) . ')'
@@ -941,18 +1359,6 @@ final class AttachmentRowRenderer
 
     private function loadAssetBytes(MediaAsset $asset): ?string
     {
-        if ($asset->storage_mode === 'data_url') {
-            return is_string($asset->payload) ? $asset->payload : null;
-        }
-        if ($asset->storage_mode === 'local' && $asset->asset_token !== null && $asset->asset_token !== '') {
-            $paths = new \Spora\Core\Paths($this->basePath);
-            $path = $paths->storage('assets') . '/' . $asset->asset_token;
-            $ext  = \Spora\Services\MediaArchive\MediaArchiveService::extensionForMime($asset->mime_type);
-            if ($ext !== null) {
-                $path .= '.' . $ext;
-            }
-            return is_file($path) ? (string) file_get_contents($path) : null;
-        }
-        return null;
+        return MediaImageBlocks::loadBytes($asset, $this->basePath);
     }
 }

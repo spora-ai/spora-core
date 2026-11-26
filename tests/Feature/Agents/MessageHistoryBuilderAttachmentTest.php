@@ -149,6 +149,45 @@ test('attachment with image asset expands to a metadata prefix + image block whe
     expect($image['base64'])->not->toBe('');
 });
 
+test('an image the endpoint cannot take is dropped from the attachment row', function (): void {
+    // The provider caps the image it receives **encoded**, and base64
+    // spends four bytes on every three — so a file the archive accepts is
+    // still one the provider answers with a 400, on every rebuilt
+    // history. The image goes here instead; the operator's own text and
+    // the asset's identity still reach the model.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+
+    // 1 KB of base64 takes 768 bytes of file; 769 does not fit.
+    $payload = str_repeat('x', 769);
+    $asset   = MediaAsset::create([
+        'id'           => '14134567-8901-4234-8234-567890123456',
+        'asset_url'    => '/api/v1/assets/14134567-8901-4234-8234-567890123456.png',
+        'storage_mode' => 'data_url',
+        'media_type'   => 'image',
+        'mime_type'    => 'image/png',
+        'byte_size'    => strlen($payload),
+        'user_id'      => 1,
+        'payload'      => $payload,
+        'filename'     => 'big.png',
+    ]);
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => 'look at this',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'image']],
+    ]);
+
+    $messages = (new MessageHistoryBuilder(new CappedImageDriver(1024)))->build($task->id);
+
+    expect($messages)->toHaveCount(1);
+    expect($messages[0]['content'])->toBeArray();
+    expect(collect($messages[0]['content'])->firstWhere('type', 'image'))->toBeNull();
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+});
+
 test('attachment with image is dropped but metadata prefix still surfaces on non-vision driver', function (): void {
     $agentId = seedAttachmentAgent();
     $task = makeAttachmentTask($agentId);
@@ -577,6 +616,132 @@ test('user row first, image attachment second (production order) drops the image
     } else {
         expect($content)->toContain('Describe this');
     }
+});
+
+test('an attachment row whose image was removed from the Media Archive tells the model it is gone', function (): void {
+    // The operator uploaded an image into the chat and then deleted it from
+    // the archive. The row still declares it, the image block is gone, and
+    // the fallback leaves the operator's own prompt alone — which reads as
+    // "there is nothing to see" rather than "the image was removed".
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => 'What is in this photo?',
+        'attachments'  => [['media_id' => '00000000-0000-4000-8000-000000000000', 'kind' => 'image']],
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+
+    expect($messages)->toHaveCount(1);
+    expect($messages[0]['role'])->toBe('user');
+    // The operator's own words survive untouched; the note is additional.
+    expect($messages[0]['content'])->toStartWith('What is in this photo?');
+    expect($messages[0]['content'])->toContain('removed from the Media Archive');
+    expect($messages[0]['content'])->toContain('no longer visible');
+});
+
+test('an attachment row whose image still exists carries no note', function (): void {
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $png = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+        strict: true,
+    );
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: $png,
+        mime: 'image/png',
+        filename: 'pixel.png',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => 'What is in this photo?',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'image']],
+    ]);
+
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: new MockHttpClient(),
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+    expect($messages)->toHaveCount(1);
+    // Layout: [metadata, prompt, image] — a fourth block would be the note.
+    $blocks = $messages[0]['content'];
+    expect($blocks)->toBeArray();
+    expect($blocks)->toHaveCount(3);
+    expect($blocks[0]['type'])->toBe('text');
+    expect($blocks[0]['text'])->toContain('[Attached asset_id=');
+    expect($blocks[1]['type'])->toBe('text');
+    expect($blocks[1]['text'])->toBe('What is in this photo?');
+    expect($blocks[2]['type'])->toBe('image');
+});
+
+test('an attachment row whose image cannot be read says so, without claiming it was removed', function (): void {
+    // The asset is still in the archive — its file is not on hand. The
+    // operator uploaded it into the chat and the bytes went missing, so
+    // the note must not tell the model the operator deleted the asset.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+
+    $asset = MediaAsset::create([
+        'id'           => 'abababab-abab-4bab-8bab-abababababab',
+        'asset_url'    => '/api/v1/assets/abababab-abab-4bab-8bab-abababababab.png',
+        'storage_mode' => 'local',
+        'media_type'   => 'image',
+        'mime_type'    => 'image/png',
+        'byte_size'    => 1024,
+        'user_id'      => 1,
+        'asset_token'  => bin2hex(random_bytes(16)),
+        'filename'     => 'pixel.png',
+    ]);
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => 'What is in this photo?',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'image']],
+    ]);
+
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: new MockHttpClient(),
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+    expect($messages)->toHaveCount(1);
+    $blocks = $messages[0]['content'];
+    expect($blocks)->toBeArray();
+    // The operator's own words survive untouched; the note is additional.
+    expect($blocks[1]['text'])->toBe('What is in this photo?');
+
+    $texts = array_values(array_filter(
+        $blocks,
+        static fn(array $block): bool => $block['type'] === 'text' && str_contains((string) $block['text'], 'Note:'),
+    ));
+    expect($texts)->toHaveCount(1);
+    expect($texts[0]['text'])->toContain('can no longer be read');
+    expect($texts[0]['text'])->not->toContain('removed from the Media Archive');
 });
 
 /**
@@ -1222,6 +1387,54 @@ test('a repeated image id is rendered once', function (): void {
     expect($images)->toHaveCount(1);
 });
 
+test('the attachment row honours the builder\'s configured image budget', function (): void {
+    // The builder's limit has to reach the renderer: the tool-result path
+    // spends it, and an attachment row that ignored it would forward an
+    // image the operator's ceiling forbids.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $png = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+        strict: true,
+    );
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: $png,
+        mime: 'image/png',
+        filename: 'pixel.png',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'image']],
+    ]);
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: new MockHttpClient(),
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    $withinBudget = (new MessageHistoryBuilder($driver))->build($task->id);
+    $overBudget   = (new MessageHistoryBuilder($driver, maxRowImageBytes: 1))->build($task->id);
+
+    $imagesIn = static function (array $messages): array {
+        return array_values(array_filter(
+            $messages[0]['content'],
+            static fn(array $block): bool => $block['type'] === 'image',
+        ));
+    };
+
+    expect($imagesIn($withinBudget))->toHaveCount(1)
+        ->and($imagesIn($overBudget))->toHaveCount(0);
+});
+
 test('the row forwards no more image bytes than the budget', function (): void {
     // The per-asset cap bounds one image; the row's budget bounds the
     // row. An image that does not fit is not loaded at all.
@@ -1260,7 +1473,7 @@ test('the row forwards no more image bytes than the budget', function (): void {
     expect(class_exists(MessageHistoryBuilder::class))->toBeTrue();
 
     $renderer = new \Spora\Agents\AttachmentRowRenderer($driver, BASE_PATH, maxRowImageBytes: 1);
-    $blocks = $renderer->render($row->fresh());
+    $blocks = $renderer->renderRow($row->fresh())['content'];
 
     expect($blocks)->not->toBeNull();
     $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));

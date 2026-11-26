@@ -13,6 +13,7 @@ use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ModelFamily;
+use Spora\Drivers\RequestLimits;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Tools\Attributes\ToolSetting;
@@ -64,6 +65,13 @@ final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements Dr
             $options?->supportsImageInput,
             $options !== null ? $options->configuredEffortLevels : [],
             $options?->supportsEffort,
+            // The Responses route bounds the whole `image_url` string — the
+            // data-URL prefix included — at 20,971,520 characters, and the
+            // image travels as such a string, so the prefix counts against
+            // the ceiling.
+            maxEncodedImageBytes: RequestLimits::OPENAI_RESPONSES_MAX_IMAGE_BYTES - RequestLimits::DATA_URL_PREFIX_BYTES,
+            maxRequestBytes: RequestLimits::OPENAI_MAX_REQUEST_BYTES,
+            maxImagesPerRequest: RequestLimits::OPENAI_MAX_IMAGES,
         );
         $this->requestBuilder = new ResponsesRequestBuilder(
             $apiKey,

@@ -40,7 +40,7 @@ describe('MediaTool::search', function (): void {
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 99, idOverride: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(['action' => 'search', 'limit' => 10], agentId: $agentA, context: mediaToolUserContext(99));
 
@@ -74,7 +74,7 @@ describe('MediaTool::search', function (): void {
     it('returns empty list when no assets match', function (): void {
         $agentA = seedMediaToolAgent();
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(['action' => 'search'], agentId: $agentA, context: mediaToolUserContext(99));
 
@@ -91,7 +91,7 @@ describe('MediaTool::search', function (): void {
         seedMediaAsset(agentId: $agentA, userId: 99, pluginSlug: 'minimax');
         seedMediaAsset(agentId: $agentA, userId: 99, pluginSlug: 'weather');
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(['action' => 'search', 'plugin_slug' => 'minimax'], agentId: $agentA, context: mediaToolUserContext(99));
 
@@ -112,7 +112,7 @@ describe('MediaTool::search', function (): void {
         $agentA = seedMediaToolAgent();
         seedMediaAsset(agentId: $agentA, userId: 99);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(['action' => 'search', 'mime_type' => 'image/png'], agentId: $agentA, context: mediaToolUserContext(99));
 
@@ -129,7 +129,7 @@ describe('MediaTool::search', function (): void {
         seedMediaAsset(agentId: $mine, userId: 99);
         seedMediaAsset(agentId: $other, userId: 99);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(['action' => 'search'], agentId: $mine, context: mediaToolUserContext(99));
 
@@ -218,7 +218,7 @@ describe('MediaTool::search', function (): void {
         seedMediaAsset(agentId: $agentA, userId: 99, idOverride: '33333333-3333-3333-3333-333333333333');
         seedMediaAsset(agentId: $agentA, userId: 99, idOverride: '44444444-4444-4444-4444-444444444444');
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(['action' => 'search'], agentId: $agentA, taskId: 999);
 
@@ -239,7 +239,7 @@ describe('MediaTool::search', function (): void {
             );
         }
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(['action' => 'search', 'limit' => 2, 'offset' => 2], agentId: $agentA, context: mediaToolUserContext(99));
 
@@ -257,7 +257,7 @@ describe('MediaTool::get_media', function (): void {
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 99);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
@@ -310,7 +310,7 @@ describe('MediaTool::get_media', function (): void {
         $otherAgent = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $ownerAgent, userId: 99);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
@@ -563,7 +563,7 @@ describe('MediaTool::get_media', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
             makeMediaToolNonAdminAuth(),
-            null,
+            mediaToolScopeConfig('agent'),
             new Spora\Core\Config(['SPORA_APP_URL' => 'https://example.test']),
         );
         try {
@@ -586,7 +586,7 @@ describe('MediaTool::get_media', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
             makeMediaToolNonAdminAuth(),
-            null,
+            mediaToolScopeConfig('agent'),
             new Spora\Core\Config(['SPORA_APP_URL' => 'https://example.test']),
         );
         try {
@@ -613,7 +613,7 @@ describe('MediaTool::get_media', function (): void {
             idOverride: '11111111-aaaa-bbbb-cccc-111111111111',
         );
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
@@ -643,7 +643,7 @@ describe('MediaTool::get_media', function (): void {
             ->where('id', $asset->id)
             ->update(['media_type' => 'audio']);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
@@ -674,7 +674,7 @@ describe('MediaTool::get_media', function (): void {
                 'height'     => 720,
             ]);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
@@ -702,7 +702,7 @@ describe('MediaTool::get_media', function (): void {
             ->where('id', $asset->id)
             ->update(['media_type' => 'document']);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
@@ -728,7 +728,7 @@ describe('MediaTool::get_media', function (): void {
             ->where('id', $asset->id)
             ->update(['prompt' => 'A neon sign over a rainy alleyway, synthwave palette']);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
@@ -751,7 +751,7 @@ describe('MediaTool::get_media', function (): void {
         $asset = seedMediaAsset(agentId: $agentA, userId: 99);
         seedTextDerivativeFor($asset, "Chapter 1\n\nIt was the best of times.");
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
@@ -778,7 +778,7 @@ describe('MediaTool::get_media', function (): void {
         $huge = str_repeat('A', 16 * 1024);
         seedTextDerivativeFor($asset, $huge);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
@@ -820,7 +820,7 @@ describe('MediaTool::get_media', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
             makeMediaToolNonAdminAuth(),
-            null,
+            mediaToolScopeConfig('agent'),
             new Spora\Core\Config(['SPORA_APP_URL' => 'https://configured.example/']),
         );
         try {
@@ -855,7 +855,7 @@ describe('MediaTool::get_media', function (): void {
             publicToken: 'a-token',
         );
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
@@ -876,7 +876,7 @@ describe('MediaTool::get_public_url', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
             makeMediaToolNonAdminAuth(),
-            null,
+            mediaToolScopeConfig('agent'),
             new Spora\Core\Config(['SPORA_APP_URL' => 'https://spora.example/']),
         );
         try {
@@ -905,7 +905,7 @@ describe('MediaTool::get_public_url', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
             makeMediaToolNonAdminAuth(),
-            null,
+            mediaToolScopeConfig('agent'),
             new Spora\Core\Config(['SPORA_APP_URL' => 'https://spora.example/']),
         );
         try {
@@ -978,7 +978,7 @@ describe('MediaTool::get_public_url', function (): void {
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 99, publicToken: 'existing-token');
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
@@ -998,7 +998,7 @@ describe('MediaTool::get_public_url', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
             makeMediaToolNonAdminAuth(),
-            null,
+            mediaToolScopeConfig('agent'),
             new Spora\Core\Config(['SPORA_APP_URL' => 'https://configured.example/']),
         );
         try {
@@ -1024,7 +1024,7 @@ describe('MediaTool::get_embed_code', function (): void {
             idOverride: 'aaaaaaaa-1111-2222-3333-444444444444',
         );
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
@@ -1057,7 +1057,7 @@ describe('MediaTool::get_embed_code', function (): void {
             ->where('id', $asset->id)
             ->update(['media_type' => 'audio']);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
@@ -1090,7 +1090,7 @@ describe('MediaTool::get_embed_code', function (): void {
                 'height'     => 720,
             ]);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
@@ -1120,7 +1120,7 @@ describe('MediaTool::get_embed_code', function (): void {
             ->where('id', $asset->id)
             ->update(['media_type' => 'document']);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
@@ -1151,7 +1151,7 @@ describe('MediaTool::get_embed_code', function (): void {
             ->where('id', $asset->id)
             ->update(['media_type' => 'unknown']);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
@@ -1181,7 +1181,7 @@ describe('MediaTool::get_embed_code', function (): void {
             ->where('id', $asset->id)
             ->update(['media_type' => 'document', 'filename' => null]);
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), mediaToolScopeConfig('agent'));
         try {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],

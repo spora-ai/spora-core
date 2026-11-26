@@ -340,4 +340,50 @@ describe('the media-library skill matches the media tool', function (): void {
             ->and($body)->not->toContain('data.parent_id')
             ->and($body)->toContain('does **not** reach you');
     });
+
+    it('names both of the notes a missing image produces', function (): void {
+        // Two things end an image and only one of them is a removal: the
+        // row is gone, or the row is there and its bytes are not. The
+        // builder sends a different note for each, and the skill has to
+        // name both — a model told only about the removal reads the
+        // other note as a deletion that never happened.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('removed from the Media Archive')
+            ->and($body)->toContain('can no longer be read');
+    });
+
+    it('names the note an image the request had no room for produces', function (): void {
+        // A third way an image ends: the request had no room for it, so it
+        // was never sent. The builder sends a note for it, and the skill
+        // has to name it — a model told only about the removal and the
+        // unreadable bytes would read the third note as one of the two,
+        // and would say the image was deleted when it was not.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('did not fit in the request')
+            ->and($body)->toContain('not sent');
+    });
+
+    it('does not promise that a smaller derivative always fits', function (): void {
+        // Two ceilings can leave an image out: the bytes it takes and the
+        // number of images the endpoint takes. The note does not say which
+        // one applied, and only the first is answered by a smaller
+        // derivative — the derivative needs a slot of its own. A skill that
+        // promises the derivative always fits teaches the model to retry
+        // a derivative that is dropped for the same reason.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('A smaller derivative is not always the way out')
+            ->and($body)->toContain('does not say which limit applied')
+            ->and($body)->toContain('may or may not help');
+    });
+
+    it('does not let the model read a second omission as a full request', function (): void {
+        // A derivative that is left out as well was left out for one of
+        // two reasons, and the note does not say which. Claiming the
+        // request is full of images states something the model cannot
+        // know — the byte budget may be the reason too.
+        expect(mediaSkillBody())->not->toContain('the request is full of images');
+    });
 });

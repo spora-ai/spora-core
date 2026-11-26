@@ -1,6 +1,6 @@
 ---
 name: media-library
-description: "Search, retrieve, embed, share, and produce media assets (images, audio, video, documents) from the media library, and organise them in folders. Trigger on any of: 'show this asset', 'show this dashboard live', 'render to PNG', 'list derivatives', 'fetch the source code', 'mint a share link', 'convert the derivative', 'what files do we have', 'media archive search', 'file this in a folder', 'create a folder for these documents', or any request that mentions an `asset_id` from a prior media tool call. The skill explains which operation fits the intent, how returned `asset_id`s chain into follow-up calls, the size/mime constraints that decide between inline-bytes and public-URL retrieval, how to show a script-capable asset as a live widget in your reply, and how the folder tree is shaped."
+description: "Search, retrieve, embed, share, and produce media assets (images, audio, video, documents) from the media library, and organise them in folders. Trigger on any of: 'show this asset', 'show this dashboard live', 'render to PNG', 'list derivatives', 'fetch the source code', 'mint a share link', 'convert the derivative', 'what files do we have', 'media archive search', 'file this in a folder', 'create a folder for these documents', 'look at this image', 'what does this picture show', or any request that mentions an `asset_id` from a prior media tool call. The skill explains which operation fits the intent, how returned `asset_id`s chain into follow-up calls, the size/mime constraints that decide between inline-bytes and public-URL retrieval, how to show a script-capable asset as a live widget in your reply, and how the folder tree is shaped."
 license: MIT
 compatibility: "Designed for Spora agents with the `media` tool enabled."
 metadata:
@@ -11,7 +11,7 @@ allowed-tools: media
 
 # Media library
 
-Fourteen operations on a single `media` tool: the eight that read and produce media (`search`, `get_media`, `get_embed_code`, `get_public_url`, `get_source`, `list_derivatives`, `create_derivative`, `create_media`) and the six that organise it in folders (`list_folders`, `create_folder`, `rename_folder`, `delete_folder`, `file_asset`, `search_assets`). The body of this skill is what the per-op `description:` lines on the tool no longer have room to say — pick the right op, chain `asset_id`s correctly, and respect the size/mime gates.
+Fifteen operations on a single `media` tool: the nine that read and produce media (`search`, `get_media`, `get_embed_code`, `get_public_url`, `get_source`, `list_derivatives`, `create_derivative`, `create_media`, `inspect_image`) and the six that organise it in folders (`list_folders`, `create_folder`, `rename_folder`, `delete_folder`, `file_asset`, `search_assets`). The body of this skill is what the per-op `description:` lines on the tool no longer have room to say — pick the right op, chain `asset_id`s correctly, and respect the size/mime gates.
 
 ## Where the answer is
 
@@ -46,8 +46,9 @@ The count on the first line is the number of **matches**, not the number of rows
 | `delete_folder` | true | **true** | A deleted folder; its assets fall back to the root |
 | `file_asset` | true | false | An asset filed into a folder, or back into the root |
 | `search_assets` | true | false | The assets inside one folder |
+| `inspect_image` | false | **false** | The image, on the user turn after the result so you can look at it |
 
-All fourteen are on by default, so a `media` call needs no prior opt-in. Five ops ask the operator to approve each call — `get_public_url`, `create_media`, `create_folder`, `rename_folder` and `delete_folder` — because each of them changes durable state the agent cannot undo. Every other op reads or writes a row the calling agent already owns, under the same `scope` rules as `get_media`.
+Fourteen of the fifteen are on by default, so a `media` call needs no prior opt-in. `inspect_image` is the exception: it ships **off**, and an operator enables it for the agent before you can call it at all. Five ops ask the operator to approve each call — `get_public_url`, `create_media`, `create_folder`, `rename_folder` and `delete_folder` — because each of them changes durable state the agent cannot undo. Every other op reads or writes a row the calling agent already owns, under the same `scope` rules as `get_media`.
 
 **That table is the shipped default, not the live truth.** An operator can change any operation's approval for a given agent in the dashboard, and that override wins over the default in both directions. When it matters — when a call comes back as an approval request, or when you want to know whether one will — read the live state with the `agent` tool: `read_agent` lists every operation with its `requires_approval` flag, and `get_available_tools` does the same for every registered tool. Read it; do not assume the table still holds.
 
@@ -100,7 +101,7 @@ A script-capable asset has **two** renderings, and they are not in the same plac
 
   **The tool hands you that line.** `create_media` and `get_media` put it in their result for a script-capable asset the operator has permitted, so copy it from there as it stands rather than composing the route yourself. A model that composes the route gets it wrong, and a model told in prose writes the prose. `get_embed_code` returns the embed alone, with no line — call `get_media` when you want the live one as well.
 
-  The chat renders that link as the live asset, in place, as a block. **A link is the whole request** — you never see the asset's bytes and you never write any markup, exactly as a link to a file is a link and not the file.
+  The chat renders that link as the live asset, in place, as a block. **A link is the whole request** — you never write any markup, exactly as a link to a file is a link and not the file. `inspect_image` is the one operation that puts an asset's own pixels in front of you, and what it gives you is an image to read, not a widget the chat plays.
 
   The target is the **embed route**, not the asset route: `/api/v1/assets/<id>.html` is the *download* path and stays a plain link, while `/api/v1/media/<id>/embed` is the one the chat can show live. A share link from `get_public_url` opens the asset and is never framed.
 
@@ -179,6 +180,27 @@ The response is the usual asset header plus a download card, and the structured 
 
 `data.asset_url` is that same owner-or-admin route, so it is a handle for your own follow-up calls and never a link to hand over. `get_public_url`'s is the exception — a different path, `/api/v1/public/media/<id>?token=…`, needing no session — which is why it is the one operation the operator approves.
 
+### Looking at an image with `inspect_image`
+
+`get_media` shows the operator an image; it does not show **you** one. `inspect_image` is the operation that puts the pixels in front of the model: the image is attached on a user turn that follows the tool result, and you see it on your next turn.
+
+- `asset_id` (required) — the image to look at.
+- `question` (optional) — what to look for ("is the axis labelled?", "does the logo match the brand guide?"). The question is echoed back with the result, so the operator can see what you were asked.
+
+**What it accepts.** A raster image only: `image/png`, `image/jpeg`, `image/webp`, `image/gif`. An SVG is refused — it is a script-capable document, not a raster image, and no registered derivative producer rasterises one, so it has to be converted to a raster image outside Spora (or by the operator) before it can be inspected. An asset stored on someone else's server (`storage_mode=external`) has no bytes here to send. An image over the endpoint's per-image ceiling is refused: the provider caps the **base64** form of the image, so the file that fits is three quarters of the stated limit — 20 MB on OpenAI, 10 MB on the Claude API, 5 MB on Bedrock. Render a smaller derivative instead.
+
+**It needs a vision-capable LLM.** The agent's own model has to accept image content blocks. When it does not, the call fails with a message that names the setting to fix — **"Allow images" on the agent's LLM configuration** — and the model the agent is running on. When you get that message: **tell the operator which setting to enable, and do not retry the call.** A retry is the same dead end every time, and a repeated failure is noise in the operator's log. The operation is off by default too: if it is not in your schema at all, the operator has not enabled it for this agent — ask them to, rather than calling it again.
+
+**The same asset can be inspected again.** Each call is a fresh look at the same bytes, so you can ask a second question about an image you have already seen. The image stays in the task history and is re-sent on every later turn that still has room for it, exactly like an operator-attached image, so do not inspect the same asset over and over.
+
+**An image can also be left out.** The images of one request share the endpoint's room — the ones you inspect and the operator's own attachments alike — and a request that carries more than the endpoint accepts is refused whole. When an image does not fit, the message that carried it says so: it carries a note that the image **did not fit in the request** and was not sent, so it is not in front of you. Take that as the answer: you cannot see that image and you must not describe it.
+
+**A smaller derivative is not always the way out.** The note does not say which limit applied, and the two need different recoveries. A smaller derivative fits when the room was the image's size; it does not fit when the request already carries as many images as the endpoint takes, because the derivative needs a slot of its own. So a smaller derivative may or may not help: render one and inspect it, and if that one is left out as well, the request has no room for it either — for one of those two reasons, and the note does not say which. Do not guess which: say that you cannot see the image and stop.
+
+**An image can also disappear.** If a later turn says the image was removed from the Media Archive, it is gone — the operator deleted it. If it says the image can no longer be read, the asset is still in the archive but its bytes are not on hand. Either way the image is not available. Do not try to look at it again, and do not describe what you saw; say that it is no longer available and move on.
+
+**Scope still applies.** `inspect_image` reaches the assets the media tool's `scope` setting allows (see Scope below). When an asset is not visible, the message says so and names the setting to change — it never confirms whether the asset exists.
+
 ## Returned assets — never lose the id
 
 Every `media` op that produces or surfaces an asset names its id in the response text. Where it is, per op:
@@ -194,6 +216,7 @@ Every `media` op that produces or surfaces an asset names its id in the response
 | `get_media` (parent) | the `Derivatives of this asset:` section, one `<media_id>` per line |
 | `create_derivative` | `Created derivative <id> of <parent_id>` |
 | `create_media` | the header line `Media asset <id>: <filename>` |
+| `inspect_image` | the header line `Attached media asset <id> (<filename>, <mime>, <bytes> bytes)` |
 | `list_folders` | one line per folder: `- <folder_id> <name> — <path>, N asset(s)` |
 | `create_folder` | `Created the media folder <path> (id <folder_id>)` |
 | `search_assets` | one line per asset: `- <asset_id> <filename> — <mime_type>, <bytes> bytes` |
@@ -240,11 +263,13 @@ Every asset carries a **kind**: `asset` (the default), `template`, or `example`.
 
 ## Scope
 
-The `scope` setting (default `agent`) is operator-configured, NOT an LLM parameter. The LLM does NOT select a scope — the wire contract has no `scope` field on any op.
+The `scope` setting (default `principal`) is operator-configured, NOT an LLM parameter. The LLM does NOT select a scope — the wire contract has no `scope` field on any op.
 
-- `scope=agent` (default) hides assets owned by other agents; only assets created by the calling agent are visible.
-- `scope=principal` widens to anything owned by the calling agent's principal — direct uploads by the principal's owner user, plus every asset of every other agent of the same principal.
+- `scope=principal` (the default) reaches anything owned by the calling agent's principal — direct uploads by the principal's owner user, plus every asset of every other agent of the same principal. This is what lets you look at an image the operator uploaded themselves.
+- `scope=agent` narrows to what the calling agent produced itself; assets owned by other agents are hidden.
 - Admins (`AuthService::isAdmin()`) bypass scope and see all rows.
+
+**An agent that was enabled before the default moved keeps the reach it had.** Where no layer of the settings cascade — the agent's own row, the shared group, the global layer, the principal layer — supplied a scope, a migration materialises `scope=agent` into the agent's own override row, so the reach it had survives the change; where a scope was set deliberately, at any of those levels, that scope is left exactly as it is, because writing `agent` over it would narrow the reach the operator asked for. An agent that enables the tool from now on gets `principal`. So when `inspect_image` says an asset is not visible, ask the operator to set the media tool's **Library scope** to `principal` on that agent; it is a one-field change on the agent's Tools tab.
 
 ## `create_derivative` idempotency
 
@@ -266,7 +291,7 @@ Five ops ask the operator to approve each call, because each hands out durable s
 - `create_media` — a new source asset with no natural key, so a retry duplicates the row and a loop has no ceiling.
 - `create_folder`, `rename_folder`, `delete_folder` — a change to the tree the operator curates.
 
-Every other op — `search`, `get_media`, `get_embed_code`, `get_source`, `list_derivatives`, `create_derivative`, `list_folders`, `file_asset`, `search_assets` — is enabled and auto-approved, so there is no prompt to wait on and nothing to justify up front. `create_derivative` is a write too, but it only creates a row derived from a parent the calling agent owns, and its idempotency is a DB-enforced UNIQUE index.
+Every other op — `search`, `get_media`, `get_embed_code`, `get_source`, `list_derivatives`, `create_derivative`, `list_folders`, `file_asset`, `search_assets`, `inspect_image` — is auto-approved, so there is no prompt to wait on and nothing to justify up front. `inspect_image` is also off by default, so it needs an operator to enable it for the agent before you can call it at all. `create_derivative` is a write too, but it only creates a row derived from a parent the calling agent owns, and its idempotency is a DB-enforced UNIQUE index.
 
 An operator can narrow any op's approval for a given agent in the dashboard, and can widen it onto an op that ships auto-approved — `file_asset` moves a row between folders and `create_media` writes one with no natural key, so an operator who does not want their agent filing and renaming unattended will turn those ops on for that agent. **Read the live state with `read_agent` (or `get_available_tools`) when you need to know which ops are gated on this install; the table above is the shipped default, not a promise about this agent.**
 

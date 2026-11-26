@@ -53,6 +53,9 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver implements D
             $options?->supportsImageInput,
             $options !== null ? $options->configuredEffortLevels : [],
             $options?->supportsEffort,
+            maxEncodedImageBytes: RequestLimits::OPENAI_MAX_IMAGE_BYTES,
+            maxRequestBytes: RequestLimits::OPENAI_MAX_REQUEST_BYTES,
+            maxImagesPerRequest: RequestLimits::OPENAI_MAX_IMAGES,
         );
 
         $this->reasoning = new ChatCompletionsReasoning($model);

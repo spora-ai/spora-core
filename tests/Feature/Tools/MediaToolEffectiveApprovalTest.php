@@ -144,6 +144,7 @@ it('gates exactly the five durable operations on a fresh install', function (): 
         'delete_folder'     => true,
         'file_asset'        => false,
         'search_assets'     => false,
+        'inspect_image'     => false,
     ]);
 });
 
